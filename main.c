@@ -224,11 +224,38 @@ int main(void) {
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
+
+	//step pin:
+	//direction pin:
+	//mf pin:
 	while (1) {
 		/* USER CODE END WHILE */
 
+		static uint8_t smer=0;
+		static uint8_t smer_change=0;
+		static uint8_t korak=0;
+		static uint32_t stevilo_korakov=0; // od zacetka
+
+		if (stevilo_korakov<5000 && korak==0)
+		{
+			korak=1;
+			smer=1;
+			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, KeyState);
+			HAL_delay(1); //med zamenjavo smeri in pulzom mora biti vec kot 125us
+		}
+		else if (stevilo_korakov==0 && korak==1)
+		{
+			korak=0;
+			smer=0;
+			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, KeyState);
+			HAL_delay(1); //med zamenjavo smeri in pulzom mora biti vec kot 125us
+		}
+
+
+		//spremeni za toggle step pina
 	    HAL_GPIO_TogglePin (GPIOJ, GPIO_PIN_2);
-	    HAL_Delay (500);
+	    //HAL_Delay (500);
+
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
