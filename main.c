@@ -231,11 +231,12 @@ int main(void) {
 	while (1) {
 		/* USER CODE END WHILE */
 
-		static uint8_t smer=0;
-		static uint8_t smer_change=0;
+		static uint8_t smer=0; //bool za smer
+		//static uint8_t smer_change=0;
 		static uint8_t korak=0;
-		static uint32_t stevilo_korakov=0; // od zacetka
-
+		static uint32_t stevilo_korakov=0; // stevilo korakov
+/*
+		//za spremembo smeri:
 		if (stevilo_korakov<5000 && korak==0)
 		{
 			korak=1;
@@ -250,12 +251,24 @@ int main(void) {
 			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, KeyState);
 			HAL_delay(1); //med zamenjavo smeri in pulzom mora biti vec kot 125us
 		}
-
+*/
 
 		//spremeni za toggle step pina
-	    HAL_GPIO_TogglePin (GPIOJ, GPIO_PIN_2);
-	    //HAL_Delay (500);
 
+		HAL_GPIO_TogglePin (GPIOE, GPIO_PIN_3);	// d8
+		//HAL_GPIO_TogglePin (GPIOJ, GPIO_PIN_2); //led pin
+	    HAL_Delay (1);
+/*
+	    // za spremljanje števila korakov:
+	    if (smer && stevilo_korakov<5000)
+		{
+	    	stevilo_korakov++;
+		}
+	    else if (!smer && stevilo_korakov>0)
+	    {
+	    	stevilo_korakov-=1;
+	    }
+*/
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
