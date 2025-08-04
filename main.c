@@ -171,6 +171,23 @@ uint8_t new_block = 1;
 
 uint8_t cbc[7];
 
+struct motor_struct {
+    uint32_t max_speed;
+    uint32_t current_speed;
+    uint8_t motor_pin;
+    GPIO_TypeDef motor_port;
+    uint32_t max_position;
+    uint32_t position;
+    _Bool reset_requested;
+    _Bool reset_completed;
+    uint8_t end_switch_pin;
+    GPIO_TypeDef end_switch_port;
+} motors[3] = {
+    {10000, 0, 1, GPIOA, 10000, 0, false, false, 1, GPIOA,}, // motors[0]
+    {10000, 0, 2, GPIOB, 10000, 0, true, false, 1, GPIOA,},  // motors[1]
+    {10000, 0, 1, GPIOC, 10000, 0, true, true, 1, GPIOA,},   // motors[2]
+};
+
 /* USER CODE END 0 */
 
 /**
@@ -1148,3 +1165,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
