@@ -151,42 +151,46 @@ TS_Init_t *hTSs;
 char rx_buff[10];
 
 uint8_t podatki;
-uint32_t pozicija_za_char = 0;
-uint32_t pozicija_za_konec = 0;
 char vnos[100];
-uint32_t y_size_global;
 
-uint32_t HIGHSCORE = 0;
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
-uint32_t timing_display = 0;
-uint32_t limit_display = 2;
-uint32_t timing_fall = 0;
-const uint32_t slow_limit_fall = 500;
-const uint32_t fast_limit_fall = 100;
-uint32_t limit_fall = slow_limit_fall;
-
-uint8_t rotation_change = 0;
-uint8_t new_block = 1;
-
-uint8_t cbc[7];
 
 struct motor_struct {
     uint32_t max_speed;
     uint32_t current_speed;
-    uint8_t motor_pin;
+
+    _Bool direction; //0=LEFT, 1=RIGHT
+    uint16_t direction_pin;
+    GPIO_TypeDef direction_port;
+
+    uint16_t motor_pin;
     GPIO_TypeDef motor_port;
-    uint32_t max_position;
+
+    uint32_t max_position; //in numbers of steps
     uint32_t position;
+
     _Bool reset_requested;
     _Bool reset_completed;
-    uint8_t end_switch_pin;
+
+    uint16_t end_switch_pin;
     GPIO_TypeDef end_switch_port;
+
 } motors[3] = {
-    {10000, 0, 1, GPIOA, 10000, 0, false, false, 1, GPIOA,}, // motors[0]
-    {10000, 0, 2, GPIOB, 10000, 0, true, false, 1, GPIOA,},  // motors[1]
-    {10000, 0, 1, GPIOC, 10000, 0, true, true, 1, GPIOA,},   // motors[2]
+    {10000, 0, 0, GPIO_PIN_3, GPIOE, TIMER_PIN, TIMER_PORT, 10000, 0, false, false, 1, GPIOA}, // motors[0]; D8
+    {10000, 0, 0, GPIO_PIN_8, GPIOI, TIMER_PIN, TIMER_PORT,10000, 0, true, false, 1, GPIOA},  // motors[1]; D7
+    {10000, 0, 0, GPIO_PIN_1, GPIOK, TIMER_PIN, TIMER_PORT,10000, 0, true, true, 1, GPIOA}    // motors[2]; D4
 };
+
+/*
+HAL_GPIO_TogglePin (GPIOE, GPIO_PIN_3);	// d8
+
+HAL_GPIO_TogglePin (GPIOI, GPIO_PIN_8);	// d7
+
+HAL_GPIO_TogglePin (GPIOK, GPIO_PIN_1);	// d4
+
+HAL_GPIO_TogglePin (GPIOG, GPIO_PIN_3);	// d2
+*/
 
 /* USER CODE END 0 */
 
@@ -224,7 +228,6 @@ int main(void) {
 	/* Initialize all configured peripherals */
 
 	MX_USART3_UART_Init(); //inicializiramo UART
-	MX_RNG_Init(); 		  //inicializiramo RNG
 	MX_GPIO_Init();
 	/* USER CODE BEGIN 2 */
 
@@ -234,17 +237,15 @@ int main(void) {
 	/* Configure LED1 */
 	BSP_LED_Init(LED1);
 
-	/*##-1- LCD Initialization #################################################*/
-	/* Initialize the LCD */
 
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 
-	//step pin:
-	//direction pin:
-	//mf pin:
+
+	reset_motors();
+
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -272,9 +273,17 @@ int main(void) {
 
 		//spremeni za toggle step pina
 
-		HAL_GPIO_TogglePin (GPIOE, GPIO_PIN_3);	// d8
+
+
 		//HAL_GPIO_TogglePin (GPIOJ, GPIO_PIN_2); //led pin
-	    HAL_Delay (1);
+	    //HAL_Delay (500);
+
+
+		//for(uint32_t stall=0; stall<10000;stall++){} //delay 250.3us
+		//for(uint32_t stall=0; stall<20000;stall++){} //delay 500.3us
+		//for(uint32_t stall=0; stall<15000;stall++){} //delay 375.3us
+
+		stall(100);
 /*
 	    // za spremljanje števila korakov:
 	    if (smer && stevilo_korakov<5000)
@@ -1051,6 +1060,26 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Alternate = GPIO_AF10_SAI4;
 	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
+	// inicializacija D7,D4,D2
+    GPIO_InitStruct.Pin = GPIO_PIN_8;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;  // Push-pull output
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;  // Push-pull output
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOK, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;  // Push-pull output
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+    //konc
+
 	/*Configure GPIO pins : USB_OTG_FS2_ID_Pin OTG_FS2_PSO_Pin */
 	GPIO_InitStruct.Pin = USB_OTG_FS2_ID_Pin | OTG_FS2_PSO_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -1134,6 +1163,38 @@ static void MX_GPIO_Init(void) {
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	HAL_UART_Receive_IT(&huart3, rx_buff, 10); //You need to toggle a breakpoint on this line!
 }
+
+void stall(uint32_t duration_us)
+{
+	uint32_t stall_limit;
+
+	stall_limit=duration_us*10000/250;
+	for(uint32_t stall=0;stall<stall_limit;stall++){}
+}
+
+void reset_motors()
+{
+	//motor 3 - J3 (trapezoidal thread axle)
+	motors[2].reset_requested=true;
+	while(motors[2].reset_requested)
+	{
+		motors[2].reset_completed=HAL_GPIO_ReadPin(motors[2].end_switch_port, motors[2].end_switch_pin);
+		motors[2].reset_requested=!motors[2].reset_completed;
+
+		motors[2].position=0;
+		motors[2].current_speed=10; // rot/s
+		motors[2].direction=0;
+
+
+
+		HAL_GPIO_TogglePin();
+		stall(300);
+		HAL_GPIO_TogglePin()
+		motors[2].
+	}
+}
+
+
 /* USER CODE END 4 */
 
 /**
@@ -1165,4 +1226,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
