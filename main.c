@@ -35,7 +35,30 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef struct {
+    uint32_t max_speed;
+    uint32_t current_speed;
 
+    _Bool direction; //0=LEFT, 1=RIGHT
+    uint16_t direction_pin;
+    GPIO_TypeDef* direction_port;
+
+    TIM_HandleTypeDef* timer;
+    uint32_t timer_channel;
+
+    uint16_t motor_pin;
+    GPIO_TypeDef* motor_port;
+
+    uint32_t max_position; //in numbers of steps
+    uint32_t position;
+
+    _Bool reset_requested;
+    _Bool reset_completed;
+
+    uint16_t end_switch_pin;
+    GPIO_TypeDef* end_switch_port;
+
+}motor_struct_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -119,6 +142,12 @@ uint16_t elapsed_1st, elapsed_2nd, elapsed_3rd;
 uint8_t time_str1[60];
 uint8_t time_str2[40];
 
+extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim15;
+extern TIM_HandleTypeDef htim3;
+
+motor_struct_t motors[3]; // Declaration only
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -163,31 +192,16 @@ char vnos[100];
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
 
-struct motor_struct {
-    uint32_t max_speed;
-    uint32_t current_speed;
+//struct motor_struct motors[3];
 
-    _Bool direction; //0=LEFT, 1=RIGHT
-    uint16_t direction_pin;
-    GPIO_TypeDef direction_port;
 
-    uint16_t motor_pin;
-    GPIO_TypeDef motor_port;
-
-    uint32_t max_position; //in numbers of steps
-    uint32_t position;
-
-    _Bool reset_requested;
-    _Bool reset_completed;
-
-    uint16_t end_switch_pin;
-    GPIO_TypeDef end_switch_port;
-
-} motors[3] = {
-    {10000, 0, 0, GPIO_PIN_3, GPIOE, GPIO_PIN_8, GPIOA, 10000, 0, false, true, 1, GPIOA}, // motors[0]; D8
-    {10000, 0, 0, GPIO_PIN_8, GPIOI, GPIO_PIN_6, GPIOE, 10000, 0, false, true, 1, GPIOA},  // motors[1]; D7
-    {10000, 0, 0, GPIO_PIN_1, GPIOK, GPIO_PIN_6, GPIOA, 10000, 0, false, true, 1, GPIOA}    // motors[2]; D4
-};
+//motor_struct motors[3];
+/*
+motors[3] = {
+    {10000, 0, 0, GPIO_PIN_3, GPIOE, &htim1, TIM_CHANNEL_1, GPIO_PIN_8, GPIOA, 10000, 0, false, true, 1, GPIOA}, // motors[0]; D8
+    {10000, 0, 0, GPIO_PIN_8, GPIOI, &htim15, TIM_CHANNEL_2, GPIO_PIN_6, GPIOE, 10000, 0, false, true, 1, GPIOA},  // motors[1]; D7
+    {10000, 0, 0, GPIO_PIN_1, GPIOK, &htim3, TIM_CHANNEL_1, GPIO_PIN_6, GPIOA, 10000, 0, false, true, 1, GPIOA}    // motors[2]; D4
+};*/
 
 /*
 HAL_GPIO_TogglePin (GPIOE, GPIO_PIN_3);	// d8
@@ -246,39 +260,82 @@ int main(void) {
 	MX_TIM15_Init();
 	MX_TIM3_Init();
 	/* USER CODE BEGIN 2 */
-
+	motors[0] = (motor_struct_t){
+	    .max_speed = 10000,
+	    .current_speed = 0,
+	    .direction = 0,
+	    .direction_pin = GPIO_PIN_3,
+	    .direction_port = GPIOE,
+	    .timer = &htim1,
+	    .timer_channel = TIM_CHANNEL_1,
+	    .motor_pin = GPIO_PIN_6,
+	    .motor_port = GPIOE,
+	    .max_position = 10000,
+	    .position = 0,
+	    .reset_requested = false,
+	    .reset_completed = true,
+	    .end_switch_pin = 1,
+	    .end_switch_port = GPIOA
+	};
+	motors[1] = (motor_struct_t){
+		.max_speed = 10000,
+		.current_speed = 0,
+		.direction = 0,
+		.direction_pin = GPIO_PIN_8,
+		.direction_port = GPIOI,
+		.timer = &htim15,
+		.timer_channel = TIM_CHANNEL_2,
+		.motor_pin = GPIO_PIN_8,
+		.motor_port = GPIOA,
+		.max_position = 10000,
+		.position = 0,
+		.reset_requested = false,
+		.reset_completed = true,
+		.end_switch_pin = 1,
+		.end_switch_port = GPIOA
+	};
+	motors[2] = (motor_struct_t){
+		.max_speed = 10000,
+		.current_speed = 0,
+		.direction = 0,
+		.direction_pin = GPIO_PIN_1,
+		.direction_port = GPIOK,
+		.timer = &htim3,
+		.timer_channel = TIM_CHANNEL_1,
+		.motor_pin = GPIO_PIN_6,
+		.motor_port = GPIOA,
+		.max_position = 10000,
+		.position = 0,
+		.reset_requested = false,
+		.reset_completed = true,
+		.end_switch_pin = 1,
+		.end_switch_port = GPIOA
+	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
 	HAL_UART_Receive_IT(&huart3, rx_buff, 10);
 
 	/* Configure LED1 */
 	BSP_LED_Init(LED1);
 
-	  SCB_EnableICache();
-	  SCB_EnableDCache();
-	  // 2. Configure NVIC
-	  HAL_NVIC_SetPriority(TIM1_UP_IRQn, 5, 0);
-	  HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
 
-	  // 3. Enable timer interrupt
-	  htim1.Instance->DIER |= TIM_DIER_UIE;
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_2);
-	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(motors[0].timer, motors[0].timer_channel);
+	HAL_TIM_PWM_Start(motors[1].timer, motors[1].timer_channel);
+	HAL_TIM_PWM_Start(motors[2].timer, motors[2].timer_channel);
 
-	// After starting PWM
-	//if (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) != HAL_OK) {
-	//    Error_Handler();}
+	// In main(), after HAL_TIM_PWM_Start() calls:
+	HAL_TIM_Base_Start_IT(motors[0].timer);  // Start with interrupt
+	HAL_TIM_Base_Start_IT(motors[1].timer);
+	HAL_TIM_Base_Start_IT(motors[2].timer);
 
-	//reset_motors();
-	//ChangePWM_Frequency_Period(&htim1, TIM_CHANNEL_1, 400);
-	//SetPWM_Frequency_50Duty(&htim1, TIM_CHANNEL_1, 499);   // 1MHz/500 = 2kHz
-	//HAL_SetPWM_Frequency_50Duty(&htim1, TIM_CHANNEL_1, 499);
-	Set_PWM_Frequency(&htim1, 300); // Set to 1kHz
+
+	Set_PWM_Frequency(motors[0].timer, motors[0].timer_channel, 300);
+	Set_PWM_Frequency(motors[1].timer, motors[1].timer_channel, 400);
+	Set_PWM_Frequency(motors[2].timer, motors[2].timer_channel, 500);
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -288,48 +345,12 @@ int main(void) {
 		static uint32_t stevilo_korakov=0; // stevilo korakov
 
 		static uint8_t test=1;
-/*
-		//za spremembo smeri:
-		if (stevilo_korakov<5000 && korak==0)
+
+		if (motors[0].position>=10)
 		{
-			korak=1;
-			smer=1;
-			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, KeyState);
-			HAL_delay(1); //med zamenjavo smeri in pulzom mora biti vec kot 125us
+			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, GPIO_PIN_SET);
+			stop_timer(motors[0].timer,motors[0].timer_channel);
 		}
-		else if (stevilo_korakov==0 && korak==1)
-		{
-			korak=0;
-			smer=0;
-			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, KeyState);
-			HAL_delay(1); //med zamenjavo smeri in pulzom mora biti vec kot 125us
-		}
-*/
-
-		//spremeni za toggle step pina
-
-
-		    // Example: Change frequency to 1kHz
-		    //HAL_SetPWM_Frequency_50Duty(&htim1, TIM_CHANNEL_1, 1000);
-		//Set_PWM_Frequency(&htim1, 4000); // Set to 1kHz  // 200MHz/(200*1000) = 1kHz
-		//HAL_Delay(1000);
-
-		    // Change to 500Hz
-		    //HAL_SetPWM_Frequency_50Duty(&htim1, TIM_CHANNEL_1, 500);
-		/*
-		Set_PWM_Frequency(&htim1, 300); // Set to 1kHz  // 200MHz/(400*1000) = 500Hz
-		Set_PWM_Frequency(&htim15, 300);
-		Set_PWM_Frequency(&htim3, 300);
-		HAL_Delay(1000);
-		 */
-		if (motors[0].position>=1000)
-		{
-			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, 1);
-		}
-
-		//if (HAL_TIM_Base_Start_IT(&htim1) != HAL_OK) {
-		//   Error_Handler();
-		//}
 
 		// Check if interrupt is enabled
 		if ((htim1.Instance->DIER & TIM_DIER_UIE) == 0) {
@@ -344,28 +365,6 @@ int main(void) {
 	    //HAL_Delay (500);
 
 
-		//for(uint32_t stall=0; stall<10000;stall++){} //delay 250.3us
-		//for(uint32_t stall=0; stall<20000;stall++){} //delay 500.3us
-		//for(uint32_t stall=0; stall<15000;stall++){} //delay 375.3us
-
-		//stall(100);
-		//ChangePWM_Frequency_Period(&htim1, TIM_CHANNEL_1, 200*test);
-		//stall(500);
-		//test+=1;
-		
-		/* Start PWM signals */
-		
-/*
-	    // za spremljanje števila korakov:
-	    if (smer && stevilo_korakov<5000)
-		{
-	    	stevilo_korakov++;
-		}
-	    else if (!smer && stevilo_korakov>0)
-	    {
-	    	stevilo_korakov-=1;
-	    }
-*/
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
@@ -768,6 +767,10 @@ static void MX_TIM1_Init(void)
   //htim1.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
   //htim1.Instance->CR1 |= TIM_CR1_CEN;    // Enable timer
 
+  htim1.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
+  HAL_NVIC_SetPriority(TIM1_UP_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
+
   HAL_TIM_MspPostInit(&htim1);
 
   // Configure NVIC
@@ -836,6 +839,11 @@ static void MX_TIM15_Init(void)
   {
     Error_Handler();
   }
+
+  htim15.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
+  HAL_NVIC_SetPriority(TIM15_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(TIM15_IRQn);
+
   HAL_TIM_MspPostInit(&htim15);
 }
 
@@ -883,6 +891,11 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
+
+  htim3.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
+  HAL_NVIC_SetPriority(TIM3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(TIM3_IRQn);
+
   HAL_TIM_MspPostInit(&htim3);
 }
 
@@ -1502,10 +1515,10 @@ void reset_motors()
 }
 
 //nastavi frekvenco pwm-ja na izbranem timerju
-void Set_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t frequency_hz)
+void Set_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t timer_channel, uint32_t frequency_hz)
 {
     // Stop PWM first
-    HAL_TIM_PWM_Stop(htim, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Stop(htim, timer_channel);
     frequency_hz=frequency_hz/2;
     // Calculate prescaler and period based on your clock
     uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // For TIM2-TIM7
@@ -1526,16 +1539,45 @@ void Set_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t frequency_hz)
     htim->Instance->ARR = period;
 
     // Restart PWM
-    HAL_TIM_PWM_Start(htim, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(htim, timer_channel);
+}
+
+void stop_timer(TIM_HandleTypeDef *htim, uint32_t timer_channel)
+{
+	HAL_TIM_PWM_Stop(htim, timer_channel);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    //if (htim->Instance == TIM1)  // Only count for TIM1
-    //{
-        motors[0].position+=1;
-    //}
+    if (htim->Instance == TIM1)
+    {
+        motors[0].position += 1;  // Increment position for motor 0
+    }
+    else if (htim->Instance == TIM15)
+    {
+        motors[1].position += 1;  // Increment position for motor 1
+    }
+    else if (htim->Instance == TIM3)
+    {
+        motors[2].position += 1;  // Increment position for motor 2
+    }
 }
+
+void TIM1_UP_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&htim1);
+}
+
+void TIM15_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&htim15);
+}
+
+void TIM3_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&htim3);
+}
+
 /* USER CODE END 4 */
 
 /**
