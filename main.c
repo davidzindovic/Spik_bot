@@ -177,7 +177,7 @@ static void MX_TIM1_Init(void);
 static void MX_TIM15_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-
+uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -238,7 +238,7 @@ int main(void) {
 
 	/* Configure the system clock */
 	SystemClock_Config();
-
+	ADC12_COMMON->CCR &= ~ADC_CCR_DUAL; // Ensure independent mode
 	//SCB->VTOR = (uint32_t)&g_pfnVectors;  // Ensure vector table is properly set
 	// After SystemClock_Config()
 	//if (__HAL_RCC_GET_TIM1_SOURCE() != RCC_TIM1CLKSOURCE_PLL) {
@@ -255,7 +255,25 @@ int main(void) {
 
 	MX_USART3_UART_Init(); //inicializiramo UART
 	MX_GPIO_Init();
+
+
+	MX_ADC1_Init();
+	MX_ADC2_Init();
+	MX_ADC3_Init();
 	
+	/*
+	// Calibrate ADCs
+	if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+	    Error_Handler();
+	}
+	if (HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+	    Error_Handler();
+	}
+	if (HAL_ADCEx_Calibration_Start(&hadc3, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+	    Error_Handler();
+	}
+	 */
+
 	MX_TIM1_Init();  // Add these after GPIO init
 	MX_TIM15_Init();
 	MX_TIM3_Init();
@@ -265,50 +283,50 @@ int main(void) {
 	    .current_speed = 0,
 	    .direction = 0,
 	    .direction_pin = GPIO_PIN_3,
-	    .direction_port = GPIOE,
+	    .direction_port = GPIOE,//D8
 	    .timer = &htim1,
 	    .timer_channel = TIM_CHANNEL_1,
-	    .motor_pin = GPIO_PIN_6,
+	    .motor_pin = GPIO_PIN_6,//D6
 	    .motor_port = GPIOE,
 	    .max_position = 10000,
 	    .position = 0,
 	    .reset_requested = false,
 	    .reset_completed = true,
-	    .end_switch_pin = 1,
-	    .end_switch_port = GPIOA
+	    .end_switch_pin = 0,//A0
+	    .end_switch_port = GPIOC
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 0,
 		.direction_pin = GPIO_PIN_8,
-		.direction_port = GPIOI,
+		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.motor_pin = GPIO_PIN_8,
+		.motor_pin = GPIO_PIN_8,//D5
 		.motor_port = GPIOA,
 		.max_position = 10000,
 		.position = 0,
 		.reset_requested = false,
 		.reset_completed = true,
-		.end_switch_pin = 1,
-		.end_switch_port = GPIOA
+		.end_switch_pin = 8,//A1
+		.end_switch_port = GPIOF
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 0,
 		.direction_pin = GPIO_PIN_1,
-		.direction_port = GPIOK,
+		.direction_port = GPIOK,//D4
 		.timer = &htim3,
 		.timer_channel = TIM_CHANNEL_1,
-		.motor_pin = GPIO_PIN_6,
+		.motor_pin = GPIO_PIN_6,//D3
 		.motor_port = GPIOA,
 		.max_position = 10000,
 		.position = 0,
 		.reset_requested = false,
 		.reset_completed = true,
-		.end_switch_pin = 1,
+		.end_switch_pin = 0,//A2
 		.end_switch_port = GPIOA
 	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
@@ -336,6 +354,7 @@ int main(void) {
 	Set_PWM_Frequency(motors[0].timer, motors[0].timer_channel, 300);
 	Set_PWM_Frequency(motors[1].timer, motors[1].timer_channel, 400);
 	Set_PWM_Frequency(motors[2].timer, motors[2].timer_channel, 500);
+	HAL_GPIO_WritePin(motors[0].direction_port, motors[0].direction_pin, GPIO_PIN_SET);
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -346,21 +365,19 @@ int main(void) {
 
 		static uint8_t test=1;
 
+		uint32_t a0_value = Read_ADC(&hadc1); // A0 (PC0)
+		uint32_t a1_value = Read_ADC(&hadc2); // A1 (PF8)
+		uint32_t a2_value = Read_ADC(&hadc3); // A2 (PA0_C)
+		HAL_Delay(2);
+		/*
 		if (motors[0].position>=10)
 		{
 			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, GPIO_PIN_SET);
 			stop_timer(motors[0].timer,motors[0].timer_channel);
 		}
+		 */
 
-		// Check if interrupt is enabled
-		if ((htim1.Instance->DIER & TIM_DIER_UIE) == 0) {
-		    printf("TIM1 Update interrupt not enabled!\n");
-		}
 
-		// Check NVIC configuration
-		if (NVIC->ISER[(((uint32_t)TIM1_UP_IRQn) >> 5UL)] & (1UL << (((uint32_t)TIM1_UP_IRQn) & 0x1FUL)) == 0) {
-		    printf("TIM1 interrupt not enabled in NVIC!\n");
-		}
 		//HAL_GPIO_TogglePin (GPIOJ, GPIO_PIN_2); //led pin
 	    //HAL_Delay (500);
 
@@ -418,6 +435,10 @@ void SystemClock_Config(void) {
 	__HAL_RCC_TIM1_CLK_ENABLE();
 	__HAL_RCC_TIM3_CLK_ENABLE();
 	__HAL_RCC_TIM15_CLK_ENABLE();
+
+	//__HAL_RCC_ADC123_CLK_ENABLE();
+	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
+	__HAL_RCC_ADC3_CLK_ENABLE();    // For ADC3
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
 	 */
@@ -525,16 +546,17 @@ static void MX_ADC1_Init(void) {
 
 	/* USER CODE END ADC1_Init 0 */
 
-	ADC_MultiModeTypeDef multimode = { 0 };
+	//ADC_MultiModeTypeDef multimode = { 0 };
+	//hadc1.Init.MultiMode = ADC_MODE_INDEPENDENT;
 	ADC_ChannelConfTypeDef sConfig = { 0 };
 
 	/* USER CODE BEGIN ADC1_Init 1 */
 
 	/* USER CODE END ADC1_Init 1 */
 
-	/** Common config
-	 */
 	hadc1.Instance = ADC1;
+	hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;  // Recommended for H7
+	hadc1.Init.Resolution = ADC_RESOLUTION_16B;        // H7 supports 16-bit
 	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
 	hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
 	hadc1.Init.LowPowerAutoWait = DISABLE;
@@ -544,35 +566,27 @@ static void MX_ADC1_Init(void) {
 	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
 	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
 	hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-	hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+	hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
 	hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
 	hadc1.Init.OversamplingMode = DISABLE;
-	hadc1.Init.Oversampling.Ratio = 1;
-	if (HAL_ADC_Init(&hadc1) != HAL_OK) {
-		Error_Handler();
-	}
-	hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-	hadc1.Init.Resolution = ADC_RESOLUTION_16B;
+
 	if (HAL_ADC_Init(&hadc1) != HAL_OK) {
 		Error_Handler();
 	}
 
-	/** Configure the ADC multi-mode
-	 */
-	multimode.Mode = ADC_MODE_INDEPENDENT;
-	if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK) {
+	// For STM32H7, you may also need to calibrate:
+	if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
 		Error_Handler();
 	}
 
-	/** Configure Regular Channel
-	 */
-	sConfig.Channel = ADC_CHANNEL_0;
+	sConfig.Channel = ADC_CHANNEL_10;        // PC0
 	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+	sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;  // H7 has different timing
 	sConfig.SingleDiff = ADC_SINGLE_ENDED;
 	sConfig.OffsetNumber = ADC_OFFSET_NONE;
 	sConfig.Offset = 0;
 	sConfig.OffsetSignedSaturation = DISABLE;
+
 	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
 		Error_Handler();
 	}
@@ -592,16 +606,16 @@ static void MX_ADC2_Init(void) {
 	/* USER CODE BEGIN ADC2_Init 0 */
 
 	/* USER CODE END ADC2_Init 0 */
-
+	//hadc2.Init.MultiMode = ADC_MODE_INDEPENDENT;
 	ADC_ChannelConfTypeDef sConfig = { 0 };
 
 	/* USER CODE BEGIN ADC2_Init 1 */
 
 	/* USER CODE END ADC2_Init 1 */
 
-	/** Common config
-	 */
 	hadc2.Instance = ADC2;
+	hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;  // Recommended for H7
+	hadc2.Init.Resolution = ADC_RESOLUTION_16B;        // H7 supports 16-bit
 	hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
 	hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
 	hadc2.Init.LowPowerAutoWait = DISABLE;
@@ -611,28 +625,27 @@ static void MX_ADC2_Init(void) {
 	hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
 	hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
 	hadc2.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-	hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+	hadc2.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
 	hadc2.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
 	hadc2.Init.OversamplingMode = DISABLE;
-	hadc2.Init.Oversampling.Ratio = 1;
-	if (HAL_ADC_Init(&hadc2) != HAL_OK) {
-		Error_Handler();
-	}
-	hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-	hadc2.Init.Resolution = ADC_RESOLUTION_16B;
+
 	if (HAL_ADC_Init(&hadc2) != HAL_OK) {
 		Error_Handler();
 	}
 
-	/** Configure Regular Channel
-	 */
-	sConfig.Channel = ADC_CHANNEL_0;
+	// For STM32H7, you may also need to calibrate:
+	if (HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+		Error_Handler();
+	}
+
+	sConfig.Channel = ADC_CHANNEL_7;        // PC0
 	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+	sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;  // H7 has different timing
 	sConfig.SingleDiff = ADC_SINGLE_ENDED;
 	sConfig.OffsetNumber = ADC_OFFSET_NONE;
 	sConfig.Offset = 0;
 	sConfig.OffsetSignedSaturation = DISABLE;
+
 	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK) {
 		Error_Handler();
 	}
@@ -652,17 +665,16 @@ static void MX_ADC3_Init(void) {
 	/* USER CODE BEGIN ADC3_Init 0 */
 
 	/* USER CODE END ADC3_Init 0 */
-
+	//hadc3.Init.MultiMode = ADC_MODE_INDEPENDENT;
 	ADC_ChannelConfTypeDef sConfig = { 0 };
 
 	/* USER CODE BEGIN ADC3_Init 1 */
 
 	/* USER CODE END ADC3_Init 1 */
 
-	/** Common config
-	 */
 	hadc3.Instance = ADC3;
-	hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+	hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;  // Recommended for H7
+	hadc3.Init.Resolution = ADC_RESOLUTION_16B;        // H7 supports 16-bit
 	hadc3.Init.ScanConvMode = ADC_SCAN_DISABLE;
 	hadc3.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
 	hadc3.Init.LowPowerAutoWait = DISABLE;
@@ -672,27 +684,27 @@ static void MX_ADC3_Init(void) {
 	hadc3.Init.ExternalTrigConv = ADC_SOFTWARE_START;
 	hadc3.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
 	hadc3.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-	hadc3.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+	hadc3.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
 	hadc3.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
 	hadc3.Init.OversamplingMode = DISABLE;
-	hadc3.Init.Oversampling.Ratio = 1;
-	if (HAL_ADC_Init(&hadc3) != HAL_OK) {
-		Error_Handler();
-	}
-	hadc3.Init.Resolution = ADC_RESOLUTION_16B;
+
 	if (HAL_ADC_Init(&hadc3) != HAL_OK) {
 		Error_Handler();
 	}
 
-	/** Configure Regular Channel
-	 */
-	sConfig.Channel = ADC_CHANNEL_7;
+	// For STM32H7, you may also need to calibrate:
+	if (HAL_ADCEx_Calibration_Start(&hadc3, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+		Error_Handler();
+	}
+
+	sConfig.Channel = ADC_CHANNEL_0;        // PC0
 	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+	sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;  // H7 has different timing
 	sConfig.SingleDiff = ADC_SINGLE_ENDED;
 	sConfig.OffsetNumber = ADC_OFFSET_NONE;
 	sConfig.Offset = 0;
 	sConfig.OffsetSignedSaturation = DISABLE;
+
 	if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK) {
 		Error_Handler();
 	}
@@ -1432,6 +1444,22 @@ static void MX_GPIO_Init(void) {
 	HAL_GPIO_Init(LD1_GPIO_Port, &GPIO_InitStruct);
 
 	/* USER CODE BEGIN MX_GPIO_Init_2 */
+	// Configure ADC input pins as analog inputs
+	//GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+	// A0 (PC0) - ADC1_IN10
+	GPIO_InitStruct.Pin = GPIO_PIN_0;
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	// A1 (PF8) - ADC2_IN6
+	GPIO_InitStruct.Pin = GPIO_PIN_8;
+	HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
+	// A2 (PA0_C) - ADC3_IN10
+	GPIO_InitStruct.Pin = GPIO_PIN_0;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 	/* USER CODE END MX_GPIO_Init_2 */
 }
 
@@ -1576,6 +1604,36 @@ void TIM15_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim3);
+}
+
+uint32_t Read_ADC(ADC_HandleTypeDef* hadc) {
+    HAL_StatusTypeDef status;
+    uint32_t adcValue = 0;
+
+    // Stop any ongoing conversion
+    HAL_ADC_Stop(hadc);
+
+    // Clear any previous state
+    __HAL_ADC_CLEAR_FLAG(hadc, ADC_FLAG_EOC | ADC_FLAG_OVR);
+
+    // Start conversion with timeout
+    status = HAL_ADC_Start(hadc);
+    if (status != HAL_OK) {
+        printf("Start failed for ADC %d: %d\n", (int)hadc->Instance, status);
+        return 0;
+    }
+
+    // Wait for conversion with timeout (100ms)
+    status = HAL_ADC_PollForConversion(hadc, 100);
+    if (status != HAL_OK) {
+        printf("Conversion timeout for ADC %d: %d\n", (int)hadc->Instance, status);
+        return 0;
+    }
+
+    adcValue = HAL_ADC_GetValue(hadc);
+    HAL_ADC_Stop(hadc);
+
+    return adcValue;
 }
 
 /* USER CODE END 4 */
