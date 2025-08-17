@@ -231,18 +231,34 @@ int main(void) {
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 	HAL_Init();
+	// Add right after HAL_Init():
+	/*
+	ADC1->CR |= ADC_CR_ADEN | ADC_CR_BOOST;  // 0x10010001
+	while(!(ADC1->ISR & ADC_ISR_ADRDY));
 
+	ADC2->CR |= ADC_CR_ADEN | ADC_CR_BOOST;  // 0x10010001
+	while(!(ADC2->ISR & ADC_ISR_ADRDY));
+
+	ADC3->CR |= ADC_CR_ADEN | ADC_CR_BOOST;  // 0x10010001
+	while(!(ADC3->ISR & ADC_ISR_ADRDY));
+	*/
 	/* USER CODE BEGIN Init */
 
 	/* USER CODE END Init */
 
 	/* Configure the system clock */
 	SystemClock_Config();
-	ADC12_COMMON->CCR &= ~ADC_CCR_DUAL; // Ensure independent mode
-	//SCB->VTOR = (uint32_t)&g_pfnVectors;  // Ensure vector table is properly set
-	// After SystemClock_Config()
-	//if (__HAL_RCC_GET_TIM1_SOURCE() != RCC_TIM1CLKSOURCE_PLL) {
-	//    Error_Handler();}
+	PeriphCommonClock_Config();
+
+	__HAL_RCC_ADC12_CLK_ENABLE();
+	__HAL_RCC_ADC3_CLK_ENABLE();
+	HAL_Delay(10);
+
+	// Manually power up the ADC
+	ADC12_COMMON->CCR |= ADC_CCR_CKMODE_0; // Set to HCLK/1 (or other suitable divider)
+	ADC1->CR &= ~ADC_CR_DEEPPWD; // Disable deep power down
+	ADC1->CR |= ADC_CR_ADVREGEN; // Enable voltage regulator
+	HAL_Delay(1); // Wait for regulator to stabilize
 
 	/* Configure the peripherals common clocks */
 	//PeriphCommonClock_Config();
@@ -258,21 +274,92 @@ int main(void) {
 
 
 	MX_ADC1_Init();
-	MX_ADC2_Init();
+
+	/*ADC1->CR &= ~ADC_CR_DEEPPWD;       // Exit deep power-down
+	ADC1->CR |= ADC_CR_ADVREGEN;       // Enable regulator
+	HAL_Delay(1);                      // Wait ~10 µs
+	HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+	HAL_ADC_Start(&hadc1);             // now enable conversions
+	// Enable ADC2 with timeout
+	ADC1->CR |= ADC_CR_ADEN;
+	uint32_t timeout = HAL_GetTick();
+	while (!(ADC1->ISR & ADC_ISR_ADRDY)) {
+	    if ((HAL_GetTick() - timeout) > 100) {
+	        printf("ADC2 never became ready!\n");
+	        Error_Handler();
+	    }
+	}
+
+	ADC1->ISR = ADC_ISR_ADRDY | ADC_ISR_EOC | ADC_ISR_OVR | ADC_ISR_AWD1 | ADC_ISR_AWD2 | ADC_ISR_AWD3;
+	// Calibrate with timeout
+	timeout = HAL_GetTick();
+	while (HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+	    if ((HAL_GetTick() - timeout) > 200) {
+	        printf("ADC2 calibration failed!\n");
+	        Error_Handler();
+	    }
+	}*/
+
 	MX_ADC3_Init();
-	
-	/*
-	// Calibrate ADCs
-	if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-	    Error_Handler();
+
+	// In main(), right after MX_ADC2_Init():
+	//__HAL_RCC_ADC12_CLK_ENABLE();
+
+	/*ADC3->CR &= ~ADC_CR_DEEPPWD;       // Exit deep power-down
+	ADC3->CR |= ADC_CR_ADVREGEN;       // Enable regulator
+	HAL_Delay(1);                      // Wait ~10 µs
+	HAL_ADCEx_Calibration_Start(&hadc3, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+	HAL_ADC_Start(&hadc3);             // now enable conversions
+	// Enable ADC2 with timeout
+	ADC3->CR |= ADC_CR_ADEN;
+	timeout = HAL_GetTick();
+	while (!(ADC3->ISR & ADC_ISR_ADRDY)) {
+	    if ((HAL_GetTick() - timeout) > 100) {
+	        printf("ADC2 never became ready!\n");
+	        Error_Handler();
+	    }
 	}
-	if (HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-	    Error_Handler();
-	}
-	if (HAL_ADCEx_Calibration_Start(&hadc3, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-	    Error_Handler();
-	}
-	 */
+
+	ADC3->ISR = ADC_ISR_ADRDY | ADC_ISR_EOC | ADC_ISR_OVR | ADC_ISR_AWD1 | ADC_ISR_AWD2 | ADC_ISR_AWD3;
+	// Calibrate with timeout
+	timeout = HAL_GetTick();
+	while (HAL_ADCEx_Calibration_Start(&hadc3, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+	    if ((HAL_GetTick() - timeout) > 200) {
+	        printf("ADC2 calibration failed!\n");
+	        Error_Handler();
+	    }
+	}*/
+
+	MX_ADC2_Init();
+	TestADCs();
+	// After ADC enables:
+	__DSB();
+	__ISB();
+	/*ADC2->CR &= ~ADC_CR_DEEPPWD;       // Exit deep power-down
+		ADC2->CR |= ADC_CR_ADVREGEN;       // Enable regulator
+		HAL_Delay(1);                      // Wait ~10 µs
+		HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+		HAL_ADC_Start(&hadc2);             // now enable conversions
+		// Enable ADC2 with timeout
+		ADC2->CR |= ADC_CR_ADEN;
+		timeout = HAL_GetTick();
+		while (!(ADC2->ISR & ADC_ISR_ADRDY)) {
+		    if ((HAL_GetTick() - timeout) > 100) {
+		        printf("ADC2 never became ready!\n");
+		        Error_Handler();
+		    }
+		}
+
+		ADC2->ISR = ADC_ISR_ADRDY | ADC_ISR_EOC | ADC_ISR_OVR | ADC_ISR_AWD1 | ADC_ISR_AWD2 | ADC_ISR_AWD3;
+		// Calibrate with timeout
+		timeout = HAL_GetTick();
+		while (HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+		    if ((HAL_GetTick() - timeout) > 200) {
+		        printf("ADC2 calibration failed!\n");
+		        Error_Handler();
+		    }
+		}*/
+
 
 	MX_TIM1_Init();  // Add these after GPIO init
 	MX_TIM15_Init();
@@ -309,7 +396,7 @@ int main(void) {
 		.position = 0,
 		.reset_requested = false,
 		.reset_completed = true,
-		.end_switch_pin = 8,//A1
+		.end_switch_pin = 13,//A1,8
 		.end_switch_port = GPIOF
 	};
 	motors[2] = (motor_struct_t){
@@ -326,7 +413,7 @@ int main(void) {
 		.position = 0,
 		.reset_requested = false,
 		.reset_completed = true,
-		.end_switch_pin = 0,//A2
+		.end_switch_pin = 14,//A2,0
 		.end_switch_port = GPIOA
 	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
@@ -366,8 +453,11 @@ int main(void) {
 		static uint8_t test=1;
 
 		uint32_t a0_value = Read_ADC(&hadc1); // A0 (PC0)
+		HAL_Delay(10);
 		uint32_t a1_value = Read_ADC(&hadc2); // A1 (PF8)
+		HAL_Delay(10);
 		uint32_t a2_value = Read_ADC(&hadc3); // A2 (PA0_C)
+		HAL_Delay(10);
 		HAL_Delay(2);
 		/*
 		if (motors[0].position>=10)
@@ -427,7 +517,7 @@ void SystemClock_Config(void) {
 
 	/** Configure the main internal regulator output voltage
 	 */
-	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE2);
+	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
 	while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {
 	}
@@ -439,6 +529,7 @@ void SystemClock_Config(void) {
 	//__HAL_RCC_ADC123_CLK_ENABLE();
 	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
 	__HAL_RCC_ADC3_CLK_ENABLE();    // For ADC3
+	HAL_Delay(1);
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
 	 */
@@ -555,37 +646,49 @@ static void MX_ADC1_Init(void) {
 	/* USER CODE END ADC1_Init 1 */
 
 	hadc1.Instance = ADC1;
-	hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;  // Recommended for H7
-	hadc1.Init.Resolution = ADC_RESOLUTION_16B;        // H7 supports 16-bit
-	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-	hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-	hadc1.Init.LowPowerAutoWait = DISABLE;
+	hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV2;  // Recommended for H7
+	hadc1.Init.Resolution = ADC_RESOLUTION_12B;        // H7 supports 16-bit
+	hadc1.Init.ScanConvMode = DISABLE;
+	//hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	//hadc1.Init.LowPowerAutoWait = DISABLE;
 	hadc1.Init.ContinuousConvMode = DISABLE;
-	hadc1.Init.NbrOfConversion = 1;
+	//hadc1.Init.NbrOfConversion = 1;
 	hadc1.Init.DiscontinuousConvMode = DISABLE;
 	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-	hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-	hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
-	hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
-	hadc1.Init.OversamplingMode = DISABLE;
+	//hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+	//hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+	//hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
+	//hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+	//hadc1.Init.OversamplingMode = DISABLE;
+    //hadc1.Init.DataAlign = ADC_DATA_ALIGN_RIGHT;
+	hadc1.Init.NbrOfConversion = 1;
+	//hadc1.Init.DMAContinuousRequests = DISABLE;
+	hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	hadc1.Init.LowPowerAutoWait = DISABLE;
+	hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
 
 	if (HAL_ADC_Init(&hadc1) != HAL_OK) {
 		Error_Handler();
 	}
-
+	/*
+	HAL_Delay(10);
 	// For STM32H7, you may also need to calibrate:
-	if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-		Error_Handler();
-	}
+	uint32_t tickstart = HAL_GetTick();
+	    while(HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
+	        if((HAL_GetTick() - tickstart) > 1000) {
+	            Error_Handler();
+	        }
+	    }
+	 */
+	HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
 
 	sConfig.Channel = ADC_CHANNEL_10;        // PC0
 	sConfig.Rank = ADC_REGULAR_RANK_1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;  // H7 has different timing
-	sConfig.SingleDiff = ADC_SINGLE_ENDED;
-	sConfig.OffsetNumber = ADC_OFFSET_NONE;
-	sConfig.Offset = 0;
-	sConfig.OffsetSignedSaturation = DISABLE;
+	//sConfig.SingleDiff = ADC_SINGLE_ENDED;
+	//sConfig.OffsetNumber = ADC_OFFSET_NONE;
+	//sConfig.Offset = 0;
+	//sConfig.OffsetSignedSaturation = DISABLE;
 
 	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
 		Error_Handler();
@@ -614,37 +717,48 @@ static void MX_ADC2_Init(void) {
 	/* USER CODE END ADC2_Init 1 */
 
 	hadc2.Instance = ADC2;
-	hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;  // Recommended for H7
-	hadc2.Init.Resolution = ADC_RESOLUTION_16B;        // H7 supports 16-bit
-	hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
-	hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-	hadc2.Init.LowPowerAutoWait = DISABLE;
+	hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV2;  // Recommended for H7
+	hadc2.Init.Resolution = ADC_RESOLUTION_12B;        // H7 supports 16-bit
+	hadc2.Init.ScanConvMode = DISABLE;
+	//hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	//hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	//hadc2.Init.LowPowerAutoWait = DISABLE;
 	hadc2.Init.ContinuousConvMode = DISABLE;
-	hadc2.Init.NbrOfConversion = 1;
+	//hadc2.Init.NbrOfConversion = 1;
 	hadc2.Init.DiscontinuousConvMode = DISABLE;
-	hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-	hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-	hadc2.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-	hadc2.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
-	hadc2.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
-	hadc2.Init.OversamplingMode = DISABLE;
+	//hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+	//hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+	//hadc2.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+	//hadc2.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
+	//hadc2.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+	//hadc2.Init.OversamplingMode = DISABLE;
+
+    hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+    //hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    //hadc2.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+    //hadc2.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
+    //hadc2.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+    //hadc2.Init.OversamplingMode = DISABLE;
+    hadc2.Init.NbrOfConversion = 1;
 
 	if (HAL_ADC_Init(&hadc2) != HAL_OK) {
 		Error_Handler();
 	}
+
 
 	// For STM32H7, you may also need to calibrate:
 	if (HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
 		Error_Handler();
 	}
 
-	sConfig.Channel = ADC_CHANNEL_7;        // PC0
+
+	sConfig.Channel = ADC_CHANNEL_6;        // PC0,7
 	sConfig.Rank = ADC_REGULAR_RANK_1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;  // H7 has different timing
-	sConfig.SingleDiff = ADC_SINGLE_ENDED;
-	sConfig.OffsetNumber = ADC_OFFSET_NONE;
-	sConfig.Offset = 0;
-	sConfig.OffsetSignedSaturation = DISABLE;
+	//sConfig.SingleDiff = ADC_SINGLE_ENDED;
+	//sConfig.OffsetNumber = ADC_OFFSET_NONE;
+	//sConfig.Offset = 0;
+	//sConfig.OffsetSignedSaturation = DISABLE;
 
 	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK) {
 		Error_Handler();
@@ -673,20 +787,25 @@ static void MX_ADC3_Init(void) {
 	/* USER CODE END ADC3_Init 1 */
 
 	hadc3.Instance = ADC3;
-	hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV4;  // Recommended for H7
-	hadc3.Init.Resolution = ADC_RESOLUTION_16B;        // H7 supports 16-bit
-	hadc3.Init.ScanConvMode = ADC_SCAN_DISABLE;
-	hadc3.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV2;  // Recommended for H7
+	hadc3.Init.Resolution = ADC_RESOLUTION_12B;        // H7 supports 16-bit
+	hadc3.Init.ScanConvMode = DISABLE;
+	//hadc3.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
 	hadc3.Init.LowPowerAutoWait = DISABLE;
-	hadc3.Init.ContinuousConvMode = DISABLE;
-	hadc3.Init.NbrOfConversion = 1;
+	//hadc3.Init.ContinuousConvMode = DISABLE;
+	//hadc3.Init.NbrOfConversion = 1;
 	hadc3.Init.DiscontinuousConvMode = DISABLE;
 	hadc3.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-	hadc3.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-	hadc3.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-	hadc3.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
-	hadc3.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
-	hadc3.Init.OversamplingMode = DISABLE;
+	//hadc3.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+	//hadc3.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+	//hadc3.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;     // Changed from PRESERVED
+	//hadc3.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+	//hadc3.Init.OversamplingMode = DISABLE;
+	hadc3.Init.NbrOfConversion = 1;
+	//hadc3.Init.DMAContinuousRequests = DISABLE;
+	//hadc3.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	//hadc3.Init.LowPowerAutoWait = DISABLE;
+	//hadc3.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
 
 	if (HAL_ADC_Init(&hadc3) != HAL_OK) {
 		Error_Handler();
@@ -697,13 +816,13 @@ static void MX_ADC3_Init(void) {
 		Error_Handler();
 	}
 
-	sConfig.Channel = ADC_CHANNEL_0;        // PC0
+	sConfig.Channel = ADC_CHANNEL_0;        // PC0,0
 	sConfig.Rank = ADC_REGULAR_RANK_1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;  // H7 has different timing
-	sConfig.SingleDiff = ADC_SINGLE_ENDED;
-	sConfig.OffsetNumber = ADC_OFFSET_NONE;
-	sConfig.Offset = 0;
-	sConfig.OffsetSignedSaturation = DISABLE;
+	//sConfig.SingleDiff = ADC_SINGLE_ENDED;
+	//sConfig.OffsetNumber = ADC_OFFSET_NONE;
+	//sConfig.Offset = 0;
+	//sConfig.OffsetSignedSaturation = DISABLE;
 
 	if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK) {
 		Error_Handler();
@@ -1454,11 +1573,20 @@ static void MX_GPIO_Init(void) {
 	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
 	// A1 (PF8) - ADC2_IN6
-	GPIO_InitStruct.Pin = GPIO_PIN_8;
+	GPIO_InitStruct.Pin = GPIO_PIN_8;//8
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIOF->MODER |= (3 << (2*8));  // Analog mode
+	GPIOF->PUPDR &= ~(3 << (2*8)); // No pull
 	HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
 	// A2 (PA0_C) - ADC3_IN10
-	GPIO_InitStruct.Pin = GPIO_PIN_0;
+	GPIO_InitStruct.Pin = GPIO_PIN_0;//0
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIOA->MODER |= (3 << (2*0));
+	GPIOA->PUPDR &= ~(3 << (2*0));
+	SYSCFG->PMCR |= SYSCFG_PMCR_PA0SO; // Critical for PA0_C!
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 	/* USER CODE END MX_GPIO_Init_2 */
 }
@@ -1606,36 +1734,78 @@ void TIM3_IRQHandler(void)
     HAL_TIM_IRQHandler(&htim3);
 }
 
+
+uint32_t Read_ADC2(ADC_HandleTypeDef* hadc) {
+	    // Stop any ongoing conversion
+	    HAL_ADC_Stop(hadc);
+
+	    // Clear all flags
+	    __HAL_ADC_CLEAR_FLAG(hadc, ADC_FLAG_EOC | ADC_FLAG_OVR | ADC_FLAG_AWD1 |
+	                          ADC_FLAG_AWD2 | ADC_FLAG_AWD3 | ADC_FLAG_JQOVF);
+
+	    // Start conversion with timeout
+	    uint32_t tickstart = HAL_GetTick();
+	    while (HAL_ADC_Start(hadc) != HAL_OK) {
+	        if ((HAL_GetTick() - tickstart) > 10) return 0xFFFF;
+	    }
+
+	    // Wait for conversion with timeout
+	    tickstart = HAL_GetTick();
+	    while (HAL_ADC_PollForConversion(hadc, 10) != HAL_OK) {
+	        if ((HAL_GetTick() - tickstart) > 10) return 0xFFFF;
+	    }
+
+	    uint32_t value = HAL_ADC_GetValue(hadc);
+	    HAL_ADC_Stop(hadc);
+
+	    return value;
+	}
+
 uint32_t Read_ADC(ADC_HandleTypeDef* hadc) {
-    HAL_StatusTypeDef status;
-    uint32_t adcValue = 0;
-
-    // Stop any ongoing conversion
+    HAL_ADC_Start(hadc);
+    HAL_ADC_PollForConversion(hadc, 10);
+    uint32_t value = HAL_ADC_GetValue(hadc);
     HAL_ADC_Stop(hadc);
-
-    // Clear any previous state
-    __HAL_ADC_CLEAR_FLAG(hadc, ADC_FLAG_EOC | ADC_FLAG_OVR);
-
-    // Start conversion with timeout
-    status = HAL_ADC_Start(hadc);
-    if (status != HAL_OK) {
-        printf("Start failed for ADC %d: %d\n", (int)hadc->Instance, status);
-        return 0;
-    }
-
-    // Wait for conversion with timeout (100ms)
-    status = HAL_ADC_PollForConversion(hadc, 100);
-    if (status != HAL_OK) {
-        printf("Conversion timeout for ADC %d: %d\n", (int)hadc->Instance, status);
-        return 0;
-    }
-
-    adcValue = HAL_ADC_GetValue(hadc);
-    HAL_ADC_Stop(hadc);
-
-    return adcValue;
+    return value;
 }
 
+// Diagnostic test - bypass all your existing ADC code
+void TestADCs() {
+    // 1. Enable clocks and power
+    //RCC->AHB1ENR |= RCC_AHB1ENR_ADC12EN | RCC_AHB1ENR_ADC3EN;
+    __DSB();
+
+    // 2. Power up regulators
+    ADC1->CR &= ~ADC_CR_DEEPPWD;
+    ADC2->CR &= ~ADC_CR_DEEPPWD;
+    ADC3->CR &= ~ADC_CR_DEEPPWD;
+    ADC1->CR |= ADC_CR_ADVREGEN;
+    ADC2->CR |= ADC_CR_ADVREGEN;
+    ADC3->CR |= ADC_CR_ADVREGEN;
+    HAL_Delay(1);
+
+    // 3. Calibrate (optional but recommended)
+    if(ADC1->CR & ADC_CR_ADEN) ADC1->CR &= ~ADC_CR_ADEN;
+    ADC1->CR |= ADC_CR_ADCAL; while(ADC1->CR & ADC_CR_ADCAL);
+
+    // 4. Enable with boost for H7 high-speed operation
+    ADC1->CR |= ADC_CR_ADEN | ADC_CR_BOOST;
+    ADC2->CR |= ADC_CR_ADEN | ADC_CR_BOOST;
+    ADC3->CR |= ADC_CR_ADEN | ADC_CR_BOOST;
+    while(!(ADC1->ISR & ADC_ISR_ADRDY));
+    while(!(ADC2->ISR & ADC_ISR_ADRDY));
+    while(!(ADC3->ISR & ADC_ISR_ADRDY));
+
+    // 5. Configure channels
+    ADC1->SQR1 = (10 << 6) | (0 << 0);  // Ch10, 1 conversion
+    ADC2->SQR1 = (6 << 6) | (0 << 0);   // Ch6, 1 conversion
+    ADC3->SQR1 = (0 << 6) | (0 << 0);   // Ch0, 1 conversion
+
+    // 6. Sample time configuration
+    ADC1->SMPR1 = 7 << (3*0);  // 810.5 cycles for Ch0-9
+    ADC2->SMPR1 = 7 << (3*0);
+    ADC3->SMPR1 = 7 << (3*0);
+}
 /* USER CODE END 4 */
 
 /**
