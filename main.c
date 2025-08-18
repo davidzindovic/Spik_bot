@@ -55,8 +55,11 @@ typedef struct {
     _Bool reset_requested;
     _Bool reset_completed;
 
-    uint16_t end_switch_pin;
-    GPIO_TypeDef* end_switch_port;
+    uint16_t end_switch1_pin;
+    GPIO_TypeDef* end_switch1_port;
+
+    uint16_t end_switch2_pin;
+    GPIO_TypeDef* end_switch2_port;
 
 }motor_struct_t;
 /* USER CODE END PTD */
@@ -273,94 +276,6 @@ int main(void) {
 	MX_GPIO_Init();
 
 
-	MX_ADC1_Init();
-
-	/*ADC1->CR &= ~ADC_CR_DEEPPWD;       // Exit deep power-down
-	ADC1->CR |= ADC_CR_ADVREGEN;       // Enable regulator
-	HAL_Delay(1);                      // Wait ~10 µs
-	HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
-	HAL_ADC_Start(&hadc1);             // now enable conversions
-	// Enable ADC2 with timeout
-	ADC1->CR |= ADC_CR_ADEN;
-	uint32_t timeout = HAL_GetTick();
-	while (!(ADC1->ISR & ADC_ISR_ADRDY)) {
-	    if ((HAL_GetTick() - timeout) > 100) {
-	        printf("ADC2 never became ready!\n");
-	        Error_Handler();
-	    }
-	}
-
-	ADC1->ISR = ADC_ISR_ADRDY | ADC_ISR_EOC | ADC_ISR_OVR | ADC_ISR_AWD1 | ADC_ISR_AWD2 | ADC_ISR_AWD3;
-	// Calibrate with timeout
-	timeout = HAL_GetTick();
-	while (HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-	    if ((HAL_GetTick() - timeout) > 200) {
-	        printf("ADC2 calibration failed!\n");
-	        Error_Handler();
-	    }
-	}*/
-
-	MX_ADC3_Init();
-
-	// In main(), right after MX_ADC2_Init():
-	//__HAL_RCC_ADC12_CLK_ENABLE();
-
-	/*ADC3->CR &= ~ADC_CR_DEEPPWD;       // Exit deep power-down
-	ADC3->CR |= ADC_CR_ADVREGEN;       // Enable regulator
-	HAL_Delay(1);                      // Wait ~10 µs
-	HAL_ADCEx_Calibration_Start(&hadc3, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
-	HAL_ADC_Start(&hadc3);             // now enable conversions
-	// Enable ADC2 with timeout
-	ADC3->CR |= ADC_CR_ADEN;
-	timeout = HAL_GetTick();
-	while (!(ADC3->ISR & ADC_ISR_ADRDY)) {
-	    if ((HAL_GetTick() - timeout) > 100) {
-	        printf("ADC2 never became ready!\n");
-	        Error_Handler();
-	    }
-	}
-
-	ADC3->ISR = ADC_ISR_ADRDY | ADC_ISR_EOC | ADC_ISR_OVR | ADC_ISR_AWD1 | ADC_ISR_AWD2 | ADC_ISR_AWD3;
-	// Calibrate with timeout
-	timeout = HAL_GetTick();
-	while (HAL_ADCEx_Calibration_Start(&hadc3, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-	    if ((HAL_GetTick() - timeout) > 200) {
-	        printf("ADC2 calibration failed!\n");
-	        Error_Handler();
-	    }
-	}*/
-
-	MX_ADC2_Init();
-	TestADCs();
-	// After ADC enables:
-	__DSB();
-	__ISB();
-	/*ADC2->CR &= ~ADC_CR_DEEPPWD;       // Exit deep power-down
-		ADC2->CR |= ADC_CR_ADVREGEN;       // Enable regulator
-		HAL_Delay(1);                      // Wait ~10 µs
-		HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
-		HAL_ADC_Start(&hadc2);             // now enable conversions
-		// Enable ADC2 with timeout
-		ADC2->CR |= ADC_CR_ADEN;
-		timeout = HAL_GetTick();
-		while (!(ADC2->ISR & ADC_ISR_ADRDY)) {
-		    if ((HAL_GetTick() - timeout) > 100) {
-		        printf("ADC2 never became ready!\n");
-		        Error_Handler();
-		    }
-		}
-
-		ADC2->ISR = ADC_ISR_ADRDY | ADC_ISR_EOC | ADC_ISR_OVR | ADC_ISR_AWD1 | ADC_ISR_AWD2 | ADC_ISR_AWD3;
-		// Calibrate with timeout
-		timeout = HAL_GetTick();
-		while (HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-		    if ((HAL_GetTick() - timeout) > 200) {
-		        printf("ADC2 calibration failed!\n");
-		        Error_Handler();
-		    }
-		}*/
-
-
 	MX_TIM1_Init();  // Add these after GPIO init
 	MX_TIM15_Init();
 	MX_TIM3_Init();
@@ -379,8 +294,10 @@ int main(void) {
 	    .position = 0,
 	    .reset_requested = false,
 	    .reset_completed = true,
-	    .end_switch_pin = 0,//A0
-	    .end_switch_port = GPIOC
+	    .end_switch1_pin = GPIO_PIN_3,//A0
+	    .end_switch1_port = GPIOE,
+	    .end_switch2_pin = GPIO_PIN_15,//A0
+	    .end_switch2_port = GPIOH
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
@@ -396,8 +313,10 @@ int main(void) {
 		.position = 0,
 		.reset_requested = false,
 		.reset_completed = true,
-		.end_switch_pin = 13,//A1,8
-		.end_switch_port = GPIOF
+		.end_switch1_pin = GPIO_PIN_4,//A1,8
+		.end_switch1_port = GPIOB,
+	    .end_switch2_pin = GPIO_PIN_15,//A0
+	    .end_switch2_port = GPIOB
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
@@ -413,8 +332,10 @@ int main(void) {
 		.position = 0,
 		.reset_requested = false,
 		.reset_completed = true,
-		.end_switch_pin = 14,//A2,0
-		.end_switch_port = GPIOA
+		.end_switch1_pin = GPIO_PIN_2,//A2,0
+		.end_switch1_port = GPIOI,
+		.end_switch2_pin = GPIO_PIN_3,//A2,0
+		.end_switch2_port = GPIOD
 	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
 	HAL_UART_Receive_IT(&huart3, rx_buff, 10);
@@ -452,13 +373,15 @@ int main(void) {
 
 		static uint8_t test=1;
 
-		uint32_t a0_value = Read_ADC(&hadc1); // A0 (PC0)
+
+
+		_Bool value0=HAL_GPIO_ReadPin (motors[0].end_switch1_port, motors[0].end_switch1_pin);
 		HAL_Delay(10);
-		uint32_t a1_value = Read_ADC(&hadc2); // A1 (PF8)
+		_Bool  value1=HAL_GPIO_ReadPin (motors[1].end_switch1_port, motors[1].end_switch1_pin);
 		HAL_Delay(10);
-		uint32_t a2_value = Read_ADC(&hadc3); // A2 (PA0_C)
+		_Bool  value2=HAL_GPIO_ReadPin (motors[2].end_switch1_port, motors[2].end_switch1_pin);
 		HAL_Delay(10);
-		HAL_Delay(2);
+
 		/*
 		if (motors[0].position>=10)
 		{
@@ -1478,6 +1401,44 @@ static void MX_GPIO_Init(void) {
     HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
     //konc
 
+    // inicializacija digital inputov (expansion board)
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_2;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    //konc
+
 	/*Configure GPIO pins : USB_OTG_FS2_ID_Pin OTG_FS2_PSO_Pin */
 	GPIO_InitStruct.Pin = USB_OTG_FS2_ID_Pin | OTG_FS2_PSO_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -1566,6 +1527,7 @@ static void MX_GPIO_Init(void) {
 	// Configure ADC input pins as analog inputs
 	//GPIO_InitTypeDef GPIO_InitStruct = {0};
 
+	/*
 	// A0 (PC0) - ADC1_IN10
 	GPIO_InitStruct.Pin = GPIO_PIN_0;
 	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
@@ -1588,6 +1550,9 @@ static void MX_GPIO_Init(void) {
 	GPIOA->PUPDR &= ~(3 << (2*0));
 	SYSCFG->PMCR |= SYSCFG_PMCR_PA0SO; // Critical for PA0_C!
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	*/
+
+
 	/* USER CODE END MX_GPIO_Init_2 */
 }
 
