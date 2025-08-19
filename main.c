@@ -40,17 +40,23 @@ typedef struct {
     uint32_t current_speed;
 
     _Bool direction; //0=LEFT, 1=RIGHT
+	_Bool direction_plus;
+	_Bool direction_minus;
+	
     uint16_t direction_pin;
     GPIO_TypeDef* direction_port;
 
     TIM_HandleTypeDef* timer;
     uint32_t timer_channel;
+	uint32_t frequency;
 
     uint16_t motor_pin;
     GPIO_TypeDef* motor_port;
 
     uint32_t max_position; //in numbers of steps
+	uint32_t starting_position;
     uint32_t position;
+	_Bool running;
 
     _Bool reset_requested;
     _Bool reset_completed;
@@ -284,14 +290,19 @@ int main(void) {
 	    .max_speed = 10000,
 	    .current_speed = 0,
 	    .direction = 0,
+		.direction_plus = 1,
+		.direction_minus = 0,
 	    .direction_pin = GPIO_PIN_3,
 	    .direction_port = GPIOE,//D8
 	    .timer = &htim1,
 	    .timer_channel = TIM_CHANNEL_1,
+		.frequency = 500,
 	    .motor_pin = GPIO_PIN_6,//D6
 	    .motor_port = GPIOE,
 	    .max_position = 10000,
+		.starting_position=5000,
 	    .position = 0,
+		.running = true,
 	    .reset_requested = false,
 	    .reset_completed = true,
 	    .end_switch1_pin = GPIO_PIN_3,//A0
@@ -303,14 +314,19 @@ int main(void) {
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 0,
+		.direction_plus = 1,
+		.direction_minus = 0,
 		.direction_pin = GPIO_PIN_8,
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
+		.frequency = 500,
 		.motor_pin = GPIO_PIN_8,//D5
 		.motor_port = GPIOA,
 		.max_position = 10000,
+		.starting_position=5000,
 		.position = 0,
+		.running = true,
 		.reset_requested = false,
 		.reset_completed = true,
 		.end_switch1_pin = GPIO_PIN_4,//A1,8
@@ -322,14 +338,19 @@ int main(void) {
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 0,
+		.direction_plus = 1,
+		.direction_minus = 0,
 		.direction_pin = GPIO_PIN_1,
 		.direction_port = GPIOK,//D4
 		.timer = &htim3,
 		.timer_channel = TIM_CHANNEL_1,
+		.frequency = 500,
 		.motor_pin = GPIO_PIN_6,//D3
 		.motor_port = GPIOA,
 		.max_position = 10000,
+		.starting_position=5000,
 		.position = 0,
+		.running = true,
 		.reset_requested = false,
 		.reset_completed = true,
 		.end_switch1_pin = GPIO_PIN_2,//A2,0
@@ -1607,44 +1628,87 @@ void stall(uint32_t duration_us)
 	for(uint32_t stall=0;stall<stall_limit;stall++){}
 }
 
+void stop_all_motors()
+{
+	stop_timer(motors[0].timer,motors[0].timer_channel);
+	stop_timer(motors[1].timer,motors[1].timer_channel);
+	stop_timer(motors[2].timer,motors[2].timer_channel);
+}
+
 void reset_motors()
 {
 	//motor 3 - J3 (trapezoidal thread axle)
 	
-	motors[2].reset_requested=true;
-	
-	motors[2].direction=0;
-	motors[2].current_speed=10; // rot/s - ni še
-	
-	// hardcoded direction
-	//HAL_GPIO_WritePin(motors[2].direction_port,motors[2].direction_pin,motors[2].direction);
-	
-	while(motors[2].reset_requested)
+	for (uint8_t motor_num=0;motor_num<num_of_motors;motor_num++)
 	{
-		//motors[2].reset_completed=HAL_GPIO_ReadPin(motors[2].end_switch_port, motors[2].end_switch_pin);
-		motors[2].reset_requested=!motors[2].reset_completed;
-
-		//HAL_GPIO_TogglePin(motors[2].motor_port,motors[2].motor_pin);
-		stall(300);
-		//HAL_GPIO_TogglePin(motors[2].motor_port,motors[2].motor_pin);
-		stall(300);
+		
+		motors[motor_num].reset_requested=true; //da ignorira pogoje za pozicijo
+		motors[motor_num].reset_completed=false;
+		
+		motors[motor_num].direction=0;
+		motors[motor_num].current_speed=10; // rot/s - ni še; raje frekvenco!
+		
+		if motors[motor_num].running==false
+		{
+			run_motor(motor_num);
+		}
+		
+		if(motors[motor_num].reset_requested)
+		{
+			while!(read_switch1(motor_num) || read_switch2(motor_num))
+			{} //trenutno je vseeno kateri switch zadane
+			
+			stop_motor(motor_num);
+			
+			motors[motor_num].position=0; //mogoče bi lahko offsetal start position da ne udari v limit switch
+			
+			motors[motor_num].direction_minus=motors[motor_num].direction;
+			
+			motors[motor_num].direction=!motors[motor_num].direction;
+			motors[motor_num].direction_plus=motors[motor_num].direction;
+			
+			motors[motor_num].reset_completed=true; //da lahko zdaj spremlja korake
+			
+			run_motor(motor_num);
+			
+			while!(read_switch1(motor_num) || read_switch2(motor_num))
+			{}
+			
+			motors[motor_num].max_position=motors[motor_num].position;
+			
+			motors[motor_num].reset_completed=false;
+			motors[motor_num].reset_requested=false;
+		}
+		
+		stop_motor(motor_num);
+		
+		
 	}
-	motors[2].current_speed=0;
-	motors[2].position=0;
-	
+}
 
+void read_switch1(uint8_t motor_number)
+{
+	return HAL_GPIO_ReadPin(motors[motor_number].end_switch1_port, motors[motor_number].end_switch1_pin);
+}
+
+void read_switch2(uint8_t motor_number)
+{
+	return HAL_GPIO_ReadPin(motors[motor_number].end_switch2_port, motors[motor_number].end_switch2_pin);
 }
 
 //nastavi frekvenco pwm-ja na izbranem timerju
-void Set_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t timer_channel, uint32_t frequency_hz)
+void run_motor(uint8_t motor_number)
 {
     // Stop PWM first
-    HAL_TIM_PWM_Stop(htim, timer_channel);
-    frequency_hz=frequency_hz/2;
+    HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
+	motors[motor_number].running=false;
+	
+    frequency_hz=motors[motor_number].frequency;
+	frequency_hz=frequency_hz/2;
     // Calculate prescaler and period based on your clock
     uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // For TIM2-TIM7
-    if(htim->Instance == TIM1 || htim->Instance == TIM8 ||
-       htim->Instance == TIM15 || htim->Instance == TIM16 || htim->Instance == TIM17) {
+    if(motors[motor_number].timer->Instance == TIM1 || motors[motor_number].timer->Instance == TIM8 ||
+       motors[motor_number].timer->Instance == TIM15 || motors[motor_number].timer->Instance == TIM16 || motors[motor_number].timer->Instance == TIM17) {
         timer_clock = HAL_RCC_GetPCLK2Freq();
     }
 
@@ -1654,33 +1718,71 @@ void Set_PWM_Frequency(TIM_HandleTypeDef *htim, uint32_t timer_channel, uint32_t
     // Reconfigure timer
     TIM_ClockConfigTypeDef sClockSourceConfig = {0};
     sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-    HAL_TIM_ConfigClockSource(htim, &sClockSourceConfig);
+    HAL_TIM_ConfigClockSource(motors[motor_number].timer, &sClockSourceConfig);
 
-    htim->Instance->PSC = prescaler;
-    htim->Instance->ARR = period;
+    motors[motor_number].timer->Instance->PSC = prescaler;
+    motors[motor_number].timer->Instance->ARR = period;
 
     // Restart PWM
-    HAL_TIM_PWM_Start(htim, timer_channel);
+    HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
+	motors[motor_number].running=true;
 }
 
-void stop_timer(TIM_HandleTypeDef *htim, uint32_t timer_channel)
+void stop_motor(uint8_t motor_number)
 {
-	HAL_TIM_PWM_Stop(htim, timer_channel);
+	HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
+	motors[motor_number].running=false;
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM1)
     {
-        motors[0].position += 1;  // Increment position for motor 0
-    }
+		if (((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true
+		{
+			stop_timer(motors[0].timer, motors[0].timer_channel);
+			motors[0].running=false;
+		}
+		else if (motors[0].running=true && motors[0].direction==motors[0].direction_plus && (motors[0].reset_completed || motors[0].position<motors[0].max_position))
+		{
+			motors[0].position += 1;
+		}
+		else if (motors[0].running=true && motors[0].direction==motors[0].direction_minus && (motors[0].reset_completed || motors[0].position>0))
+		{
+			motors[0].position -= 1;
+		}
+	}
     else if (htim->Instance == TIM15)
     {
-        motors[1].position += 1;  // Increment position for motor 1
+		if (((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true
+		{
+			stop_timer(motors[1].timer, motors[1].timer_channel);
+			motors[1].running=false;
+		}
+		else if (motors[1].running=true && motors[1].direction==motors[1].direction_plus && (motors[1].reset_completed || motors[1].position<motors[1].max_position))
+		{
+			motors[1].position += 1;
+		}
+		else if (motors[1].running=true && motors[1].direction==motors[1].direction_minus && (motors[1].reset_completed || motors[1].position>0))
+		{
+			motors[1].position -= 1;
+		}
     }
     else if (htim->Instance == TIM3)
     {
-        motors[2].position += 1;  // Increment position for motor 2
+		if (((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true
+		{
+			stop_timer(motors[2].timer, motors[2].timer_channel);
+			motors[2].running=false;
+		}
+		else if (motors[2].running=true && motors[2].direction==motors[2].direction_plus && (motors[2].reset_completed || motors[2].position<motors[2].max_position))
+		{
+			motors[2].position += 1;
+		}
+		else if (motors[2].running=true && motors[2].direction==motors[2].direction_minus && (motors[2].reset_completed || motors[2].position>0))
+		{
+			motors[2].position -= 1;
+		}
     }
 }
 
