@@ -39,7 +39,7 @@ typedef struct {
     uint32_t max_speed;
     uint32_t current_speed;
 
-    _Bool direction; //0=LEFT, 1=RIGHT
+    _Bool direction;
 	_Bool direction_plus;
 	_Bool direction_minus;
 	
@@ -66,6 +66,8 @@ typedef struct {
 
     uint16_t end_switch2_pin;
     GPIO_TypeDef* end_switch2_port;
+	
+	uint32_t unit_conversion; //number of steps per mm or deg
 
 }motor_struct_t;
 /* USER CODE END PTD */
@@ -186,7 +188,22 @@ static void MX_TIM1_Init(void);
 static void MX_TIM15_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
+void stall(uint32_t duration_us);
+void stop_all_motors(void);
+void direction_change(uint8_t motor_number, _Bool direction);
+void reset_motors(void);
+void move_to_starting position(uint8_t motor_number);
+void move_effector(uint32_t x, uint32_t y, uint32_t orientation);
+void update_global_coordinates(void);
+_Bool read_switch1(uint8_t motor_number);
+_Bool read_switch2(uint8_t motor_number);
+void run_motor(uint8_t motor_number);
+void stop_motor(uint8_t motor_number);
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
+void TIM1_UP_IRQHandler(void);
+void TIM15_UP_IRQHandler(void);
+void TIM3_UP_IRQHandler(void);
+//uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -201,26 +218,11 @@ char vnos[100];
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
 
-//struct motor_struct motors[3];
+uint8_t num_of_motors=3; //število vseh motorjev
 
-
-//motor_struct motors[3];
-/*
-motors[3] = {
-    {10000, 0, 0, GPIO_PIN_3, GPIOE, &htim1, TIM_CHANNEL_1, GPIO_PIN_8, GPIOA, 10000, 0, false, true, 1, GPIOA}, // motors[0]; D8
-    {10000, 0, 0, GPIO_PIN_8, GPIOI, &htim15, TIM_CHANNEL_2, GPIO_PIN_6, GPIOE, 10000, 0, false, true, 1, GPIOA},  // motors[1]; D7
-    {10000, 0, 0, GPIO_PIN_1, GPIOK, &htim3, TIM_CHANNEL_1, GPIO_PIN_6, GPIOA, 10000, 0, false, true, 1, GPIOA}    // motors[2]; D4
-};*/
-
-/*
-HAL_GPIO_TogglePin (GPIOE, GPIO_PIN_3);	// d8
-
-HAL_GPIO_TogglePin (GPIOI, GPIO_PIN_8);	// d7
-
-HAL_GPIO_TogglePin (GPIOK, GPIO_PIN_1);	// d4
-
-HAL_GPIO_TogglePin (GPIOG, GPIO_PIN_3);	// d2
-*/
+uint32_t effector_x=0;   //end effector x coordinate [mm]
+uint32_t effector_y=0;   //end effector y coordinate [mm]
+uint32_t effector_orientation=0;   //end effector orientation [deg]
 
 /* USER CODE END 0 */
 
@@ -259,6 +261,7 @@ int main(void) {
 	SystemClock_Config();
 	PeriphCommonClock_Config();
 
+	/*
 	__HAL_RCC_ADC12_CLK_ENABLE();
 	__HAL_RCC_ADC3_CLK_ENABLE();
 	HAL_Delay(10);
@@ -268,7 +271,8 @@ int main(void) {
 	ADC1->CR &= ~ADC_CR_DEEPPWD; // Disable deep power down
 	ADC1->CR |= ADC_CR_ADVREGEN; // Enable voltage regulator
 	HAL_Delay(1); // Wait for regulator to stabilize
-
+	*/
+	
 	/* Configure the peripherals common clocks */
 	//PeriphCommonClock_Config();
 
@@ -279,12 +283,15 @@ int main(void) {
 	/* Initialize all configured peripherals */
 
 	MX_USART3_UART_Init(); //inicializiramo UART
+	
+	//GPIO initialization
 	MX_GPIO_Init();
 
-
-	MX_TIM1_Init();  // Add these after GPIO init
+	//Timer initialization
+	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
+	
 	/* USER CODE BEGIN 2 */
 	motors[0] = (motor_struct_t){
 	    .max_speed = 10000,
@@ -302,13 +309,14 @@ int main(void) {
 	    .max_position = 10000,
 		.starting_position=5000,
 	    .position = 0,
-		.running = true,
+		.running = false,
 	    .reset_requested = false,
-	    .reset_completed = true,
+	    .reset_completed = false,
 	    .end_switch1_pin = GPIO_PIN_3,//A0
 	    .end_switch1_port = GPIOE,
 	    .end_switch2_pin = GPIO_PIN_15,//A0
-	    .end_switch2_port = GPIOH
+	    .end_switch2_port = GPIOH,
+		.unit_conversion=100 //steps per mm
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
@@ -326,13 +334,14 @@ int main(void) {
 		.max_position = 10000,
 		.starting_position=5000,
 		.position = 0,
-		.running = true,
+		.running = false,
 		.reset_requested = false,
-		.reset_completed = true,
+		.reset_completed = false,
 		.end_switch1_pin = GPIO_PIN_4,//A1,8
 		.end_switch1_port = GPIOB,
 	    .end_switch2_pin = GPIO_PIN_15,//A0
-	    .end_switch2_port = GPIOB
+	    .end_switch2_port = GPIOB,
+		.unit_conversion=100 //steps per deg
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
@@ -350,13 +359,14 @@ int main(void) {
 		.max_position = 10000,
 		.starting_position=5000,
 		.position = 0,
-		.running = true,
+		.running = false,
 		.reset_requested = false,
-		.reset_completed = true,
+		.reset_completed = false,
 		.end_switch1_pin = GPIO_PIN_2,//A2,0
 		.end_switch1_port = GPIOI,
 		.end_switch2_pin = GPIO_PIN_3,//A2,0
-		.end_switch2_port = GPIOD
+		.end_switch2_port = GPIOD,
+		.unit_conversion=100 //steps per mm
 	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
 	HAL_UART_Receive_IT(&huart3, rx_buff, 10);
@@ -370,50 +380,22 @@ int main(void) {
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 
+	//Start the PWMs
 	HAL_TIM_PWM_Start(motors[0].timer, motors[0].timer_channel);
 	HAL_TIM_PWM_Start(motors[1].timer, motors[1].timer_channel);
 	HAL_TIM_PWM_Start(motors[2].timer, motors[2].timer_channel);
 
-	// In main(), after HAL_TIM_PWM_Start() calls:
-	HAL_TIM_Base_Start_IT(motors[0].timer);  // Start with interrupt
+	// Starts interrupts (for position increments in callback functions)
+	HAL_TIM_Base_Start_IT(motors[0].timer);
 	HAL_TIM_Base_Start_IT(motors[1].timer);
 	HAL_TIM_Base_Start_IT(motors[2].timer);
-
-
-	Set_PWM_Frequency(motors[0].timer, motors[0].timer_channel, 300);
-	Set_PWM_Frequency(motors[1].timer, motors[1].timer_channel, 400);
-	Set_PWM_Frequency(motors[2].timer, motors[2].timer_channel, 500);
-	HAL_GPIO_WritePin(motors[0].direction_port, motors[0].direction_pin, GPIO_PIN_SET);
+	
+	stop_all_motors();
+	
+	reset_motors();
+	
 	while (1) {
 		/* USER CODE END WHILE */
-
-		static uint8_t smer=0; //bool za smer
-		//static uint8_t smer_change=0;
-		static uint8_t korak=0;
-		static uint32_t stevilo_korakov=0; // stevilo korakov
-
-		static uint8_t test=1;
-
-
-
-		_Bool value0=HAL_GPIO_ReadPin (motors[0].end_switch1_port, motors[0].end_switch1_pin);
-		HAL_Delay(10);
-		_Bool  value1=HAL_GPIO_ReadPin (motors[1].end_switch1_port, motors[1].end_switch1_pin);
-		HAL_Delay(10);
-		_Bool  value2=HAL_GPIO_ReadPin (motors[2].end_switch1_port, motors[2].end_switch1_pin);
-		HAL_Delay(10);
-
-		/*
-		if (motors[0].position>=10)
-		{
-			HAL_GPIO_WritePin(GPIOJ, GPIO_PIN_2, GPIO_PIN_SET);
-			stop_timer(motors[0].timer,motors[0].timer_channel);
-		}
-		 */
-
-
-		//HAL_GPIO_TogglePin (GPIOJ, GPIO_PIN_2); //led pin
-	    //HAL_Delay (500);
 
 
 		/* USER CODE BEGIN 3 */
@@ -1620,6 +1602,11 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
   }
 }
 
+/**
+  * @brief  Stalls the processor for the defined time period in us.
+  * @param  duration_us: the time that the CPU should wait
+  * @retval None
+  */
 void stall(uint32_t duration_us)
 {
 	uint32_t stall_limit;
@@ -1628,24 +1615,50 @@ void stall(uint32_t duration_us)
 	for(uint32_t stall=0;stall<stall_limit;stall++){}
 }
 
-void stop_all_motors()
+/**
+  * @brief  Stops all motors (by stopping their timers).
+  * @param  None
+  * @retval None
+  */
+void stop_all_motors(void)
 {
-	stop_timer(motors[0].timer,motors[0].timer_channel);
-	stop_timer(motors[1].timer,motors[1].timer_channel);
-	stop_timer(motors[2].timer,motors[2].timer_channel);
+	stop_motor(motors[0].timer,motors[0].timer_channel);
+	stop_motor(motors[1].timer,motors[1].timer_channel);
+	stop_motor(motors[2].timer,motors[2].timer_channel);
 }
 
-void reset_motors()
+/**
+  * @brief  Changes the direction of the chosen motor to the desires direction
+			and flags it in the struct.
+  * @param  motor_number: number of the motor (starting with index 0).
+  *	@param	direction: boolean value of the direction of rotation.
+  * @retval None
+  */
+void direction_change(uint8_t motor_number, _Bool direction)
+{
+	motors[motor_number].direction=direction;
+	HAL_GPIO_WritePin(motors[motor_number].direction_port, motors[motor_number].direction_pin, motors[motor_number].direction);
+}
+
+/**
+  * @brief  Resets all the motors and configures max positions,
+			then moves the motors to their starting positions.
+  * @param  None
+  * @retval None
+  */
+void reset_motors(void)
 {
 	//motor 3 - J3 (trapezoidal thread axle)
+	//motor 2 - J2 (snail)
+	//motor 1 - J1 (pulley)
 	
-	for (uint8_t motor_num=0;motor_num<num_of_motors;motor_num++)
+	for (uint8_t motor_num=0;motor_num<(num_of_motors-1);motor_num++)
 	{
 		
 		motors[motor_num].reset_requested=true; //da ignorira pogoje za pozicijo
 		motors[motor_num].reset_completed=false;
 		
-		motors[motor_num].direction=0;
+		direction_change(motor_num, 0);
 		motors[motor_num].current_speed=10; // rot/s - ni še; raje frekvenco!
 		
 		if motors[motor_num].running==false
@@ -1664,7 +1677,8 @@ void reset_motors()
 			
 			motors[motor_num].direction_minus=motors[motor_num].direction;
 			
-			motors[motor_num].direction=!motors[motor_num].direction;
+			direction_change(motor_num,!motors[motor_num].direction);
+			
 			motors[motor_num].direction_plus=motors[motor_num].direction;
 			
 			motors[motor_num].reset_completed=true; //da lahko zdaj spremlja korake
@@ -1675,6 +1689,7 @@ void reset_motors()
 			{}
 			
 			motors[motor_num].max_position=motors[motor_num].position;
+			motors[motor_num].starting_position=motors[motor_num].max_position/2;
 			
 			motors[motor_num].reset_completed=false;
 			motors[motor_num].reset_requested=false;
@@ -1682,21 +1697,94 @@ void reset_motors()
 		
 		stop_motor(motor_num);
 		
-		
+		move_to_starting(motor_num);
 	}
 }
 
-void read_switch1(uint8_t motor_number)
+/**
+  * @brief  Manipulates the chosen motor to move to the struct
+			defined starting position.
+  * @param  motor_number: number of the motor (starting with index 0), 
+			whose second limit switch should be read.
+  * @retval None
+  */
+void move_to_starting position(uint8_t motor_number)
+{
+	if motors[motor_number].position>motors[motor_number].starting_position
+		{
+			direction_change(motor_number,motors[motor_number].direction_minus);
+		}
+		else if motors[motor_number].position<motors[motor_number].starting_position
+		{
+			direction_change(motor_number,motors[motor_number].direction_plus;
+		}
+	
+	while(motors[motor_number].position!=motors[motor_number].starting_position)
+	{
+		if motors[motor_number].running==false
+		{
+			run_motor(motor_number);
+		}
+	}
+	
+}
+
+/**
+  * @brief  Moves the end effector (needle) to the given coordinates,
+			taking in the account the desired orientation.
+  *	@param	x: x coordinate of end effector position.
+  * @param  y: x coordinate of end effector position.
+  * @param  orientation: orientation (in degrees) with 0° being
+			parralel to the pulley rail.s
+  * @retval None
+  */
+void move_effector(uint32_t x, uint32_t y, uint32_t orientation)
+{
+	
+}
+
+/**
+  * @brief  Updates the global end effector coordinate from the known struct
+			data of the motors.
+  * @param  None
+  * @retval None
+  */
+void update_global_coordinates(void)
+{		//PREVERI DELJENJE CELIH ŠTEVIL
+
+	//drugi index je hipotenuza (izteg)
+	effector_x=motors[0].position/motors[0].unit_conversion+motors[2].position/motors[2].unit_conversion*cos(motors[1].position/motors[1].unit_conversion);
+	effector_y=motors[2]*position/motors[2].unit_conversion*sin(motors[1].position/motors[1].unit_conversion);
+	effector_orientation=0;
+}
+
+/**
+  * @brief  Reads the state of the first limit switch, of the chosen motor.
+  * @param  motor_number: number of the motor (starting with index 0), 
+			whose first limit switch should be read.
+  * @retval The state of the first limit switch.
+  */
+_Bool read_switch1(uint8_t motor_number)
 {
 	return HAL_GPIO_ReadPin(motors[motor_number].end_switch1_port, motors[motor_number].end_switch1_pin);
 }
 
-void read_switch2(uint8_t motor_number)
+/**
+  * @brief  Reads the state of the second limit switch, of the chosen motor.
+  * @param  motor_number: number of the motor (starting with index 0), 
+			whose second limit switch should be read.
+  * @retval The state of the second limit switch.
+  */
+_Bool read_switch2(uint8_t motor_number)
 {
 	return HAL_GPIO_ReadPin(motors[motor_number].end_switch2_port, motors[motor_number].end_switch2_pin);
 }
 
-//nastavi frekvenco pwm-ja na izbranem timerju
+/**
+  * @brief  Runs the chosen motor with the struct defined speed/frequency.
+  * @param  motor_number: the number of the motor that should be ran (starting with index 0)
+  * @retval None
+  */
 void run_motor(uint8_t motor_number)
 {
     // Stop PWM first
@@ -1728,12 +1816,24 @@ void run_motor(uint8_t motor_number)
 	motors[motor_number].running=true;
 }
 
+/**
+  * @brief  Stops the chosen motor.
+  * @param  filmotor_number: the number of the motor (starting with 0)
+			that should be stopped.
+  * @retval None
+  */
 void stop_motor(uint8_t motor_number)
 {
 	HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
 	motors[motor_number].running=false;
 }
 
+/**
+  * @brief  Timer interrupt function for incrementing the position
+			of the stepper motor.
+  * @param  htim: pointer to the designated timer
+  * @retval None
+  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM1)
@@ -1786,16 +1886,31 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 }
 
+/**
+  * @brief  Makes the timer IRQ handler readable for the specific timer.
+  * @param  None
+  * @retval None
+  */
 void TIM1_UP_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim1);
 }
 
+/**
+  * @brief  Makes the timer IRQ handler readable for the specific timer.
+  * @param  None
+  * @retval None
+  */
 void TIM15_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim15);
 }
 
+/**
+  * @brief  Makes the timer IRQ handler readable for the specific timer.
+  * @param  None
+  * @retval None
+  */
 void TIM3_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim3);
