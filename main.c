@@ -42,7 +42,7 @@ typedef struct {
     _Bool direction;
 	_Bool direction_plus;
 	_Bool direction_minus;
-	
+
     uint16_t direction_pin;
     GPIO_TypeDef* direction_port;
 
@@ -66,7 +66,7 @@ typedef struct {
 
     uint16_t end_switch2_pin;
     GPIO_TypeDef* end_switch2_port;
-	
+
 	uint32_t unit_conversion; //number of steps per mm or deg
 
 }motor_struct_t;
@@ -192,7 +192,7 @@ void stall(uint32_t duration_us);
 void stop_all_motors(void);
 void direction_change(uint8_t motor_number, _Bool direction);
 void reset_motors(void);
-void move_to_starting position(uint8_t motor_number);
+void move_to_starting_position(uint8_t motor_number);
 void move_effector(uint32_t x, uint32_t y, uint32_t orientation);
 void update_global_coordinates(void);
 _Bool read_switch1(uint8_t motor_number);
@@ -272,7 +272,7 @@ int main(void) {
 	ADC1->CR |= ADC_CR_ADVREGEN; // Enable voltage regulator
 	HAL_Delay(1); // Wait for regulator to stabilize
 	*/
-	
+
 	/* Configure the peripherals common clocks */
 	//PeriphCommonClock_Config();
 
@@ -283,7 +283,7 @@ int main(void) {
 	/* Initialize all configured peripherals */
 
 	MX_USART3_UART_Init(); //inicializiramo UART
-	
+
 	//GPIO initialization
 	MX_GPIO_Init();
 
@@ -291,7 +291,7 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
-	
+
 	/* USER CODE BEGIN 2 */
 	motors[0] = (motor_struct_t){
 	    .max_speed = 10000,
@@ -300,7 +300,7 @@ int main(void) {
 		.direction_plus = 1,
 		.direction_minus = 0,
 	    .direction_pin = GPIO_PIN_3,
-	    .direction_port = GPIOE,//D8
+	    .direction_port = GPIOG,//D2
 	    .timer = &htim1,
 	    .timer_channel = TIM_CHANNEL_1,
 		.frequency = 500,
@@ -312,9 +312,9 @@ int main(void) {
 		.running = false,
 	    .reset_requested = false,
 	    .reset_completed = false,
-	    .end_switch1_pin = GPIO_PIN_3,//A0
+	    .end_switch1_pin = GPIO_PIN_3,//D8
 	    .end_switch1_port = GPIOE,
-	    .end_switch2_pin = GPIO_PIN_15,//A0
+	    .end_switch2_pin = GPIO_PIN_15,//D9
 	    .end_switch2_port = GPIOH,
 		.unit_conversion=100 //steps per mm
 	};
@@ -337,9 +337,9 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch1_pin = GPIO_PIN_4,//A1,8
+		.end_switch1_pin = GPIO_PIN_4,//D10
 		.end_switch1_port = GPIOB,
-	    .end_switch2_pin = GPIO_PIN_15,//A0
+	    .end_switch2_pin = GPIO_PIN_15,//D11
 	    .end_switch2_port = GPIOB,
 		.unit_conversion=100 //steps per deg
 	};
@@ -362,9 +362,9 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch1_pin = GPIO_PIN_2,//A2,0
+		.end_switch1_pin = GPIO_PIN_2,//D12
 		.end_switch1_port = GPIOI,
-		.end_switch2_pin = GPIO_PIN_3,//A2,0
+		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
 		.unit_conversion=100 //steps per mm
 	};
@@ -389,14 +389,28 @@ int main(void) {
 	HAL_TIM_Base_Start_IT(motors[0].timer);
 	HAL_TIM_Base_Start_IT(motors[1].timer);
 	HAL_TIM_Base_Start_IT(motors[2].timer);
-	
+
 	stop_all_motors();
-	
-	reset_motors();
-	
+
+	//reset_motors();
+
+	_Bool values[6]={0,0,0,0,0,0};
+
 	while (1) {
 		/* USER CODE END WHILE */
 
+		/*
+		for (uint8_t neki=0;neki<num_of_motors;neki++)
+		{
+			values[neki*2+0]=read_switch1(neki);
+			values[neki*2+1]=read_switch2(neki);
+			HAL_GPIO_WritePin(motors[neki].direction_port,motors[neki].direction_pin,GPIO_PIN_SET);
+		}
+		stall(5);
+		*/
+
+		//za test motorjev:
+		run_motor(0);
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1622,9 +1636,9 @@ void stall(uint32_t duration_us)
   */
 void stop_all_motors(void)
 {
-	stop_motor(motors[0].timer,motors[0].timer_channel);
-	stop_motor(motors[1].timer,motors[1].timer_channel);
-	stop_motor(motors[2].timer,motors[2].timer_channel);
+	stop_motor(0);
+	stop_motor(1);
+	stop_motor(2);
 }
 
 /**
@@ -1654,74 +1668,74 @@ void reset_motors(void)
 	
 	for (uint8_t motor_num=0;motor_num<(num_of_motors-1);motor_num++)
 	{
-		
+
 		motors[motor_num].reset_requested=true; //da ignorira pogoje za pozicijo
 		motors[motor_num].reset_completed=false;
-		
+
 		direction_change(motor_num, 0);
 		motors[motor_num].current_speed=10; // rot/s - ni še; raje frekvenco!
-		
-		if motors[motor_num].running==false
+
+		if (motors[motor_num].running==false)
 		{
 			run_motor(motor_num);
 		}
-		
+
 		if(motors[motor_num].reset_requested)
 		{
-			while!(read_switch1(motor_num) || read_switch2(motor_num))
+			while(!(read_switch1(motor_num) || read_switch2(motor_num)))
 			{} //trenutno je vseeno kateri switch zadane
-			
+
 			stop_motor(motor_num);
-			
+
 			motors[motor_num].position=0; //mogoče bi lahko offsetal start position da ne udari v limit switch
-			
+
 			motors[motor_num].direction_minus=motors[motor_num].direction;
-			
+
 			direction_change(motor_num,!motors[motor_num].direction);
-			
+
 			motors[motor_num].direction_plus=motors[motor_num].direction;
-			
+
 			motors[motor_num].reset_completed=true; //da lahko zdaj spremlja korake
-			
+
 			run_motor(motor_num);
-			
-			while!(read_switch1(motor_num) || read_switch2(motor_num))
+
+			while(!(read_switch1(motor_num) || read_switch2(motor_num)))
 			{}
-			
+
 			motors[motor_num].max_position=motors[motor_num].position;
 			motors[motor_num].starting_position=motors[motor_num].max_position/2;
-			
+
 			motors[motor_num].reset_completed=false;
 			motors[motor_num].reset_requested=false;
 		}
-		
+
 		stop_motor(motor_num);
-		
-		move_to_starting(motor_num);
+
+		move_to_starting_position(motor_num);
 	}
 }
 
 /**
   * @brief  Manipulates the chosen motor to move to the struct
 			defined starting position.
-  * @param  motor_number: number of the motor (starting with index 0), 
+  * @param  motor_number: number of the motor (starting with index 0),
 			whose second limit switch should be read.
   * @retval None
   */
-void move_to_starting position(uint8_t motor_number)
+void move_to_starting_position(uint8_t motor_number)
 {
-	if motors[motor_number].position>motors[motor_number].starting_position
+	if (motors[motor_number].position>motors[motor_number].starting_position)
 		{
 			direction_change(motor_number,motors[motor_number].direction_minus);
 		}
-		else if motors[motor_number].position<motors[motor_number].starting_position
+		else if (motors[motor_number].position<motors[motor_number].starting_position)
 		{
-			direction_change(motor_number,motors[motor_number].direction_plus;
+			direction_change(motor_number,motors[motor_number].direction_plus);
 		}
 	
 	while(motors[motor_number].position!=motors[motor_number].starting_position)
 	{
-		if motors[motor_number].running==false
+		if (motors[motor_number].running==false)
 		{
 			run_motor(motor_number);
 		}
@@ -1754,13 +1768,13 @@ void update_global_coordinates(void)
 
 	//drugi index je hipotenuza (izteg)
 	effector_x=motors[0].position/motors[0].unit_conversion+motors[2].position/motors[2].unit_conversion*cos(motors[1].position/motors[1].unit_conversion);
-	effector_y=motors[2]*position/motors[2].unit_conversion*sin(motors[1].position/motors[1].unit_conversion);
+	effector_y=(motors[2].position)/motors[2].unit_conversion*sin(motors[1].position/motors[1].unit_conversion);
 	effector_orientation=0;
 }
 
 /**
   * @brief  Reads the state of the first limit switch, of the chosen motor.
-  * @param  motor_number: number of the motor (starting with index 0), 
+  * @param  motor_number: number of the motor (starting with index 0),
 			whose first limit switch should be read.
   * @retval The state of the first limit switch.
   */
@@ -1771,7 +1785,7 @@ _Bool read_switch1(uint8_t motor_number)
 
 /**
   * @brief  Reads the state of the second limit switch, of the chosen motor.
-  * @param  motor_number: number of the motor (starting with index 0), 
+  * @param  motor_number: number of the motor (starting with index 0),
 			whose second limit switch should be read.
   * @retval The state of the second limit switch.
   */
@@ -1790,8 +1804,8 @@ void run_motor(uint8_t motor_number)
     // Stop PWM first
     HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
 	motors[motor_number].running=false;
-	
-    frequency_hz=motors[motor_number].frequency;
+
+	uint32_t frequency_hz=motors[motor_number].frequency;
 	frequency_hz=frequency_hz/2;
     // Calculate prescaler and period based on your clock
     uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // For TIM2-TIM7
@@ -1838,9 +1852,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM1)
     {
-		if (((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true
+		if ((((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true)
 		{
-			stop_timer(motors[0].timer, motors[0].timer_channel);
+			stop_motor(0);
 			motors[0].running=false;
 		}
 		else if (motors[0].running=true && motors[0].direction==motors[0].direction_plus && (motors[0].reset_completed || motors[0].position<motors[0].max_position))
@@ -1854,9 +1868,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	}
     else if (htim->Instance == TIM15)
     {
-		if (((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true
+		if ((((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true)
 		{
-			stop_timer(motors[1].timer, motors[1].timer_channel);
+			stop_motor(1);
 			motors[1].running=false;
 		}
 		else if (motors[1].running=true && motors[1].direction==motors[1].direction_plus && (motors[1].reset_completed || motors[1].position<motors[1].max_position))
@@ -1870,9 +1884,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
     else if (htim->Instance == TIM3)
     {
-		if (((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true
+		if ((((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true)
 		{
-			stop_timer(motors[2].timer, motors[2].timer_channel);
+			stop_motor(2);
 			motors[2].running=false;
 		}
 		else if (motors[2].running=true && motors[2].direction==motors[2].direction_plus && (motors[2].reset_completed || motors[2].position<motors[2].max_position))
