@@ -293,10 +293,13 @@ int main(void) {
 	MX_TIM3_Init();
 
 	/* USER CODE BEGIN 2 */
+	// freq=100000 -> hitro
+	// steps=40000 -> en obrat
+
 	motors[0] = (motor_struct_t){
 	    .max_speed = 10000,
 	    .current_speed = 0,
-	    .direction = 0,
+	    .direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
 	    .direction_pin = GPIO_PIN_3,
@@ -304,8 +307,8 @@ int main(void) {
 	    .timer = &htim1,
 	    .timer_channel = TIM_CHANNEL_1,
 		.frequency = 500,
-	    .motor_pin = GPIO_PIN_6,//D6
-	    .motor_port = GPIOE,
+	    .motor_pin = GPIO_PIN_8,//D5
+	    .motor_port = GPIOA,
 	    .max_position = 10000,
 		.starting_position=5000,
 	    .position = 0,
@@ -321,17 +324,17 @@ int main(void) {
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
-		.direction = 0,
+		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
 		.direction_pin = GPIO_PIN_8,
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 500,
-		.motor_pin = GPIO_PIN_8,//D5
-		.motor_port = GPIOA,
-		.max_position = 10000,
+		.frequency = 100000,
+		.motor_pin = GPIO_PIN_6,//D6
+		.motor_port = GPIOE,
+		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
 		.running = false,
@@ -346,7 +349,7 @@ int main(void) {
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
-		.direction = 0,
+		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
 		.direction_pin = GPIO_PIN_1,
@@ -380,6 +383,7 @@ int main(void) {
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 
+	/*
 	//Start the PWMs
 	HAL_TIM_PWM_Start(motors[0].timer, motors[0].timer_channel);
 	HAL_TIM_PWM_Start(motors[1].timer, motors[1].timer_channel);
@@ -389,12 +393,16 @@ int main(void) {
 	HAL_TIM_Base_Start_IT(motors[0].timer);
 	HAL_TIM_Base_Start_IT(motors[1].timer);
 	HAL_TIM_Base_Start_IT(motors[2].timer);
-
+*/
 	stop_all_motors();
 
 	//reset_motors();
 
 	_Bool values[6]={0,0,0,0,0,0};
+
+	//run_motor(0);
+	run_motor(1);
+	//run_motor(2);
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -406,11 +414,18 @@ int main(void) {
 			values[neki*2+1]=read_switch2(neki);
 			HAL_GPIO_WritePin(motors[neki].direction_port,motors[neki].direction_pin,GPIO_PIN_SET);
 		}
-		stall(5);
 		*/
+		//stall(5);
+		if (motors[1].position==40000)
+				{
+					stop_motor(1);
+					HAL_Delay(1000);
+					motors[1].position=0;
+					run_motor(1);
+				}
 
 		//za test motorjev:
-		run_motor(0);
+
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1665,7 +1680,7 @@ void reset_motors(void)
 	//motor 3 - J3 (trapezoidal thread axle)
 	//motor 2 - J2 (snail)
 	//motor 1 - J1 (pulley)
-	
+
 	for (uint8_t motor_num=0;motor_num<(num_of_motors-1);motor_num++)
 	{
 
@@ -1732,7 +1747,7 @@ void move_to_starting_position(uint8_t motor_number)
 		{
 			direction_change(motor_number,motors[motor_number].direction_plus);
 		}
-	
+
 	while(motors[motor_number].position!=motors[motor_number].starting_position)
 	{
 		if (motors[motor_number].running==false)
@@ -1740,7 +1755,7 @@ void move_to_starting_position(uint8_t motor_number)
 			run_motor(motor_number);
 		}
 	}
-	
+
 }
 
 /**
@@ -1754,7 +1769,7 @@ void move_to_starting_position(uint8_t motor_number)
   */
 void move_effector(uint32_t x, uint32_t y, uint32_t orientation)
 {
-	
+
 }
 
 /**
@@ -1816,6 +1831,7 @@ void run_motor(uint8_t motor_number)
 
     uint32_t prescaler = (timer_clock / (frequency_hz * 1000)) - 1;
     uint32_t period = 999; // Keeps same resolution
+    //uint32_t period = 399;
 
     // Reconfigure timer
     TIM_ClockConfigTypeDef sClockSourceConfig = {0};
@@ -1828,6 +1844,8 @@ void run_motor(uint8_t motor_number)
     // Restart PWM
     HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
 	motors[motor_number].running=true;
+
+	HAL_TIM_Base_Start_IT(motors[motor_number].timer);
 }
 
 /**
@@ -1838,6 +1856,8 @@ void run_motor(uint8_t motor_number)
   */
 void stop_motor(uint8_t motor_number)
 {
+	HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
+	HAL_TIM_Base_Stop(motors[motor_number].timer);
 	HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
 	motors[motor_number].running=false;
 }
@@ -1852,6 +1872,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM1)
     {
+    	//if (false)
 		if ((((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true)
 		{
 			stop_motor(0);
