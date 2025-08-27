@@ -1,6 +1,10 @@
 useful link:
 https://github.com/LAPSyLAB/STM32H7_Discovery_VIN_Projects/blob/main/STM32H750B-DK_VIN_Basic/Core/Src/main.c
 
+# 27.8.2025:
+- treba poštimat TIM12_CH2 (manjka IRQn)
+- treba stestirat TIM12 z A4988
+
 # 15.8.2025: 
 - timer interupti (PWM) in inkrementacija pozicije deluje
 - motor struct naštiman
