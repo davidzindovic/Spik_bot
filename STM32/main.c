@@ -512,6 +512,7 @@ void SystemClock_Config(void) {
 	__HAL_RCC_TIM1_CLK_ENABLE();
 	__HAL_RCC_TIM3_CLK_ENABLE();
 	__HAL_RCC_TIM15_CLK_ENABLE();
+	__HAL_RCC_TIM12_CLK_ENABLE();
 
 	//__HAL_RCC_ADC123_CLK_ENABLE();
 	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
@@ -1058,8 +1059,8 @@ static void MX_TIM12_Init(void)
   }
 
   htim12.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
-  //HAL_NVIC_SetPriority(TIM12_IRQn, 5, 0);
-  //HAL_NVIC_EnableIRQ(TIM12_IRQn);
+  HAL_NVIC_SetPriority(TIM8_BRK_TIM12_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(TIM8_BRK_TIM12_IRQn);
 
   HAL_TIM_MspPostInit(&htim12);
 }
@@ -2062,7 +2063,7 @@ void TIM3_IRQHandler(void)
   * @param  None
   * @retval None
   */
-void TIM12_IRQHandler(void)
+void TIM8_BRK_TIM12_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim12);
 }
