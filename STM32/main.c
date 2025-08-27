@@ -126,6 +126,7 @@ SAI_HandleTypeDef hsai_BlockB2;
 TIM_HandleTypeDef htim1;  // Example timer handles - adjust based on which timers you want to use
 TIM_HandleTypeDef htim15;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim12;
 
 MMC_HandleTypeDef hmmc1;
 
@@ -156,8 +157,9 @@ uint8_t time_str2[40];
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim12;
 
-motor_struct_t motors[3]; // Declaration only
+motor_struct_t motors[4]; // Declaration only
 
 /* USER CODE END PV */
 
@@ -187,6 +189,7 @@ void StartDefaultTask(void *argument);
 static void MX_TIM1_Init(void);
 static void MX_TIM15_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM12_Init(void);
 /* USER CODE BEGIN PFP */
 void stall(uint32_t duration_us);
 void stop_all_motors(void);
@@ -203,6 +206,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void TIM1_UP_IRQHandler(void);
 void TIM15_UP_IRQHandler(void);
 void TIM3_UP_IRQHandler(void);
+void TIM12_UP_IRQHandler(void);
 //uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
 /* USER CODE END PFP */
 
@@ -291,6 +295,7 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
+	MX_TIM12_Init();
 
 	/* USER CODE BEGIN 2 */
 	// freq=100000 -> hitro
@@ -371,6 +376,33 @@ int main(void) {
 		.end_switch2_port = GPIOD,
 		.unit_conversion=100 //steps per mm
 	};
+	motors[3] = (motor_struct_t){
+		.max_speed = 10000,
+		.current_speed = 0,
+		.direction = 1,
+		.direction_plus = 1,
+		.direction_minus = 0,
+		.direction_pin = GPIO_PIN_15,
+		.direction_port = GPIOB,//D11
+		.timer = &htim12,
+		.timer_channel = TIM_CHANNEL_2,
+		.frequency = 500,
+		.motor_pin = GPIO_PIN_6,//D3
+		.motor_port = GPIOA,
+		.max_position = 10000,
+		.starting_position=5000,
+		.position = 0,
+		.running = false,
+		//NE UPORABLJAJ:
+		.reset_requested = false,
+		.reset_completed = false,
+		.end_switch1_pin = GPIO_PIN_2,//D12
+		.end_switch1_port = GPIOI,
+		.end_switch2_pin = GPIO_PIN_3,//D13
+		.end_switch2_port = GPIOD,
+		//konc prepovedi
+		.unit_conversion=100 //steps per mm
+	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
 	HAL_UART_Receive_IT(&huart3, rx_buff, 10);
 
@@ -401,7 +433,7 @@ int main(void) {
 	_Bool values[6]={0,0,0,0,0,0};
 
 	//run_motor(0);
-	run_motor(1);
+	run_motor(3);
 	//run_motor(2);
 
 	while (1) {
@@ -416,12 +448,12 @@ int main(void) {
 		}
 		*/
 		//stall(5);
-		if (motors[1].position==40000)
+		if (motors[3].position==40000)
 				{
-					stop_motor(1);
+					stop_motor(3);
 					HAL_Delay(1000);
-					motors[1].position=0;
-					run_motor(1);
+					motors[3].position=0;
+					run_motor(3);
 				}
 
 		//za test motorjev:
@@ -985,7 +1017,52 @@ static void MX_TIM3_Init(void)
   HAL_TIM_MspPostInit(&htim3);
 }
 
+static void MX_TIM12_Init(void)
+{
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
 
+  htim12.Instance = TIM12;
+  htim12.Init.Prescaler = 49;
+  htim12.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim12.Init.Period = 999;
+  htim12.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim12.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim12) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim12, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim12) != HAL_OK)
+  {
+	  Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim12, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 500;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim12, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  htim12.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
+  //HAL_NVIC_SetPriority(TIM12_IRQn, 5, 0);
+  //HAL_NVIC_EnableIRQ(TIM12_IRQn);
+
+  HAL_TIM_MspPostInit(&htim12);
+}
 
 /**
  * @brief LTDC Initialization Function
@@ -1452,12 +1529,6 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = GPIO_PIN_15;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
-	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
     GPIO_InitStruct.Pin = GPIO_PIN_2;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
 	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
@@ -1482,14 +1553,6 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
-
-	/*Configure GPIO pin : PA8 */
-	GPIO_InitStruct.Pin = GPIO_PIN_8;
-	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : audio_Int_Pin */
 	GPIO_InitStruct.Pin = audio_Int_Pin;
@@ -1524,6 +1587,8 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(OTG_FS2_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
+	//timers:
+
 	/*Configure GPIO pin : PA6 */
 	GPIO_InitStruct.Pin = GPIO_PIN_6;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -1532,14 +1597,30 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Alternate = GPIO_AF9_TIM13;//tim13
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+	/*Configure GPIO pin : PA8 */
+	GPIO_InitStruct.Pin = GPIO_PIN_8;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	GPIO_InitStruct.Alternate = GPIO_AF1_TIM1;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
 	/*Configure GPIO pin : PE6 */
-	// Add this to MX_GPIO_Init()
 	GPIO_InitStruct.Pin = GPIO_PIN_6;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	GPIO_InitStruct.Alternate = GPIO_AF4_TIM15;
 	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+	GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	GPIO_InitStruct.Alternate = GPIO_AF2_TIM12;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	//konc timers
 
 	/*Configure GPIO pins : MII_TX_ER_nINT_Pin LCD_RST_Pin */
 	GPIO_InitStruct.Pin = MII_TX_ER_nINT_Pin | LCD_RST_Pin;
@@ -1629,6 +1710,17 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
     GPIO_InitStruct.Alternate = GPIO_AF4_TIM15;  // TIM15_CH2 uses AF4
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
   }
+  else if(timHandle->Instance==TIM12)
+  {
+    /* TIM12 CH2 on PB15 */
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM12;  // TIM12_CH2 uses AF2
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  }
 }
 
 /**
@@ -1654,6 +1746,7 @@ void stop_all_motors(void)
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
+	stop_motor(3);
 }
 
 /**
@@ -1677,6 +1770,7 @@ void direction_change(uint8_t motor_number, _Bool direction)
   */
 void reset_motors(void)
 {
+	//motor 4 - pumpa (preskočil - nima reset)
 	//motor 3 - J3 (trapezoidal thread axle)
 	//motor 2 - J2 (snail)
 	//motor 1 - J1 (pulley)
@@ -1824,7 +1918,7 @@ void run_motor(uint8_t motor_number)
 	frequency_hz=frequency_hz/2;
     // Calculate prescaler and period based on your clock
     uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // For TIM2-TIM7
-    if(motors[motor_number].timer->Instance == TIM1 || motors[motor_number].timer->Instance == TIM8 ||
+    if(motors[motor_number].timer->Instance == TIM1 || motors[motor_number].timer->Instance == TIM8 || motors[motor_number].timer->Instance == TIM12 ||
        motors[motor_number].timer->Instance == TIM15 || motors[motor_number].timer->Instance == TIM16 || motors[motor_number].timer->Instance == TIM17) {
         timer_clock = HAL_RCC_GetPCLK2Freq();
     }
@@ -1919,6 +2013,18 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			motors[2].position -= 1;
 		}
     }
+    else if (htim->Instance == TIM12)
+    {
+
+		if (motors[3].running=true && motors[3].direction==motors[3].direction_plus)
+		{
+			motors[3].position += 1;
+		}
+		else if (motors[3].running=true && motors[3].direction==motors[3].direction_minus)
+		{
+			motors[3].position -= 1;
+		}
+    }
 }
 
 /**
@@ -1949,6 +2055,16 @@ void TIM15_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim3);
+}
+
+/**
+  * @brief  Makes the timer IRQ handler readable for the specific timer.
+  * @param  None
+  * @retval None
+  */
+void TIM12_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&htim12);
 }
 
 
