@@ -69,6 +69,8 @@ typedef struct {
 
 	uint32_t unit_conversion; //number of steps per mm or deg
 
+	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
+
 }motor_struct_t;
 /* USER CODE END PTD */
 
@@ -324,7 +326,8 @@ int main(void) {
 	    .end_switch1_port = GPIOE,
 	    .end_switch2_pin = GPIO_PIN_15,//D9
 	    .end_switch2_port = GPIOH,
-		.unit_conversion=100 //steps per mm
+		.unit_conversion=100, //steps per mm
+		.num_steps_per_turn=0
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
@@ -349,7 +352,8 @@ int main(void) {
 		.end_switch1_port = GPIOB,
 	    .end_switch2_pin = GPIO_PIN_15,//D11
 	    .end_switch2_port = GPIOB,
-		.unit_conversion=100 //steps per deg
+		.unit_conversion=100, //steps per deg
+		.num_steps_per_turn=0
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
@@ -374,7 +378,8 @@ int main(void) {
 		.end_switch1_port = GPIOI,
 		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
-		.unit_conversion=100 //steps per mm
+		.unit_conversion=100, //steps per mm
+		.num_steps_per_turn=0
 	};
 	motors[3] = (motor_struct_t){
 		.max_speed = 10000,
@@ -401,7 +406,8 @@ int main(void) {
 		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
 		//konc prepovedi
-		.unit_conversion=100 //steps per mm
+		.unit_conversion=100, //steps per mm
+		.num_steps_per_turn=200
 	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
 	HAL_UART_Receive_IT(&huart3, rx_buff, 10);
@@ -448,7 +454,8 @@ int main(void) {
 		}
 		*/
 		//stall(5);
-		if (motors[3].position==40000)
+
+		if (motors[3].position==motors[3].num_steps_per_turn)
 				{
 					stop_motor(3);
 					HAL_Delay(1000);
