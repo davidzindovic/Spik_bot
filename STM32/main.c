@@ -200,7 +200,7 @@ void stop_all_motors(void);
 void direction_change(uint8_t motor_number, _Bool direction);
 void reset_motors(void);
 void move_to_starting_position(uint8_t motor_number);
-void move_effector(uint32_t x, uint32_t y, uint32_t orientation);
+_Bool move_effector(uint32_t x, uint32_t y, uint32_t orientation);
 void update_global_coordinates(void);
 _Bool read_switch1(uint8_t motor_number);
 _Bool read_switch2(uint8_t motor_number);
@@ -211,6 +211,8 @@ void TIM1_UP_IRQHandler(void);
 void TIM15_UP_IRQHandler(void);
 void TIM3_UP_IRQHandler(void);
 void TIM12_UP_IRQHandler(void);
+void Test_USART3(void);
+void USART3_IRQHandler(void);
 //uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
 /* USER CODE END PFP */
 
@@ -300,6 +302,13 @@ int main(void) {
 	/* Initialize all configured peripherals */
 
 	MX_USART3_UART_Init(); //inicializiramo UART
+
+    // Configure USART3 interrupts
+    HAL_NVIC_SetPriority(USART3_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(USART3_IRQn);
+
+    // Start receiving data via interrupt
+    HAL_UART_Receive_IT(&huart3, rx_buff, 10);
 
 	//GPIO initialization
 	MX_GPIO_Init();
@@ -470,6 +479,7 @@ int main(void) {
 		*/
 		//stall(5);
 
+		/*
 		if (motors[3].position==motors[3].num_steps_per_turn)
 				{
 					stop_motor(3);
@@ -477,8 +487,9 @@ int main(void) {
 					motors[3].position=0;
 					run_motor(3);
 				}
-
-		//za test motorjev:
+		*/
+		Test_USART3();
+		HAL_Delay(1000);
 
 
 		/* USER CODE BEGIN 3 */
@@ -535,6 +546,7 @@ void SystemClock_Config(void) {
 	__HAL_RCC_TIM3_CLK_ENABLE();
 	__HAL_RCC_TIM15_CLK_ENABLE();
 	__HAL_RCC_TIM12_CLK_ENABLE();
+	__HAL_RCC_USART3_CLK_ENABLE();
 
 	//__HAL_RCC_ADC123_CLK_ENABLE();
 	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
@@ -1645,6 +1657,16 @@ static void MX_GPIO_Init(void) {
 
 	//konc timers
 
+	//usart:
+    /* Configure USART3 TX (PB10) and RX (PB11) pins */
+    GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_11;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF7_USART3;  // USART3 uses AF7
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    //konc usart
+
 	/*Configure GPIO pins : MII_TX_ER_nINT_Pin LCD_RST_Pin */
 	GPIO_InitStruct.Pin = MII_TX_ER_nINT_Pin | LCD_RST_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -1693,8 +1715,16 @@ static void MX_GPIO_Init(void) {
 }
 
 /* USER CODE BEGIN 4 */
+//void USART3_IRQHandler(void) {
+//    HAL_UART_IRQHandler(&huart3);
+//}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-	HAL_UART_Receive_IT(&huart3, rx_buff, 10); //You need to toggle a breakpoint on this line!
+    if (huart->Instance == USART3) {
+        // Process received data in rx_buff
+        // Then restart reception
+        HAL_UART_Receive_IT(&huart3, rx_buff, 10);
+    }
 }
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
@@ -1887,7 +1917,7 @@ void move_to_starting_position(uint8_t motor_number)
 bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orientation)
 {
 	stop_all_motors();
-	
+
 	//ce neke tocke ni mozno doseci pod doloceno orientacijo
 	if (target_y<(motors[2].offset*sin(target_orientation))) //DOPOLNI!
 	{	//PRENIZKO ZA TO ORIENTACIJO
@@ -1898,7 +1928,7 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 		//OUT OF BOUNDS
 		return false;
 	}
-	
+
 	if(target_orientation!=effector_orientation)
 	{
 
@@ -1919,8 +1949,8 @@ void update_global_coordinates(void)
 		min_effector_x=1;
 	if (max_effector_x==0)
 		max_effector_x=motors[0].position/motors[0].unit_conversion;
-	
-		
+
+
 	//drugi index je hipotenuza (izteg); pri hipotenuzi je treba upostevat default dolzino
 	effector_x=motors[0].position/motors[0].unit_conversion+(motors[2].position/motors[2].unit_conversion+motors[2].offset)*cos(motors[1].position/motors[1].unit_conversion);
 	effector_y=(motors[2].position/motors[2].unit_conversion+motors[2].offset)*sin(motors[1].position/motors[1].unit_conversion);
@@ -2185,6 +2215,31 @@ void TestADCs() {
     ADC2->SMPR1 = 7 << (3*0);
     ADC3->SMPR1 = 7 << (3*0);
 }
+
+void Test_USART3(void) {
+    // Simple test pattern: send alternating 0x55 and 0xAA
+    uint8_t test_pattern[] = {0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA};
+
+    printf("Testing USART3 TX...\n");
+
+    // Direct register manipulation test
+    USART3->CR1 |= USART_CR1_TE;  // Enable transmitter
+    USART3->CR1 |= USART_CR1_UE;  // Enable USART
+
+    for(int i = 0; i < 6; i++) {
+    //    while(!(USART3->ISR & USART_ISR_TXFE));  // Wait for TX empty
+        USART3->TDR = test_pattern[i];
+    }
+
+    while(!(USART3->ISR & USART_ISR_TC));  // Wait for transmission complete
+
+    printf("Direct register test completed\n");
+
+    // HAL test
+    HAL_UART_Transmit(&huart3, test_pattern, 6, 1000);
+    printf("HAL transmit test completed\n");
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -2216,5 +2271,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
