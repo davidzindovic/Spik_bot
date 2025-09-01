@@ -1889,8 +1889,13 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 	stop_all_motors();
 	
 	//ce neke tocke ni mozno doseci pod doloceno orientacijo
-	if (target_y<)
+	if (target_y<(motors[2].offset*sin(target_orientation))) //DOPOLNI!
+	{	//PRENIZKO ZA TO ORIENTACIJO
+		return false;
+	}
+	if (target_y>max_effector_y || target_x>max_effector_x)
 	{
+		//OUT OF BOUNDS
 		return false;
 	}
 	
@@ -1918,7 +1923,7 @@ void update_global_coordinates(void)
 		
 	//drugi index je hipotenuza (izteg); pri hipotenuzi je treba upostevat default dolzino
 	effector_x=motors[0].position/motors[0].unit_conversion+(motors[2].position/motors[2].unit_conversion+motors[2].offset)*cos(motors[1].position/motors[1].unit_conversion);
-	effector_y=(motors[2].position)/motors[2].unit_conversion*sin(motors[1].position/motors[1].unit_conversion);
+	effector_y=(motors[2].position/motors[2].unit_conversion+motors[2].offset)*sin(motors[1].position/motors[1].unit_conversion);
 	effector_orientation=motors[1].position/motors[1].unit_conversion;
 }
 
@@ -2211,4 +2216,5 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
