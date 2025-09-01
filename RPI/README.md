@@ -1,3 +1,7 @@
+# ostal sem na:
+Install RealSense SDK pyrealsense2 Python bindings for librealsense:
+(v directory: ~/librealsense/build)
+
 # realsense installation:
 https://github.com/datasith/Ai_Demos_RPi/wiki/Raspberry-Pi-4-and-Intel-RealSense-D435
 
