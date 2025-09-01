@@ -32,9 +32,10 @@ sudo nano /boot/firmware/config.txt
 Add these lines:
 text
 
-# Enable primary UART
+Enable primary UART
 enable_uart=1
-# Disable Bluetooth to free up ttyAMA0 (optional)
+
+Disable Bluetooth to free up ttyAMA0 (optional)
 dtoverlay=disable-bt
 
 bash
