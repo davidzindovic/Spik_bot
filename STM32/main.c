@@ -71,6 +71,8 @@ typedef struct {
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
 
+	uint32_t offset; // offset due to mechanical structure (spindle joint)
+
 }motor_struct_t;
 /* USER CODE END PTD */
 
@@ -230,6 +232,15 @@ uint32_t effector_x=0;   //end effector x coordinate [mm]
 uint32_t effector_y=0;   //end effector y coordinate [mm]
 uint32_t effector_orientation=0;   //end effector orientation [deg]
 
+uint32_t min_effector_y=0;
+uint32_t max_effector_y=0;
+
+uint32_t min_effector_x=0;
+uint32_t max_effector_x=0;
+
+uint32_t min_effector_orientation=0;
+uint32_t max_effector_orientation=0;
+
 /* USER CODE END 0 */
 
 /**
@@ -327,7 +338,8 @@ int main(void) {
 	    .end_switch2_pin = GPIO_PIN_15,//D9
 	    .end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=0
+		.num_steps_per_turn=0,
+		.offset=0
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
@@ -353,7 +365,8 @@ int main(void) {
 	    .end_switch2_pin = GPIO_PIN_15,//D11
 	    .end_switch2_port = GPIOB,
 		.unit_conversion=100, //steps per deg
-		.num_steps_per_turn=0
+		.num_steps_per_turn=0,
+		.offset=0
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
@@ -379,7 +392,8 @@ int main(void) {
 		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=0
+		.num_steps_per_turn=0,
+		.offset=55 //popravi!
 	};
 	motors[3] = (motor_struct_t){
 		.max_speed = 10000,
@@ -407,7 +421,8 @@ int main(void) {
 		.end_switch2_port = GPIOD,
 		//konc prepovedi
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=200
+		.num_steps_per_turn=200,
+		.offset=0
 	};
 	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
 	HAL_UART_Receive_IT(&huart3, rx_buff, 10);
@@ -1869,8 +1884,20 @@ void move_to_starting_position(uint8_t motor_number)
 			parralel to the pulley rail.s
   * @retval None
   */
-void move_effector(uint32_t x, uint32_t y, uint32_t orientation)
+bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orientation)
 {
+	stop_all_motors();
+	
+	//ce neke tocke ni mozno doseci pod doloceno orientacijo
+	if (target_y<)
+	{
+		return false;
+	}
+	
+	if(target_orientation!=effector_orientation)
+	{
+
+	}
 
 }
 
@@ -1883,10 +1910,16 @@ void move_effector(uint32_t x, uint32_t y, uint32_t orientation)
 void update_global_coordinates(void)
 {		//PREVERI DELJENJE CELIH ŠTEVIL
 
-	//drugi index je hipotenuza (izteg)
-	effector_x=motors[0].position/motors[0].unit_conversion+motors[2].position/motors[2].unit_conversion*cos(motors[1].position/motors[1].unit_conversion);
+	if (min_effector_x==0) //določanje skrajno leve točke, opcija je da bi bilo bolj levo od motorja
+		min_effector_x=1;
+	if (max_effector_x==0)
+		max_effector_x=motors[0].position/motors[0].unit_conversion;
+	
+		
+	//drugi index je hipotenuza (izteg); pri hipotenuzi je treba upostevat default dolzino
+	effector_x=motors[0].position/motors[0].unit_conversion+(motors[2].position/motors[2].unit_conversion+motors[2].offset)*cos(motors[1].position/motors[1].unit_conversion);
 	effector_y=(motors[2].position)/motors[2].unit_conversion*sin(motors[1].position/motors[1].unit_conversion);
-	effector_orientation=0;
+	effector_orientation=motors[1].position/motors[1].unit_conversion;
 }
 
 /**
@@ -2178,3 +2211,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
