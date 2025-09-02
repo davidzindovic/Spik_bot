@@ -1,6 +1,12 @@
 useful link:
 https://github.com/LAPSyLAB/STM32H7_Discovery_VIN_Projects/blob/main/STM32H750B-DK_VIN_Basic/Core/Src/main.c
 
+# 02.09.2025:
+- del inštalacije librealsense na RPI narejen
+- delno narejena kinematika na STM32
+- dodana funkcija za pumpanje tekočine
+- v razmislek vzet merjenje prodora v deblo
+
 # 27.8.2025:
 - treba poštimat TIM12_CH2 (manjka IRQn)
 - treba stestirat TIM12 z A4988
