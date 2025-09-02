@@ -1919,7 +1919,7 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 	stop_all_motors();
 
 	//ce neke tocke ni mozno doseci pod doloceno orientacijo
-	if (target_y<(motors[2].offset*sin(target_orientation))) //DOPOLNI!
+	if (target_y<(motors[2].offset*sin(180-target_orientation))) //DOPOLNI!
 	{	//PRENIZKO ZA TO ORIENTACIJO
 		return false;
 	}
@@ -1931,7 +1931,24 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 
 	if(target_orientation!=effector_orientation)
 	{
+		//x:
+		if (target_x<(motors[0].offset*cos(180-target_orientation)))
+		{
+			motors[0].direction=motors[0].direction_minus;
+			start_motor(0);
+		}
+		else if (target_x>(motors[0].offset*cos(180-target_orientation)))
+		{
+			motors[0].direction=motors[0].direction_plus;
+			start_motor(0);
+		}
 
+		
+		//y:
+		if (target_y<(motors[2].offset*sin(180-target_orientation)))
+		{
+			
+		}
 	}
 
 }
@@ -2271,4 +2288,5 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
