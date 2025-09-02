@@ -240,8 +240,15 @@ uint32_t max_effector_y=0;
 uint32_t min_effector_x=0;
 uint32_t max_effector_x=0;
 
-uint32_t min_effector_orientation=0;
-uint32_t max_effector_orientation=0;
+uint32_t min_effector_orientation=1;
+uint32_t max_effector_orientation=179;
+
+uint32_t J1_offset_mm=0;
+uint32_t J2_offset_deg=0;
+uint32_t J3_offset_mm=0;
+uint32_t J3_offset_base=30; //popravi
+uint32_t J4_ammount_of_liquid=0;
+uint32_t J4_volume_per_turn=0;
 
 /* USER CODE END 0 */
 
@@ -347,8 +354,7 @@ int main(void) {
 	    .end_switch2_pin = GPIO_PIN_15,//D9
 	    .end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=0,
-		.offset=0
+		.num_steps_per_turn=0
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
@@ -374,8 +380,7 @@ int main(void) {
 	    .end_switch2_pin = GPIO_PIN_15,//D11
 	    .end_switch2_port = GPIOB,
 		.unit_conversion=100, //steps per deg
-		.num_steps_per_turn=0,
-		.offset=0
+		.num_steps_per_turn=0
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
@@ -401,8 +406,7 @@ int main(void) {
 		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=0,
-		.offset=55 //popravi!
+		.num_steps_per_turn=0
 	};
 	motors[3] = (motor_struct_t){
 		.max_speed = 10000,
@@ -430,11 +434,8 @@ int main(void) {
 		.end_switch2_port = GPIOD,
 		//konc prepovedi
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=200,
-		.offset=0
+		.num_steps_per_turn=200
 	};
-	//inicializiramo UART interrupt, rx_buff je dolg 10 znakov
-	HAL_UART_Receive_IT(&huart3, rx_buff, 10);
 
 	/* Configure LED1 */
 	BSP_LED_Init(LED1);
@@ -455,7 +456,7 @@ int main(void) {
 	HAL_TIM_Base_Start_IT(motors[0].timer);
 	HAL_TIM_Base_Start_IT(motors[1].timer);
 	HAL_TIM_Base_Start_IT(motors[2].timer);
-*/
+	*/
 	stop_all_motors();
 
 	//reset_motors();
@@ -1932,20 +1933,19 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 	if(target_orientation!=effector_orientation)
 	{
 		//x:
-		if (target_x<(motors[0].offset*cos(180-target_orientation)))
+		if (target_x<(J1_offset_mm+J3_offset_mm*cos(180-target_orientation)))
 		{
 			motors[0].direction=motors[0].direction_minus;
 			start_motor(0);
 		}
-		else if (target_x>(motors[0].offset*cos(180-target_orientation)))
+		else if (target_x>(J1_offset_mm+J3_offset_mm*cos(180-target_orientation)))
 		{
 			motors[0].direction=motors[0].direction_plus;
 			start_motor(0);
 		}
 
-		
 		//y:
-		if (target_y<(motors[2].offset*sin(180-target_orientation)))
+		if (target_y<(motors[2].offset*sin(180-J2_offset_deg)))
 		{
 			
 		}
@@ -2037,7 +2037,7 @@ void run_motor(uint8_t motor_number)
 
 /**
   * @brief  Stops the chosen motor.
-  * @param  filmotor_number: the number of the motor (starting with 0)
+  * @param  motor_number: the number of the motor (starting with 0)
 			that should be stopped.
   * @retval None
   */
@@ -2047,6 +2047,22 @@ void stop_motor(uint8_t motor_number)
 	HAL_TIM_Base_Stop(motors[motor_number].timer);
 	HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
 	motors[motor_number].running=false;
+}
+
+/**
+  * @brief  Runs the pump motor to squeeze out a specific ammount of liquid.
+  * @param  ammount_of_liquid: the ammount of liquid (in mL) that should be
+  				squeezed out of the needle.
+  * @retval None
+  */
+void pump_liquid(uint32_t ammount_of_liquid)
+{
+	motors[3].position=0; //set the motor to track the ammount of liquid pumped out
+	motors[3].direction=motors[3].direction_plus;
+	J4_ammount_of_liquid=0;
+	run_motor(3);
+	while(J4_ammount_of_liquid!=ammount_of_liquid){}
+	stop_motor(3);
 }
 
 /**
@@ -2068,10 +2084,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		else if (motors[0].running=true && motors[0].direction==motors[0].direction_plus && (motors[0].reset_completed || motors[0].position<motors[0].max_position))
 		{
 			motors[0].position += 1;
+			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
 		else if (motors[0].running=true && motors[0].direction==motors[0].direction_minus && (motors[0].reset_completed || motors[0].position>0))
 		{
 			motors[0].position -= 1;
+			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
 	}
     else if (htim->Instance == TIM15)
@@ -2084,10 +2102,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		else if (motors[1].running=true && motors[1].direction==motors[1].direction_plus && (motors[1].reset_completed || motors[1].position<motors[1].max_position))
 		{
 			motors[1].position += 1;
+			J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
 		else if (motors[1].running=true && motors[1].direction==motors[1].direction_minus && (motors[1].reset_completed || motors[1].position>0))
 		{
 			motors[1].position -= 1;
+			J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
     }
     else if (htim->Instance == TIM3)
@@ -2100,10 +2120,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		else if (motors[2].running=true && motors[2].direction==motors[2].direction_plus && (motors[2].reset_completed || motors[2].position<motors[2].max_position))
 		{
 			motors[2].position += 1;
+			J3_offset_mm=J3_offset_base+motors[2].position*motors[2].unit_conversion/motors[2].num_steps_per_turn;
 		}
 		else if (motors[2].running=true && motors[2].direction==motors[2].direction_minus && (motors[2].reset_completed || motors[2].position>0))
 		{
 			motors[2].position -= 1;
+			J3_offset_mm=J3_offset_base+motors[2].position*motors[2].unit_conversion/motors[2].num_steps_per_turn;
 		}
     }
     else if (htim->Instance == TIM12)
@@ -2112,6 +2134,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if (motors[3].running=true && motors[3].direction==motors[3].direction_plus)
 		{
 			motors[3].position += 1;
+			J4_ammount_of_liquid=J4_volume_per_turn*motors[3].position/motors[3].num_steps_per_turn;
 		}
 		else if (motors[3].running=true && motors[3].direction==motors[3].direction_minus)
 		{
@@ -2288,5 +2311,6 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
