@@ -2,6 +2,9 @@
 Install RealSense SDK pyrealsense2 Python bindings for librealsense:
 (v directory: ~/librealsense/build)
 
+# zgled za kodo:
+https://github.com/IntelRealSense/librealsense/issues/6628
+
 # realsense installation:
 https://github.com/datasith/Ai_Demos_RPi/wiki/Raspberry-Pi-4-and-Intel-RealSense-D435
 
