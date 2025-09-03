@@ -1932,6 +1932,21 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 
 	if(target_orientation!=effector_orientation)
 	{
+		if(target_orientation>effector_orientation)
+		{
+			motors[1].direction=motors[1].direction_plus;
+			start_motor(1);
+		}
+		else
+		{
+			motors[1].direction=motors[1].direction_minus;
+			start_motor(1);
+		}
+	}
+
+	if(target_x!=effector_x || target_y!=effector_y)
+	{
+		uint32_t cart_x_position_mm=motors[0].position
 		//x:
 		if (target_x<(J1_offset_mm+J3_offset_mm*cos(180-target_orientation)))
 		{
@@ -2311,6 +2326,7 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
 
