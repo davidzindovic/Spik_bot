@@ -4,6 +4,7 @@ Install RealSense SDK pyrealsense2 Python bindings for librealsense:
 
 # zgled za kodo:
 https://github.com/IntelRealSense/librealsense/issues/6628
+
 https://github.com/IntelRealSense/librealsense/blob/master/wrappers/python/examples/python-tutorial-1-depth.py#L21
 
 # realsense installation:
