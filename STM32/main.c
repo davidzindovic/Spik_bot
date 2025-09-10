@@ -324,7 +324,7 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
-	MX_TIM12_Init();
+	//MX_TIM12_Init(); //VRŽE ERROR!
 
 	/* USER CODE BEGIN 2 */
 	// freq=100000 -> hitro
@@ -338,10 +338,10 @@ int main(void) {
 		.direction_minus = 0,
 	    .direction_pin = GPIO_PIN_3,
 	    .direction_port = GPIOG,//D2
-	    .timer = &htim1,
+	    .timer = &htim3,
 	    .timer_channel = TIM_CHANNEL_1,
 		.frequency = 500,
-	    .motor_pin = GPIO_PIN_8,//D5
+	    .motor_pin = GPIO_PIN_6,//D3
 	    .motor_port = GPIOA,
 	    .max_position = 10000,
 		.starting_position=5000,
@@ -362,13 +362,13 @@ int main(void) {
 		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
-		.direction_pin = GPIO_PIN_8,
-		.direction_port = GPIOI,//D7
-		.timer = &htim15,
-		.timer_channel = TIM_CHANNEL_2,
+		.direction_pin = GPIO_PIN_1,
+		.direction_port = GPIOK,//D4
+		.timer = &htim1,
+		.timer_channel = TIM_CHANNEL_1,
 		.frequency = 100000,
-		.motor_pin = GPIO_PIN_6,//D6
-		.motor_port = GPIOE,
+		.motor_pin = GPIO_PIN_8,//D5
+		.motor_port = GPIOA,
 		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
@@ -377,8 +377,8 @@ int main(void) {
 		.reset_completed = false,
 		.end_switch1_pin = GPIO_PIN_4,//D10
 		.end_switch1_port = GPIOB,
-	    .end_switch2_pin = GPIO_PIN_15,//D11
-	    .end_switch2_port = GPIOB,
+	    .end_switch2_pin = GPIO_PIN_2,//D12
+	    .end_switch2_port = GPIOI,
 		.unit_conversion=100, //steps per deg
 		.num_steps_per_turn=0
 	};
@@ -388,21 +388,21 @@ int main(void) {
 		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
-		.direction_pin = GPIO_PIN_1,
-		.direction_port = GPIOK,//D4
-		.timer = &htim3,
-		.timer_channel = TIM_CHANNEL_1,
+		.direction_pin = GPIO_PIN_8,
+		.direction_port = GPIOI,//D7
+		.timer = &htim15,
+		.timer_channel = TIM_CHANNEL_2,
 		.frequency = 500,
-		.motor_pin = GPIO_PIN_6,//D3
-		.motor_port = GPIOA,
+		.motor_pin = GPIO_PIN_6,//D6
+		.motor_port = GPIOE,
 		.max_position = 10000,
 		.starting_position=5000,
 		.position = 0,
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch1_pin = GPIO_PIN_2,//D12
-		.end_switch1_port = GPIOI,
+		.end_switch1_pin = GPIO_PIN_13,//D14
+		.end_switch1_port = GPIOD,
 		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
 		.unit_conversion=100, //steps per mm
@@ -414,18 +414,19 @@ int main(void) {
 		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
-		.direction_pin = GPIO_PIN_15,
-		.direction_port = GPIOB,//D11
+		.direction_pin = GPIO_PIN_12,
+		.direction_port = GPIOD,//D15
 		.timer = &htim12,
 		.timer_channel = TIM_CHANNEL_2,
 		.frequency = 500,
-		.motor_pin = GPIO_PIN_6,//D3
-		.motor_port = GPIOA,
+		.motor_pin = GPIO_PIN_15,//D11
+		.motor_port = GPIOB,
 		.max_position = 10000,
 		.starting_position=5000,
 		.position = 0,
 		.running = false,
-		//NE UPORABLJAJ:
+
+		//NE UPORABLJAJ = IGNORIRAJ:
 		.reset_requested = false,
 		.reset_completed = false,
 		.end_switch1_pin = GPIO_PIN_2,//D12
@@ -433,12 +434,13 @@ int main(void) {
 		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
 		//konc prepovedi
+
 		.unit_conversion=100, //steps per mm
 		.num_steps_per_turn=200
 	};
 
 	/* Configure LED1 */
-	BSP_LED_Init(LED1);
+	//BSP_LED_Init(LED1);
 
 
 	/* USER CODE END 2 */
@@ -489,9 +491,15 @@ int main(void) {
 					run_motor(3);
 				}
 		*/
-		Test_USART3();
-		HAL_Delay(1000);
 
+		//Test_USART3();
+		//HAL_Delay(1000);
+
+		static _Bool dir=false;
+
+		direction_change(2,dir);
+		dir=!dir;
+		HAL_Delay(2000);
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1946,7 +1954,7 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 
 	if(target_x!=effector_x || target_y!=effector_y)
 	{
-		uint32_t cart_x_position_mm=motors[0].position
+		uint32_t cart_x_position_mm=motors[0].position;
 		//x:
 		if (target_x<(J1_offset_mm+J3_offset_mm*cos(180-target_orientation)))
 		{
@@ -1962,7 +1970,7 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 		//y:
 		if (target_y<(motors[2].offset*sin(180-J2_offset_deg)))
 		{
-			
+			uint8_t neki=0;
 		}
 	}
 
@@ -2326,7 +2334,6 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
 
 
