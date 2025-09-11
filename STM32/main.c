@@ -208,9 +208,9 @@ void run_motor(uint8_t motor_number);
 void stop_motor(uint8_t motor_number);
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void TIM1_UP_IRQHandler(void);
-void TIM15_UP_IRQHandler(void);
-void TIM3_UP_IRQHandler(void);
-void TIM12_UP_IRQHandler(void);
+void TIM15_IRQHandler(void);
+void TIM3_IRQHandler(void);
+void TIM8_BRK_TIM12_IRQHandler(void);
 void Test_USART3(void);
 void USART3_IRQHandler(void);
 //uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
@@ -324,7 +324,7 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
-	//MX_TIM12_Init(); //VRŽE ERROR!
+	MX_TIM12_Init(); //VRŽE ERROR!
 
 	/* USER CODE BEGIN 2 */
 	// freq=100000 -> hitro
@@ -340,10 +340,10 @@ int main(void) {
 	    .direction_port = GPIOG,//D2
 	    .timer = &htim3,
 	    .timer_channel = TIM_CHANNEL_1,
-		.frequency = 500,
+		.frequency = 50000,
 	    .motor_pin = GPIO_PIN_6,//D3
 	    .motor_port = GPIOA,
-	    .max_position = 10000,
+	    .max_position = 100000,
 		.starting_position=5000,
 	    .position = 0,
 		.running = false,
@@ -354,7 +354,7 @@ int main(void) {
 	    .end_switch2_pin = GPIO_PIN_15,//D9
 	    .end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=0
+		.num_steps_per_turn=40000
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
@@ -366,10 +366,10 @@ int main(void) {
 		.direction_port = GPIOK,//D4
 		.timer = &htim1,
 		.timer_channel = TIM_CHANNEL_1,
-		.frequency = 100000,
+		.frequency = 50000,
 		.motor_pin = GPIO_PIN_8,//D5
 		.motor_port = GPIOA,
-		.max_position = 10000000,
+		.max_position = 100000,
 		.starting_position=5000,
 		.position = 0,
 		.running = false,
@@ -380,7 +380,7 @@ int main(void) {
 	    .end_switch2_pin = GPIO_PIN_2,//D12
 	    .end_switch2_port = GPIOI,
 		.unit_conversion=100, //steps per deg
-		.num_steps_per_turn=0
+		.num_steps_per_turn=40000
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
@@ -392,10 +392,10 @@ int main(void) {
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 500,
+		.frequency = 50000,
 		.motor_pin = GPIO_PIN_6,//D6
 		.motor_port = GPIOE,
-		.max_position = 10000,
+		.max_position = 100000,
 		.starting_position=5000,
 		.position = 0,
 		.running = false,
@@ -406,9 +406,9 @@ int main(void) {
 		.end_switch2_pin = GPIO_PIN_3,//D13
 		.end_switch2_port = GPIOD,
 		.unit_conversion=100, //steps per mm
-		.num_steps_per_turn=0
+		.num_steps_per_turn=40000
 	};
-	motors[3] = (motor_struct_t){
+	motors[3] = (motor_struct_t){ //max 50000 freq
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 1,
@@ -466,7 +466,7 @@ int main(void) {
 	_Bool values[6]={0,0,0,0,0,0};
 
 	//run_motor(0);
-	run_motor(3);
+
 	//run_motor(2);
 
 	while (1) {
@@ -482,24 +482,39 @@ int main(void) {
 		*/
 		//stall(5);
 
-		/*
-		if (motors[3].position==motors[3].num_steps_per_turn)
-				{
-					stop_motor(3);
-					HAL_Delay(1000);
-					motors[3].position=0;
-					run_motor(3);
-				}
-		*/
+
+
+		for (uint8_t i=0;i<4;i++)
+		{
+			motors[i].direction=motors[i].direction_plus;
+			run_motor(i);
+			if ((motors[i].position)==(motors[i].num_steps_per_turn))
+			{
+				stop_motor(i);
+				HAL_Delay(1000);
+			}
+			motors[i].direction=motors[i].direction_minus;
+			run_motor(i);
+			if ((motors[i].position)==0)
+			{
+				stop_motor(i);
+				HAL_Delay(1000);
+			}
+		}
+
+
+
+//		motors[2].direction=!motors[2].direction;
 
 		//Test_USART3();
 		//HAL_Delay(1000);
 
-		static _Bool dir=false;
+		/*static _Bool dir=false;
 
 		direction_change(2,dir);
 		dir=!dir;
 		HAL_Delay(2000);
+		*/
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1003,6 +1018,8 @@ static void MX_TIM15_Init(void)
   }
 
   htim15.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
+  //HAL_TIM_RegisterCallback(motors[2].timer, HAL_TIM_PERIOD_ELAPSED_CB_ID, HAL_TIM_PeriodElapsedCallback);
+
   HAL_NVIC_SetPriority(TIM15_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(TIM15_IRQn);
 
@@ -1068,9 +1085,9 @@ static void MX_TIM12_Init(void)
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   htim12.Instance = TIM12;
-  htim12.Init.Prescaler = 49;
+  htim12.Init.Prescaler = 79;
   htim12.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim12.Init.Period = 999;
+  htim12.Init.Period = 1999;
   htim12.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim12.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim12) != HAL_OK)
@@ -1101,11 +1118,16 @@ static void MX_TIM12_Init(void)
     Error_Handler();
   }
 
-  htim12.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
-  HAL_NVIC_SetPriority(TIM8_BRK_TIM12_IRQn, 5, 0);
+  //htim12.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
+
+
+  HAL_NVIC_SetPriority(TIM8_BRK_TIM12_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(TIM8_BRK_TIM12_IRQn);
 
   HAL_TIM_MspPostInit(&htim12);
+
+  HAL_TIM_Base_Start_IT(&htim12);
+  HAL_TIM_PWM_Start(&htim12, TIM_CHANNEL_2);
 }
 
 /**
@@ -1657,6 +1679,7 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Alternate = GPIO_AF4_TIM15;
 	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
+	/*Configure GPIO pin : PB15 */
 	GPIO_InitStruct.Pin = GPIO_PIN_15;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -2027,35 +2050,86 @@ _Bool read_switch2(uint8_t motor_number)
 void run_motor(uint8_t motor_number)
 {
     // Stop PWM first
-    HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
-	motors[motor_number].running=false;
+    //HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
+	//motors[motor_number].running=false;
 
-	uint32_t frequency_hz=motors[motor_number].frequency;
-	frequency_hz=frequency_hz/2;
-    // Calculate prescaler and period based on your clock
-    uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // For TIM2-TIM7
-    if(motors[motor_number].timer->Instance == TIM1 || motors[motor_number].timer->Instance == TIM8 || motors[motor_number].timer->Instance == TIM12 ||
-       motors[motor_number].timer->Instance == TIM15 || motors[motor_number].timer->Instance == TIM16 || motors[motor_number].timer->Instance == TIM17) {
-        timer_clock = HAL_RCC_GetPCLK2Freq();
-    }
+	if (motors[motor_number].timer->State == HAL_TIM_STATE_RESET) {
+	    // Timer not initialized, initialize it first
+	    // You might need to call the specific MX_TIMx_Init function
+	    return;
+	}
 
-    uint32_t prescaler = (timer_clock / (frequency_hz * 1000)) - 1;
-    uint32_t period = 999; // Keeps same resolution
-    //uint32_t period = 399;
+	if (motors[motor_number].running == false)
+	{
+		// Stop timer first
+		//HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
+		htim15.Instance->DIER &= ~(1);
+		HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
 
-    // Reconfigure timer
-    TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-    sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-    HAL_TIM_ConfigClockSource(motors[motor_number].timer, &sClockSourceConfig);
+		uint32_t frequency_hz = motors[motor_number].frequency;
+		frequency_hz = frequency_hz / 2;
 
-    motors[motor_number].timer->Instance->PSC = prescaler;
-    motors[motor_number].timer->Instance->ARR = period;
+		// Calculate prescaler and period
+		uint32_t timer_clock = HAL_RCC_GetPCLK1Freq();
+		if(motors[motor_number].timer->Instance == TIM1 ||
+		   motors[motor_number].timer->Instance == TIM8 ||
+		   motors[motor_number].timer->Instance == TIM12 ||
+		   motors[motor_number].timer->Instance == TIM15 ||
+		   motors[motor_number].timer->Instance == TIM16 ||
+		   motors[motor_number].timer->Instance == TIM17) {
+			timer_clock = HAL_RCC_GetPCLK2Freq();
+		}
 
-    // Restart PWM
-    HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
-	motors[motor_number].running=true;
+		uint32_t prescaler = (timer_clock / (frequency_hz * 1000)) - 1;
+		uint32_t period = 999;
 
-	HAL_TIM_Base_Start_IT(motors[motor_number].timer);
+		// Configure timer registers
+		motors[motor_number].timer->Instance->PSC = prescaler;
+		motors[motor_number].timer->Instance->ARR = period;
+
+		// Clear update flag
+		motors[motor_number].timer->Instance->SR &= ~TIM_SR_UIF;
+
+		// Restart timer
+		//HAL_TIM_Base_Start_IT(motors[motor_number].timer);
+		htim15.Instance->DIER |= TIM_DIER_UIE;
+		motors[motor_number].timer->Instance->CR1 |= TIM_CR1_CEN;
+		HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
+
+		motors[motor_number].running = true;
+	}
+
+	/*
+	if (motors[motor_number].running==false)
+	{
+		uint32_t frequency_hz=motors[motor_number].frequency;
+		frequency_hz=frequency_hz/2;
+		// Calculate prescaler and period based on your clock
+		uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // For TIM2-TIM7
+		if(motors[motor_number].timer->Instance == TIM1 || motors[motor_number].timer->Instance == TIM8 || motors[motor_number].timer->Instance == TIM12 ||
+		   motors[motor_number].timer->Instance == TIM15 || motors[motor_number].timer->Instance == TIM16 || motors[motor_number].timer->Instance == TIM17) {
+			timer_clock = HAL_RCC_GetPCLK2Freq();
+		}
+
+		uint32_t prescaler = (timer_clock / (frequency_hz * 1000)) - 1;
+		uint32_t period = 999; // Keeps same resolution
+		//uint32_t period = 399;
+
+		// Reconfigure timer
+		TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+		sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+		HAL_TIM_ConfigClockSource(motors[motor_number].timer, &sClockSourceConfig);
+
+		motors[motor_number].timer->Instance->PSC = prescaler;
+		motors[motor_number].timer->Instance->ARR = period;
+
+		// Restart PWM
+		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
+		HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
+		motors[motor_number].running=true;
+
+
+	}*/
 }
 
 /**
@@ -2096,7 +2170,7 @@ void pump_liquid(uint32_t ammount_of_liquid)
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM1)
+    if (htim->Instance == TIM3)
     {
     	//if (false)
 		if ((((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true)
@@ -2115,7 +2189,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
 	}
-    else if (htim->Instance == TIM15)
+    else if (htim->Instance == TIM1)
     {
 		if ((((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true)
 		{
@@ -2125,7 +2199,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		else if (motors[1].running=true && motors[1].direction==motors[1].direction_plus && (motors[1].reset_completed || motors[1].position<motors[1].max_position))
 		{
 			motors[1].position += 1;
-			J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
+			//J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
 		else if (motors[1].running=true && motors[1].direction==motors[1].direction_minus && (motors[1].reset_completed || motors[1].position>0))
 		{
@@ -2133,7 +2207,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
     }
-    else if (htim->Instance == TIM3)
+    else if (htim->Instance == TIM15)
     {
 		if ((((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true)
 		{
@@ -2157,7 +2231,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if (motors[3].running=true && motors[3].direction==motors[3].direction_plus)
 		{
 			motors[3].position += 1;
-			J4_ammount_of_liquid=J4_volume_per_turn*motors[3].position/motors[3].num_steps_per_turn;
+			//J4_ammount_of_liquid=J4_volume_per_turn*motors[3].position/motors[3].num_steps_per_turn;
 		}
 		else if (motors[3].running=true && motors[3].direction==motors[3].direction_minus)
 		{
