@@ -484,16 +484,16 @@ int main(void) {
 
 
 
-		for (uint8_t i=0;i<4;i++)
+		for (uint8_t i=3;i<4;i++)
 		{
-			motors[i].direction=motors[i].direction_plus;
+			direction_change(i,motors[i].direction_plus);
 			run_motor(i);
 			if ((motors[i].position)==(motors[i].num_steps_per_turn))
 			{
 				stop_motor(i);
 				HAL_Delay(1000);
 			}
-			motors[i].direction=motors[i].direction_minus;
+			direction_change(i,motors[i].direction_minus);
 			run_motor(i);
 			if ((motors[i].position)==0)
 			{
