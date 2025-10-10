@@ -3,7 +3,7 @@ import time
 
 # Configure serial port
 ser = serial.Serial(
-    port='/dev/serial0',  # Default UART port on GPIO 14/15
+    port='/dev/ttyS0',  # Default UART port on GPIO 14/15
     baudrate=115200,
     parity=serial.PARITY_NONE,
     stopbits=serial.STOPBITS_ONE,
