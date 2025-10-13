@@ -136,7 +136,7 @@ MMC_HandleTypeDef hmmc1;
 
 //SPI_HandleTypeDef hspi2;
 
-UART_HandleTypeDef huart3;
+UART_HandleTypeDef huart1;
 
 //PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
@@ -184,8 +184,7 @@ static void MX_RTC_Init(void);
 static void MX_SAI2_Init(void);
 static void MX_SDMMC1_MMC_Init(void);
 static void MX_SPI2_Init(void);
-static void MX_USART3_UART_Init(void);
-static void MX_USB_OTG_FS_PCD_Init(void);
+//static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_RNG_Init(void);
 static void CPU_CACHE_Enable(void);
 void StartDefaultTask(void *argument);
@@ -212,7 +211,18 @@ void TIM15_IRQHandler(void);
 void TIM3_IRQHandler(void);
 void TIM8_BRK_TIM12_IRQHandler(void);
 void Test_USART3(void);
-void USART3_IRQHandler(void);
+void USART1_IRQHandler(void);
+static void MX_USART1_UART_Init(void);
+
+void UART_Send_Data(const char* data);
+void UART_Process_Command(const char* command);
+void UART_Send_Motor_Status(void);
+
+
+static void MPU_Config(void);
+void USART3_Pin_Init(void);
+
+void USART3_Initt(void);
 //uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
 /* USER CODE END PFP */
 
@@ -224,6 +234,10 @@ char rx_buff[10];
 
 uint8_t podatki;
 char vnos[100];
+
+char uart_rx_buffer[64];
+uint8_t uart_rx_index = 0;
+_Bool uart_command_ready = false;
 
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
@@ -308,18 +322,11 @@ int main(void) {
 
 	/* Initialize all configured peripherals */
 
-	MX_USART3_UART_Init(); //inicializiramo UART
-
-    // Configure USART3 interrupts
-    HAL_NVIC_SetPriority(USART3_IRQn, 5, 0);
-    HAL_NVIC_EnableIRQ(USART3_IRQn);
-
-    // Start receiving data via interrupt
-    HAL_UART_Receive_IT(&huart3, rx_buff, 10);
 
 	//GPIO initialization
 	MX_GPIO_Init();
-
+	MX_USART1_UART_Init();
+    HAL_UART_Receive_IT(&huart1, rx_buff, 10);
 	//Timer initialization
 	MX_TIM1_Init();
 	MX_TIM15_Init();
@@ -469,6 +476,8 @@ int main(void) {
 
 	//run_motor(2);
 
+
+
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -483,7 +492,7 @@ int main(void) {
 		//stall(5);
 
 
-
+		/*
 		for (uint8_t i=3;i<4;i++)
 		{
 			direction_change(i,motors[i].direction_plus);
@@ -500,21 +509,23 @@ int main(void) {
 				stop_motor(i);
 				HAL_Delay(1000);
 			}
-		}
+		}*/
 
 
 
-//		motors[2].direction=!motors[2].direction;
+		char SendBuffer[]="Hello\r\n";
+		HAL_UART_Transmit(&huart1, SendBuffer,strlen(SendBuffer)-1,1000);
+		HAL_Delay(1000);  // Add delay to avoid spamming
+	    // Transmit data via USART3
 
-		//Test_USART3();
-		//HAL_Delay(1000);
+	    //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+	    //HAL_Delay(500);
+	    //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+	    //HAL_Delay(500);
 
-		/*static _Bool dir=false;
 
-		direction_change(2,dir);
-		dir=!dir;
-		HAL_Delay(2000);
-		*/
+
+
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -570,7 +581,7 @@ void SystemClock_Config(void) {
 	__HAL_RCC_TIM3_CLK_ENABLE();
 	__HAL_RCC_TIM15_CLK_ENABLE();
 	__HAL_RCC_TIM12_CLK_ENABLE();
-	__HAL_RCC_USART3_CLK_ENABLE();
+	__HAL_RCC_USART1_CLK_ENABLE();
 
 	//__HAL_RCC_ADC123_CLK_ENABLE();
 	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
@@ -582,13 +593,16 @@ void SystemClock_Config(void) {
 	//RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48
 	//		| RCC_OSCILLATORTYPE_HSI | RCC_OSCILLATORTYPE_LSI
 	//		| RCC_OSCILLATORTYPE_HSE;
-	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_HSI48; //
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_HSI48| RCC_OSCILLATORTYPE_HSI; //
 	//RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
 	//RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
 	RCC_OscInitStruct.HSEState = RCC_HSE_ON; //
 	//RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
 	//RCC_OscInitStruct.LSIState = RCC_LSI_ON;
-	RCC_OscInitStruct.HSIState = RCC_HSI_OFF;//
+	RCC_OscInitStruct.HSIState = RCC_HSI_ON;//
+    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
 	RCC_OscInitStruct.CSIState = RCC_CSI_OFF;//
 	RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -646,6 +660,14 @@ void SystemClock_Config(void) {
 
 	  /* Enables the I/O Compensation Cell */
 	  HAL_EnableCompensationCell();
+
+	  // Ensure proper USART clock - add this after clock configuration
+	  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+	  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1;
+	  PeriphClkInit.Usart234578ClockSelection = RCC_USART234578CLKSOURCE_D2PCLK1;  // Important!
+	  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK) {
+	      Error_Handler();
+	  }
 }
 
 /**
@@ -1383,40 +1405,62 @@ static void MX_SDMMC1_MMC_Init(void) {
  * @param None
  * @retval None
  */
-static void MX_USART3_UART_Init(void) {
+
+static void MX_USART1_UART_Init(void) {
 
 	/* USER CODE BEGIN USART3_Init 0 */
-
+    __HAL_RCC_USART1_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    HAL_Delay(1);
 	/* USER CODE END USART3_Init 0 */
 
 	/* USER CODE BEGIN USART3_Init 1 */
 
 	/* USER CODE END USART3_Init 1 */
-	huart3.Instance = USART3;
-	huart3.Init.BaudRate = 115200;
-	huart3.Init.WordLength = UART_WORDLENGTH_8B;
-	huart3.Init.StopBits = UART_STOPBITS_1;
-	huart3.Init.Parity = UART_PARITY_NONE;
-	huart3.Init.Mode = UART_MODE_TX_RX;
-	huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-	huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-	huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-	huart3.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-	huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-	if (HAL_UART_Init(&huart3) != HAL_OK) {
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 115200;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX_RX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+	huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+	//huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+	GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+	//__HAL_RCC_GPIOB_CLK_ENABLE();
+
+	/* Configure PB10 = TX, PB11 = RX */
+	GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+	//GPIO_InitStruct.Pin = VCP_TX_Pin | VCP_RX_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_InitStruct.Alternate = GPIO_AF7_USART1;  // Alternate function 7 = USART3
+
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	//HAL_GPIO_Init(VCP_TX_GPIO_Port, &GPIO_InitStruct);
+
+	if (HAL_UART_Init(&huart1) != HAL_OK) {
 		Error_Handler();
 	}
-	if (HAL_UARTEx_SetTxFifoThreshold(&huart3, UART_TXFIFO_THRESHOLD_1_8)
+	if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8)
 			!= HAL_OK) {
 		Error_Handler();
 	}
-	if (HAL_UARTEx_SetRxFifoThreshold(&huart3, UART_RXFIFO_THRESHOLD_1_8)
+	if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8)
 			!= HAL_OK) {
 		Error_Handler();
 	}
-	if (HAL_UARTEx_DisableFifoMode(&huart3) != HAL_OK) {
+	if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK) {
 		Error_Handler();
 	}
+
+    HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);  // Set appropriate priority
+    HAL_NVIC_EnableIRQ(USART1_IRQn);          // Enable USART1 interrupt
 	/* USER CODE BEGIN USART3_Init 2 */
 
 	/* USER CODE END USART3_Init 2 */
@@ -1609,10 +1653,10 @@ static void MX_GPIO_Init(void) {
     //konc
 
 	/*Configure GPIO pins : USB_OTG_FS2_ID_Pin OTG_FS2_PSO_Pin */
-	GPIO_InitStruct.Pin = USB_OTG_FS2_ID_Pin | OTG_FS2_PSO_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	//GPIO_InitStruct.Pin = USB_OTG_FS2_ID_Pin | OTG_FS2_PSO_Pin;
+	//GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	//GPIO_InitStruct.Pull = GPIO_NOPULL;
+	//HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : B1_Pin */
 	GPIO_InitStruct.Pin = B1_Pin;
@@ -1691,12 +1735,50 @@ static void MX_GPIO_Init(void) {
 
 	//usart:
     /* Configure USART3 TX (PB10) and RX (PB11) pins */
-    GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_11;
+
+	//__HAL_RCC_USART3_CLK_ENABLE();
+
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 115200;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX_RX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+	huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+
+	GPIO_InitStruct.Pin = GPIO_PIN_6;
+    //GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF7_USART1;  // USART1 uses AF7
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_7;
+    //GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF7_USART3;  // USART3 uses AF7
+    GPIO_InitStruct.Alternate = GPIO_AF7_USART1;  // USART1 uses AF7
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	if (HAL_UART_Init(&huart1) != HAL_OK) {
+		Error_Handler();
+	}
+	if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8)
+			!= HAL_OK) {
+		Error_Handler();
+	}
+	if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8)
+			!= HAL_OK) {
+		Error_Handler();
+	}
+	if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK) {
+		Error_Handler();
+	}
     //konc usart
 
 	/*Configure GPIO pins : MII_TX_ER_nINT_Pin LCD_RST_Pin */
@@ -1751,13 +1833,14 @@ static void MX_GPIO_Init(void) {
 //    HAL_UART_IRQHandler(&huart3);
 //}
 
+/*
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance == USART3) {
         // Process received data in rx_buff
         // Then restart reception
         HAL_UART_Receive_IT(&huart3, rx_buff, 10);
     }
-}
+}*/
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
 {
@@ -2280,7 +2363,71 @@ void TIM8_BRK_TIM12_IRQHandler(void)
     HAL_TIM_IRQHandler(&htim12);
 }
 
+static void MPU_Config(void)
+{
+  MPU_Region_InitTypeDef MPU_InitStruct = {0};
 
+  // Disable the MPU
+  HAL_MPU_Disable();
+
+  // Configure the MPU attributes as Device Non Cacheable for SRAM1
+  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
+  MPU_InitStruct.BaseAddress = 0x24000000;
+  MPU_InitStruct.Size = MPU_REGION_SIZE_512KB;
+  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
+  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
+  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
+  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
+  MPU_InitStruct.SubRegionDisable = 0x00;
+  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
+
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
+
+  // Enable the MPU
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+}
+
+/*
+void USART3_Pin_Init()
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  // Enable GPIOB clock
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  // Enable USART3 clock
+  __HAL_RCC_USART3_CLK_ENABLE();
+
+  // Configure PB10 as USART3_TX
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+}*/
+/*
+void USART3_Initt(void)
+{
+  huart3.Instance = USART3;
+  huart3.Init.BaudRate = 115200;
+  huart3.Init.WordLength = UART_WORDLENGTH_8B;
+  huart3.Init.StopBits = UART_STOPBITS_1;
+  huart3.Init.Parity = UART_PARITY_NONE;
+  huart3.Init.Mode = UART_MODE_TX;
+  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart3.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+  huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+  //if (HAL_UART_Init(&huart3) != HAL_OK)
+  //{
+  //  Error_Handler();
+  //}
+}*/
 uint32_t Read_ADC2(ADC_HandleTypeDef* hadc) {
 	    // Stop any ongoing conversion
 	    HAL_ADC_Stop(hadc);
@@ -2360,22 +2507,139 @@ void Test_USART3(void) {
     printf("Testing USART3 TX...\n");
 
     // Direct register manipulation test
-    USART3->CR1 |= USART_CR1_TE;  // Enable transmitter
-    USART3->CR1 |= USART_CR1_UE;  // Enable USART
+    USART1->CR1 |= USART_CR1_TE;  // Enable transmitter
+    USART1->CR1 |= USART_CR1_UE;  // Enable USART
 
     for(int i = 0; i < 6; i++) {
     //    while(!(USART3->ISR & USART_ISR_TXFE));  // Wait for TX empty
-        USART3->TDR = test_pattern[i];
+        USART1->TDR = test_pattern[i];
     }
 
-    while(!(USART3->ISR & USART_ISR_TC));  // Wait for transmission complete
+    while(!(USART1->ISR & USART_ISR_TC));  // Wait for transmission complete
 
     printf("Direct register test completed\n");
 
     // HAL test
-    HAL_UART_Transmit(&huart3, test_pattern, 6, 1000);
+    HAL_UART_Transmit(&huart1, test_pattern, 6, 1000);
     printf("HAL transmit test completed\n");
 }
+
+void UART_Send_Data(const char* data) {
+    HAL_UART_Transmit(&huart1, (uint8_t*)data, strlen(data), 1000);
+}
+
+void UART_Process_Command(const char* command) {
+    char response[128];
+
+    if (strncmp(command, "STATUS", 6) == 0) {
+        UART_Send_Motor_Status();
+    }
+    else if (strncmp(command, "STOP", 4) == 0) {
+        stop_all_motors();
+        UART_Send_Data("OK:All motors stopped\r\n");
+    }
+    else if (strncmp(command, "START", 5) == 0) {
+        // Parse motor number: START 0, START 1, etc.
+        int motor_num = command[6] - '0';
+        if (motor_num >= 0 && motor_num < 4) {
+            run_motor(motor_num);
+            snprintf(response, sizeof(response), "OK:Motor %d started\r\n", motor_num);
+            UART_Send_Data(response);
+        }
+    }
+    else if (strncmp(command, "MOVE", 4) == 0) {
+        // Example: MOVE 0 50000 - move motor 0 to position 50000
+        int motor_num, position;
+        if (sscanf(command, "MOVE %d %d", &motor_num, &position) == 2) {
+            if (motor_num >= 0 && motor_num < 4) {
+                // Add your move logic here
+                snprintf(response, sizeof(response), "OK:Moving motor %d to %d\r\n", motor_num, position);
+                UART_Send_Data(response);
+            }
+        }
+    }
+    else if (strncmp(command, "RESET", 5) == 0) {
+        reset_motors();
+        UART_Send_Data("OK:Motors reset\r\n");
+    }
+    else {
+        snprintf(response, sizeof(response), "ERROR:Unknown command: %s\r\n", command);
+        UART_Send_Data(response);
+    }
+}
+
+void UART_Send_Motor_Status(void) {
+    char status[256];
+    snprintf(status, sizeof(status),
+             "Motor Status:\r\n"
+             "M0: Pos=%lu, Running=%d, Dir=%d\r\n"
+             "M1: Pos=%lu, Running=%d, Dir=%d\r\n"
+             "M2: Pos=%lu, Running=%d, Dir=%d\r\n"
+             "M3: Pos=%lu, Running=%d, Dir=%d\r\n",
+             motors[0].position, motors[0].running, motors[0].direction,
+             motors[1].position, motors[1].running, motors[1].direction,
+             motors[2].position, motors[2].running, motors[2].direction,
+             motors[3].position, motors[3].running, motors[3].direction);
+    UART_Send_Data(status);
+}
+
+// Modify your existing UART callback
+/*void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART3) {
+        // Echo back what was received
+        //HAL_UART_Transmit(&huart3, rx_buff, 1, 1000);
+
+        // Also process commands if it's a newline
+        if (rx_buff[0] == '\r' || rx_buff[0] == '\n') {
+            if (uart_rx_index > 0) {
+                uart_rx_buffer[uart_rx_index] = '\0';
+                uart_command_ready = true;
+                uart_rx_index = 0;
+            }
+            uart_rx_index = 0;
+        } else if (uart_rx_index < sizeof(uart_rx_buffer) - 1) {
+            uart_rx_buffer[uart_rx_index++] = rx_buff[0];
+        }
+
+        // Restart reception
+        HAL_UART_Receive_IT(&huart3, (uint8_t*)rx_buff, 1);
+    }
+}*/
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    //if (huart->Instance == USART1) {
+        // BREAKPOINT HERE - this triggers when reception is complete
+        //__asm("NOP");
+
+        // Echo the received byte
+    //    HAL_UART_Transmit(&huart1, rx_buff, 1, 100);
+
+        // Restart reception
+
+    //}
+    HAL_UART_Receive_IT(&huart1, rx_buff, 10);
+}
+
+void UART_Echo_Test(void) {
+    char test_message[] = "STM32 Echo Test - Hello RPI!\r\n";
+    HAL_UART_Transmit(&huart1, (uint8_t*)test_message, strlen(test_message), 1000);
+}
+/*
+void USART3_IRQHandler(void) {
+    // Check if RXNE (Receive Not Empty) flag is set
+    if (USART3->ISR & USART_ISR_RXNE_RXFNE) {  // Correct for H7
+        // Breakpoint here - this should trigger when data is received
+        __asm("NOP"); // Place for breakpoint
+
+        // Read the received data (clears RXNE flag)
+        uint8_t received_byte = USART3->RDR;
+
+        // Echo back immediately
+        USART3->TDR = received_byte;
+
+        // Optional: Also use HAL to clear flags
+        __HAL_UART_CLEAR_FLAG(&huart3, UART_CLEAR_NEF);
+    }
+}*/
 
 /* USER CODE END 4 */
 
@@ -2408,6 +2672,5 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
 
