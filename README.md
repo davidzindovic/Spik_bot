@@ -1,6 +1,13 @@
 useful link:
 https://github.com/LAPSyLAB/STM32H7_Discovery_VIN_Projects/blob/main/STM32H750B-DK_VIN_Basic/Core/Src/main.c
 
+# 13.10.2025:
+- ST UART skor konc
+- RPI lahko transmita UART (se mi zdi)
+- lahko controllam driverje (rabm še probat vse motorje)
+- čakam akse
+- realsense (z GUI) se odpre na RPI. Treba stuhtat data stream
+
 # 02.09.2025:
 - del inštalacije librealsense na RPI narejen
 - delno narejena kinematika na STM32
