@@ -56,6 +56,8 @@
 
 /* External variables --------------------------------------------------------*/
 extern UART_HandleTypeDef huart1;
+extern char rcv_buff[];
+extern char rx_buff[];
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -203,27 +205,13 @@ void SysTick_Handler(void)
   */
 void USART1_IRQHandler(void)
 {
-  /* USER CODE BEGIN USART3_IRQn 0 */
-    /* Handle RXNE interrupt */
-    if((__HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE) != RESET) &&
-       (__HAL_UART_GET_IT_SOURCE(&huart1, UART_IT_RXNE) != RESET)) {
-        // BREAKPOINT HERE
-        __asm("NOP");
+	/* USER CODE BEGIN USART1_IRQn 0 */
 
-        //uint8_t data = (uint8_t)(huart3.Instance->RDR & 0xFF);
-        uint8_t data = USART1->RDR;
-        // Simple echo
-        huart1.Instance->TDR = data;
-        USART3->ICR = USART1->ISR;
-        // Clear RXNE flag
-        __HAL_UART_CLEAR_FLAG(&huart1, UART_CLEAR_NEF);
-    }
+	  /* USER CODE END USART1_IRQn 0 */
+	  HAL_UART_IRQHandler(&huart1);
 
-  /* USER CODE END USART3_IRQn 0 */
-  HAL_UART_IRQHandler(&huart1);
-  /* USER CODE BEGIN USART3_IRQn 1 */
-
-  /* USER CODE END USART3_IRQn 1 */
+	  /* USER CODE BEGIN USART1_IRQn 1 */
+	  /* USER CODE END USART1_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
