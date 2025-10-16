@@ -14,7 +14,7 @@ try:
     print("Receiving")
     x=ser.readline()
     if len(x)>2:
-      print x
+      print(x)
   ser.reset_output_buffer()
   print("Buffer resset")
 except KeyboardInterrupt:
