@@ -12,9 +12,10 @@ try:
   while len(data)<9:
     time.sleep(1)
     print("Receiving")
-    data.append(pmd.read())
-    print(data)
-  pmd.reset_output_buffer()
+    x=ser.readline()
+    if len(x)>2:
+      print x
+  ser.reset_output_buffer()
   print("Buffer resset")
 except KeyboardInterrupt:
   print("closing")
