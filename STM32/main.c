@@ -214,25 +214,24 @@ void TIM15_IRQHandler(void);
 void TIM3_IRQHandler(void);
 void TIM8_BRK_TIM12_IRQHandler(void);
 void Test_USART3(void);
+
 void USART1_IRQHandler(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
+
 void izpis_v_serijc(char *sporocilo);
+void uart_transmit(char *sporocilo);
+char uart_receive();
+void process_message(char message);
 
-void UART_Send_Data(const char* data);
-void UART_Process_Command(const char* command);
-void UART_Send_Motor_Status(void);
-
+void uart_process_command(const char* command);
+void uart_send_motor_status(void);
 
 static void MPU_Config(void);
 void USART3_Pin_Init(void);
 
-void USART3_Initt(void);
-
-
-
-void Debug_USART1_Config(void);
 //uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -507,8 +506,7 @@ int main(void) {
 	char znak='\0'; 					//aktiven prebran znak
 	char znak_temp; 			//shranjeno prejšnje stanje znaka
 
-	char SendBuffer[]="HelloHello\r\n";
-	HAL_UART_Transmit_IT(&huart1, SendBuffer,strlen(SendBuffer)-1);
+	
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -547,33 +545,7 @@ int main(void) {
 
 
 
-		if((HAL_GetTick()-timing_uart)>=limit_uart)
-		{
-			static uint8_t uart_read_pos=0;
-			static uint8_t first_read=0;
-			uint8_t read_state=0; 				//je 1 če smo prebrali nekaj novega, po defaultu 0 vsak loop
-
-			if(uart_read_pos==10)uart_read_pos=0;
-
-			if(first_read!=1 && rx_buff[0]!='\0')//prvo branje opravimo ko je prvi element različen od '\0', da ne listamo po nepotrebnem
-			{
-				first_read=1;
-				znak_temp=znak;
-				znak=rx_buff[uart_read_pos];
-				rx_buff[uart_read_pos]='\0'; //po branju zapišemo '\0' kot oznako da smo prebrali
-				uart_read_pos++;
-				read_state=1;
-			}
-			else if(first_read==1 && rx_buff[uart_read_pos]!='\0') //če smo primer prvega branja opravili in če je kaj za prebrat
-			{
-				znak_temp=znak;
-				znak=rx_buff[uart_read_pos];
-				rx_buff[uart_read_pos]='\0'; //po branju zapišemo '\0' kot oznako da smo prebrali
-				uart_read_pos++;
-				read_state=1;
-			}
-		}
-
+		uart_receive();
 
 	    // Transmit data via USART3
 
@@ -581,10 +553,6 @@ int main(void) {
 	    //HAL_Delay(500);
 	    //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
 	    //HAL_Delay(500);
-
-
-
-
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -680,20 +648,6 @@ void SystemClock_Config(void) {
 	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
 		Error_Handler();
 	}
-
-	/** Initializes the CPU, AHB and APB buses clocks
-	 */
-/*	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
-			| RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2 | RCC_CLOCKTYPE_D3PCLK1
-			| RCC_CLOCKTYPE_D1PCLK1;
-	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
-	RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-	RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
-	RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV1;
-	RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV1;
-	RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV1;
-	RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV1;
-*/
 
 	  RCC_ClkInitStruct.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_D1PCLK1 | RCC_CLOCKTYPE_PCLK1 | \
 	                                 RCC_CLOCKTYPE_PCLK2  | RCC_CLOCKTYPE_D3PCLK1);
@@ -1902,18 +1856,7 @@ static void MX_GPIO_Init(void) {
 }
 
 /* USER CODE BEGIN 4 */
-//void USART3_IRQHandler(void) {
-//    HAL_UART_IRQHandler(&huart3);
-//}
 
-/*
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    if (huart->Instance == USART3) {
-        // Process received data in rx_buff
-        // Then restart reception
-        HAL_UART_Receive_IT(&huart3, rx_buff, 10);
-    }
-}*/
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
 {
@@ -2255,37 +2198,6 @@ void run_motor(uint8_t motor_number)
 		motors[motor_number].running = true;
 	}
 
-	/*
-	if (motors[motor_number].running==false)
-	{
-		uint32_t frequency_hz=motors[motor_number].frequency;
-		frequency_hz=frequency_hz/2;
-		// Calculate prescaler and period based on your clock
-		uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // For TIM2-TIM7
-		if(motors[motor_number].timer->Instance == TIM1 || motors[motor_number].timer->Instance == TIM8 || motors[motor_number].timer->Instance == TIM12 ||
-		   motors[motor_number].timer->Instance == TIM15 || motors[motor_number].timer->Instance == TIM16 || motors[motor_number].timer->Instance == TIM17) {
-			timer_clock = HAL_RCC_GetPCLK2Freq();
-		}
-
-		uint32_t prescaler = (timer_clock / (frequency_hz * 1000)) - 1;
-		uint32_t period = 999; // Keeps same resolution
-		//uint32_t period = 399;
-
-		// Reconfigure timer
-		TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-		sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-		HAL_TIM_ConfigClockSource(motors[motor_number].timer, &sClockSourceConfig);
-
-		motors[motor_number].timer->Instance->PSC = prescaler;
-		motors[motor_number].timer->Instance->ARR = period;
-
-		// Restart PWM
-		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
-		HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
-		motors[motor_number].running=true;
-
-
-	}*/
 }
 
 /**
@@ -2462,45 +2374,6 @@ static void MPU_Config(void)
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
 }
 
-/*
-void USART3_Pin_Init()
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-  // Enable GPIOB clock
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  // Enable USART3 clock
-  __HAL_RCC_USART3_CLK_ENABLE();
-
-  // Configure PB10 as USART3_TX
-  GPIO_InitStruct.Pin = GPIO_PIN_10;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-}*/
-/*
-void USART3_Initt(void)
-{
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 115200;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart3.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-
-  //if (HAL_UART_Init(&huart3) != HAL_OK)
-  //{
-  //  Error_Handler();
-  //}
-}*/
 uint32_t Read_ADC2(ADC_HandleTypeDef* hadc) {
 	    // Stop any ongoing conversion
 	    HAL_ADC_Stop(hadc);
@@ -2573,35 +2446,7 @@ void TestADCs() {
     ADC3->SMPR1 = 7 << (3*0);
 }
 
-void Test_USART3(void) {
-    // Simple test pattern: send alternating 0x55 and 0xAA
-    uint8_t test_pattern[] = {0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA};
-
-    printf("Testing USART3 TX...\n");
-
-    // Direct register manipulation test
-    USART1->CR1 |= USART_CR1_TE;  // Enable transmitter
-    USART1->CR1 |= USART_CR1_UE;  // Enable USART
-
-    for(int i = 0; i < 6; i++) {
-    //    while(!(USART3->ISR & USART_ISR_TXFE));  // Wait for TX empty
-        USART1->TDR = test_pattern[i];
-    }
-
-    while(!(USART1->ISR & USART_ISR_TC));  // Wait for transmission complete
-
-    printf("Direct register test completed\n");
-
-    // HAL test
-    HAL_UART_Transmit(&huart1, test_pattern, 6, 1000);
-    printf("HAL transmit test completed\n");
-}
-
-void UART_Send_Data(const char* data) {
-    HAL_UART_Transmit(&huart1, (uint8_t*)data, strlen(data), 1000);
-}
-
-void UART_Process_Command(const char* command) {
+void uart_process_command(const char* command) {
     char response[128];
 
     if (strncmp(command, "STATUS", 6) == 0) {
@@ -2641,7 +2486,7 @@ void UART_Process_Command(const char* command) {
     }
 }
 
-void UART_Send_Motor_Status(void) {
+void uart_send_motor_status(void) {
     char status[256];
     snprintf(status, sizeof(status),
              "Motor Status:\r\n"
@@ -2656,75 +2501,8 @@ void UART_Send_Motor_Status(void) {
     UART_Send_Data(status);
 }
 
-// Modify your existing UART callback
-/*void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    if (huart->Instance == USART3) {
-        // Echo back what was received
-        //HAL_UART_Transmit(&huart3, rx_buff, 1, 1000);
-
-        // Also process commands if it's a newline
-        if (rx_buff[0] == '\r' || rx_buff[0] == '\n') {
-            if (uart_rx_index > 0) {
-                uart_rx_buffer[uart_rx_index] = '\0';
-                uart_command_ready = true;
-                uart_rx_index = 0;
-            }
-            uart_rx_index = 0;
-        } else if (uart_rx_index < sizeof(uart_rx_buffer) - 1) {
-            uart_rx_buffer[uart_rx_index++] = rx_buff[0];
-        }
-
-        // Restart reception
-        HAL_UART_Receive_IT(&huart3, (uint8_t*)rx_buff, 1);
-    }
-}*/
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    //if (huart->Instance == USART1) {
-        // BREAKPOINT HERE - this triggers when reception is complete
-        //__asm("NOP");
-
-        // Echo the received byte
-    //    HAL_UART_Transmit(&huart1, rx_buff, 1, 100);
-
-        // Restart reception
-
-    //}
     HAL_UART_Receive_IT(&huart1, rx_buff, 10);
-}
-
-void UART_Echo_Test(void) {
-    char test_message[] = "STM32 Echo Test - Hello RPI!\r\n";
-    HAL_UART_Transmit(&huart1, (uint8_t*)test_message, strlen(test_message), 1000);
-}
-
-void Debug_USART1_Config(void) {
-	uint8_t MSG[35] = {'\0'};
-	uint8_t X = 0;
-	izpis_v_serijc("TEST\n");
-    //sprintf(MSG,"=== USART1 Configuration Debug ===\n",X);
-    //HAL_UART_Transmit(&huart3, MSG, sizeof(MSG), 100);
-    //sprintf("USART1 CR1: 0x%08lX\n", USART1->CR1);
-    //HAL_UART_Transmit(&huart3, MSG, sizeof(MSG), 100);
-    //izpis_v_serijc("USART1 CR1: 0x%08lX\n", {USART1->CR1});
-
-	/*
-	sprintf(MSG,"  UE: %d, RXNEIE: %d, TE: %d, RE: %d\n",
-           (USART1->CR1 & USART_CR1_UE) >> 0,
-           (USART1->CR1 & USART_CR1_RXNEIE_RXFNEIE) >> 5,
-           (USART1->CR1 & USART_CR1_TE) >> 3,
-           (USART1->CR1 & USART_CR1_RE) >> 2,X);
-
-    printf("USART1 ISR: 0x%08lX\n", USART1->ISR);
-    printf("  RXNE: %d, ORE: %d\n",
-           (USART1->ISR & USART_ISR_RXNE_RXFNE) >> 5,
-           (USART1->ISR & USART_ISR_ORE) >> 1);
-
-    printf("NVIC ISER0: 0x%08lX\n", NVIC->ISER[0]);
-    printf("  USART1 enabled in NVIC: %d\n", (NVIC->ISER[0] & (1 << 25)) != 0);
-
-    printf("RCC AHB4ENR: 0x%08lX (GPIOB clock)\n", RCC->AHB4ENR);
-    printf("RCC APB2ENR: 0x%08lX (USART1 clock)\n", RCC->APB2ENR);
-    printf("=== End Debug ===\n");*/
 }
 
 void izpis_v_serijc(char *sporocilo)
@@ -2733,6 +2511,15 @@ void izpis_v_serijc(char *sporocilo)
 	sprintf(sporocilo,sporocilo,X);
 	HAL_UART_Transmit(&huart3, sporocilo, sizeof(sporocilo), 100);
 }
+
+void uart_transmit(const *char sporocilo)
+{
+	//char SendBuffer[]="HelloHello\r\n";
+	HAL_UART_Transmit_IT(&huart1, sporocilo,strlen(sporocilo)-1);
+}
+
+char uart_receive(void);
+
 
 /**
  * @brief USART3 Initialization Function
@@ -2815,24 +2602,6 @@ static void MX_USART3_UART_Init(void) {
 
 }
 
-/*
-void USART3_IRQHandler(void) {
-    // Check if RXNE (Receive Not Empty) flag is set
-    if (USART3->ISR & USART_ISR_RXNE_RXFNE) {  // Correct for H7
-        // Breakpoint here - this should trigger when data is received
-        __asm("NOP"); // Place for breakpoint
-
-        // Read the received data (clears RXNE flag)
-        uint8_t received_byte = USART3->RDR;
-
-        // Echo back immediately
-        USART3->TDR = received_byte;
-
-        // Optional: Also use HAL to clear flags
-        __HAL_UART_CLEAR_FLAG(&huart3, UART_CLEAR_NEF);
-    }
-}*/
-
 /* USER CODE END 4 */
 
 /**
@@ -2864,5 +2633,6 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
