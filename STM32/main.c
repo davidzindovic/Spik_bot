@@ -220,7 +220,7 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 
 void izpis_v_serijc(char *sporocilo);
-void uart_transmit(char *sporocilo);
+void uart_transmit(const char *sporocilo);
 char uart_receive();
 void process_message(char message);
 
@@ -238,8 +238,8 @@ void USART3_Pin_Init(void);
 /* USER CODE BEGIN 0 */
 TS_Init_t *hTSs;
 
-char rx_buff[10];
-char rcv_buff[10];
+char rx_buff[30];
+char rcv_buff[30];
 
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
@@ -282,7 +282,7 @@ uint32_t J4_volume_per_turn=0;
  */
 int main(void) {
 	uint32_t RNG_PTR[2];
-	for(uint8_t i=0;i<10;i++)rx_buff[i]='\0';
+	for(uint8_t i=0;i<30;i++)rx_buff[i]='\0';
 	for(uint8_t i=0;i<128;i++)uart_rx_buffer[i]='\0';
 
 	/* USER CODE BEGIN 1 */
@@ -502,12 +502,7 @@ int main(void) {
 
 	//run_motor(2);
 
-
-	char znak='\0'; 					//aktiven prebran znak
-	char znak_temp; 			//shranjeno prejšnje stanje znaka
-
-	
-
+	uart_transmit("Nika\r\n");
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -544,8 +539,9 @@ int main(void) {
 
 
 
-
-		uart_receive();
+		char neki[30];
+		*neki=uart_receive();
+		HAL_Delay(1);
 
 	    // Transmit data via USART3
 
@@ -2450,11 +2446,11 @@ void uart_process_command(const char* command) {
     char response[128];
 
     if (strncmp(command, "STATUS", 6) == 0) {
-        UART_Send_Motor_Status();
+    	uart_send_motor_status();
     }
     else if (strncmp(command, "STOP", 4) == 0) {
         stop_all_motors();
-        UART_Send_Data("OK:All motors stopped\r\n");
+        uart_transmit("OK:All motors stopped\r\n");
     }
     else if (strncmp(command, "START", 5) == 0) {
         // Parse motor number: START 0, START 1, etc.
@@ -2462,7 +2458,7 @@ void uart_process_command(const char* command) {
         if (motor_num >= 0 && motor_num < 4) {
             run_motor(motor_num);
             snprintf(response, sizeof(response), "OK:Motor %d started\r\n", motor_num);
-            UART_Send_Data(response);
+            uart_transmit(response);
         }
     }
     else if (strncmp(command, "MOVE", 4) == 0) {
@@ -2472,7 +2468,7 @@ void uart_process_command(const char* command) {
             if (motor_num >= 0 && motor_num < 4) {
                 // Add your move logic here
                 snprintf(response, sizeof(response), "OK:Moving motor %d to %d\r\n", motor_num, position);
-                UART_Send_Data(response);
+                uart_transmit(response);
             }
         }
     }
@@ -2482,7 +2478,7 @@ void uart_process_command(const char* command) {
     }
     else {
         snprintf(response, sizeof(response), "ERROR:Unknown command: %s\r\n", command);
-        UART_Send_Data(response);
+        uart_transmit(response);
     }
 }
 
@@ -2498,7 +2494,7 @@ void uart_send_motor_status(void) {
              motors[1].position, motors[1].running, motors[1].direction,
              motors[2].position, motors[2].running, motors[2].direction,
              motors[3].position, motors[3].running, motors[3].direction);
-    UART_Send_Data(status);
+    uart_transmit(status);
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
@@ -2512,13 +2508,55 @@ void izpis_v_serijc(char *sporocilo)
 	HAL_UART_Transmit(&huart3, sporocilo, sizeof(sporocilo), 100);
 }
 
-void uart_transmit(const *char sporocilo)
+void uart_transmit(const char *sporocilo)
 {
 	//char SendBuffer[]="HelloHello\r\n";
 	HAL_UART_Transmit_IT(&huart1, sporocilo,strlen(sporocilo)-1);
 }
 
-char uart_receive(void);
+char uart_receive(void)
+{
+	static char znak='\0'; 					//aktiven prebran znak
+	static char znak_temp;
+
+	char beseda[30];
+	uint8_t beseda_write_pos=0;
+
+	while(znak!='\n')
+	{
+		if((HAL_GetTick()-timing_uart)>=limit_uart)
+		{
+			static uint8_t uart_read_pos=0;
+			static uint8_t first_read=0;
+
+			uint8_t read_state=0; 				//je 1 če smo prebrali nekaj novega, po defaultu 0 vsak loop
+
+			if(uart_read_pos==30)uart_read_pos=0;
+
+			if(first_read!=1 && rx_buff[0]!='\0')//prvo branje opravimo ko je prvi element različen od '\0', da ne listamo po nepotrebnem
+			{
+				first_read=1;
+				znak_temp=znak;
+				znak=rx_buff[uart_read_pos];
+				rx_buff[uart_read_pos]='\0'; //po branju zapišemo '\0' kot oznako da smo prebrali
+				uart_read_pos++;
+				read_state=1;
+			}
+
+			else if(first_read==1 && rx_buff[uart_read_pos]!='\0') //če smo primer prvega branja opravili in če je kaj za prebrat
+			{
+				znak_temp=znak;
+				znak=rx_buff[uart_read_pos];
+				rx_buff[uart_read_pos]='\0'; //po branju zapišemo '\0' kot oznako da smo prebrali
+				beseda[beseda_write_pos]=znak;
+				beseda_write_pos++;
+				uart_read_pos++;
+				read_state=1;
+			}
+		}
+	}
+	return *beseda;
+}
 
 
 /**
@@ -2633,6 +2671,5 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
 
