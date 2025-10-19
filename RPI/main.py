@@ -6,7 +6,9 @@ try:
   spik_bot_serial.serial_init()
   
   while(1):
-    spik_bot_serial.serial_receive()
+    sporocilo=spik_bot_serial.serial_receive()
+    if sporocilo is not None:
+      spik_bot_serial.serial_transmit(sporocilo)
 
 except KeyboardInterrupt:
   spik_bot_serial.serial_close()
