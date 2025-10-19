@@ -20,7 +20,7 @@ def serial_receive():
   print("Receiving message...")
   x=ser.readline()
   if len(x)>2:
-    print("Received: "+x+"\n-----")
+    print("Received: "+str(x)+"\n-----")
   else:
     print("Received message is invalid \n-----")
   ser.reset_output_buffer()
