@@ -1,6 +1,8 @@
 import serial
 import time
 
+global ser
+
 def serial_init():
   ser=serial.Serial('/dev/ttyS0',115200,timeout=1.0)
   time.sleep(3)
