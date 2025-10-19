@@ -19,6 +19,7 @@ def serial_receive():
   global ser
   print("Receiving message...")
   x=ser.readline()
+  x=x[2:]
   if len(x)>2:
     print("Received: "+str(x)+"\n-----")
   else:
