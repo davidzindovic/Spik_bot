@@ -14,7 +14,7 @@ def library_setup():
     finally:
         import serial
 	
-	try:
+    try:
         import time
     except:
         os.system('python -m pip install time')
@@ -41,6 +41,7 @@ def library_setup():
         os.system('python -m pip install matplotlib')
     finally:
         import matplotlib.pyplot as plt
+
 
 
 
