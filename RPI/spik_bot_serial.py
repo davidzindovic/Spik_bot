@@ -13,7 +13,7 @@ def serial_init():
 def serial_transmit(message):
   global ser
   print("Sending: "+message)
-  ser.write(message.encode('utf-8'))
+  ser.write((message+"\n").encode('utf-8'))
 
 def serial_receive():
   global ser
