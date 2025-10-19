@@ -6,4 +6,4 @@ try:
   serial_init()
   
   while(1):
-
+    print(serial.receive())
