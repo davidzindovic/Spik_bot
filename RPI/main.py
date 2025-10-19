@@ -9,5 +9,4 @@ try:
     spik_bot_serial.serial_receive()
 
 except KeyboardInterrupt:
-  print("closing")
-  ser.close()
+  spik_bot_serial.serial_close()
