@@ -2,7 +2,7 @@
 #import needed modules and install them if needed
 
 from datetime import datetime
-#import os
+import os
 #import ctypes
 
 def library_setup():
@@ -41,6 +41,7 @@ def library_setup():
         os.system('python -m pip install matplotlib')
     finally:
         import matplotlib.pyplot as plt
+
 
 
 
