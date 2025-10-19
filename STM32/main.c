@@ -220,8 +220,8 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 
 void izpis_v_serijc(char *sporocilo);
-void uart_transmit(const char *sporocilo);
-char uart_receive();
+void uart_transmit(char *sporocilo);
+char uart_receive(char *sporocilo);
 void process_message(char message);
 
 void uart_process_command(const char* command);
@@ -229,6 +229,10 @@ void uart_send_motor_status(void);
 
 static void MPU_Config(void);
 void USART3_Pin_Init(void);
+
+//void USART_write(int ch);
+
+//void UART_Write_String(char *p);
 
 //uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
 
@@ -238,13 +242,15 @@ void USART3_Pin_Init(void);
 /* USER CODE BEGIN 0 */
 TS_Init_t *hTSs;
 
-char rx_buff[30];
-char rcv_buff[30];
+#define BUFFER_SIZE 30
+
+char rx_buff[BUFFER_SIZE];
+//char rcv_buff[30];
 
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
 
-uint8_t uart_rx_buffer[128];
+uint8_t uart_rx_buffer[BUFFER_SIZE];
 uint8_t uart_rx_index = 0;
 
 uint8_t podatki;
@@ -283,7 +289,7 @@ uint32_t J4_volume_per_turn=0;
 int main(void) {
 	uint32_t RNG_PTR[2];
 	for(uint8_t i=0;i<30;i++)rx_buff[i]='\0';
-	for(uint8_t i=0;i<128;i++)uart_rx_buffer[i]='\0';
+	for(uint8_t i=0;i<30;i++)uart_rx_buffer[i]='\0';
 
 	/* USER CODE BEGIN 1 */
 	 CPU_CACHE_Enable();
@@ -340,17 +346,17 @@ int main(void) {
 	//HAL_UART_Receive_IT(&huart3, rx_buff_usb, 10);
 	MX_USART1_UART_Init();
 	// Clear any pending interrupts
-	__HAL_UART_CLEAR_FLAG(&huart1, UART_CLEAR_TCF | UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_FEF | UART_CLEAR_PEF);
+	//__HAL_UART_CLEAR_FLAG(&huart1, UART_CLEAR_TCF | UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_FEF | UART_CLEAR_PEF);
 
 	// Enable RX interrupt in NVIC
-	HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);
-	HAL_NVIC_EnableIRQ(USART1_IRQn);
+	//HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);
+	//HAL_NVIC_EnableIRQ(USART1_IRQn);
 
 	// Enable RX interrupt in USART peripheral
-	__HAL_UART_ENABLE_IT(&huart1, UART_IT_RXNE);
+	//__HAL_UART_ENABLE_IT(&huart1, UART_IT_RXNE);
 
 	// Start receiving - THIS IS CRITICAL!
-	HAL_UART_Receive_IT(&huart1, rx_buff, 1);  // Receive 1 byte at a time
+	HAL_UART_Receive_IT(&huart1, rx_buff, 30);  // Receive 1 byte at a time
     //Debug_USART1_Config();
 
 	//Timer initialization
@@ -502,7 +508,11 @@ int main(void) {
 
 	//run_motor(2);
 
-	uart_transmit("Nika\r\n");
+	char text[]="Nika\r\n";
+
+	uart_transmit(text);
+	//uart_transmit("Nika\r\n");
+
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -539,9 +549,10 @@ int main(void) {
 
 
 
-		char neki[30];
-		*neki=uart_receive();
+		//char neki[30];
+		uart_receive(uart_rx_buffer);
 		HAL_Delay(1);
+		uart_empty_buffer(uart_rx_buffer,BUFFER_SIZE);
 
 	    // Transmit data via USART3
 
@@ -1418,9 +1429,9 @@ static void MX_SDMMC1_MMC_Init(void) {
 static void MX_USART1_UART_Init(void) {
 
 	/* USER CODE BEGIN USART1_Init 0 */
-    __HAL_RCC_USART1_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    HAL_Delay(1);
+    //__HAL_RCC_USART1_CLK_ENABLE();
+    //__HAL_RCC_GPIOB_CLK_ENABLE();
+    //HAL_Delay(1);
 	/* USER CODE END USART1_Init 0 */
 
 	/* USER CODE BEGIN USART1_Init 1 */
@@ -1456,10 +1467,12 @@ static void MX_USART1_UART_Init(void) {
 */
     HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);  // Set appropriate priority
     HAL_NVIC_EnableIRQ(USART1_IRQn);
+
+
 	if (HAL_UART_Init(&huart1) != HAL_OK) {
 		Error_Handler();
 	}
-	/*
+/*
 	if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8)
 			!= HAL_OK) {
 		Error_Handler();
@@ -1471,7 +1484,7 @@ static void MX_USART1_UART_Init(void) {
 	if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK) {
 		Error_Handler();
 	}
-
+	/*
     HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);  // Set appropriate priority
     HAL_NVIC_EnableIRQ(USART1_IRQn);          // Enable USART1 interrupt
     */
@@ -2498,7 +2511,7 @@ void uart_send_motor_status(void) {
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    HAL_UART_Receive_IT(&huart1, rx_buff, 10);
+    HAL_UART_Receive_IT(&huart1, rx_buff, 30);
 }
 
 void izpis_v_serijc(char *sporocilo)
@@ -2508,26 +2521,35 @@ void izpis_v_serijc(char *sporocilo)
 	HAL_UART_Transmit(&huart3, sporocilo, sizeof(sporocilo), 100);
 }
 
-void uart_transmit(const char *sporocilo)
+void uart_transmit(char *sporocilo)
 {
-	//char SendBuffer[]="HelloHello\r\n";
+	//za preset sporocil:
+	//char buffer[40]={'0'};
+	//sprintf(buffer,"my variable is %s \r\n",sporocilo);
+
 	HAL_UART_Transmit_IT(&huart1, sporocilo,strlen(sporocilo)-1);
+	HAL_Delay(1);
 }
 
-char uart_receive(void)
+char uart_receive(char *beseda)
 {
 	static char znak='\0'; 					//aktiven prebran znak
 	static char znak_temp;
 
-	char beseda[30];
+	//char beseda[30];
+	for(uint8_t i=0;i<30;i++)beseda[i]='\0';
 	uint8_t beseda_write_pos=0;
+
+	static _Bool first_read=0;
+
+	//timing_uart=HAL_GetTick();
 
 	while(znak!='\n')
 	{
-		if((HAL_GetTick()-timing_uart)>=limit_uart)
-		{
+		//if((HAL_GetTick()-timing_uart)>=limit_uart)
+		//{
+			timing_uart=HAL_GetTick();
 			static uint8_t uart_read_pos=0;
-			static uint8_t first_read=0;
 
 			uint8_t read_state=0; 				//je 1 če smo prebrali nekaj novega, po defaultu 0 vsak loop
 
@@ -2536,10 +2558,10 @@ char uart_receive(void)
 			if(first_read!=1 && rx_buff[0]!='\0')//prvo branje opravimo ko je prvi element različen od '\0', da ne listamo po nepotrebnem
 			{
 				first_read=1;
-				znak_temp=znak;
-				znak=rx_buff[uart_read_pos];
-				rx_buff[uart_read_pos]='\0'; //po branju zapišemo '\0' kot oznako da smo prebrali
-				uart_read_pos++;
+				//znak_temp=znak;
+				//znak=rx_buff[uart_read_pos];
+				//rx_buff[uart_read_pos]='\0'; //po branju zapišemo '\0' kot oznako da smo prebrali
+				//uart_read_pos++;
 				read_state=1;
 			}
 
@@ -2553,11 +2575,19 @@ char uart_receive(void)
 				uart_read_pos++;
 				read_state=1;
 			}
-		}
+		//}
 	}
-	return *beseda;
+	first_read=0;
+	//return *beseda;
 }
 
+void uart_empty_buffer(char *buffer, uint8_t buffer_size)
+{
+	for(uint8_t buff_ptr=0;buff_ptr<buffer_size;buff_ptr++)
+	{
+		buffer[buff_ptr]='\0';
+	}
+}
 
 /**
  * @brief USART3 Initialization Function
