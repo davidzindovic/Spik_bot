@@ -1,5 +1,5 @@
-import lib_init.py
-import spik_bot_serial.py
+import lib_init
+import spik_bot_serial
 
 try:
   library_setup()
