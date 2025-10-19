@@ -24,7 +24,7 @@ def library_setup():
     try:
         import cv2
     except:
-        os.system('python -m pip install python-opencv')
+        os.system('python -m pip install opencv-python')
     finally:
         import cv2
 	
@@ -41,6 +41,7 @@ def library_setup():
         os.system('python -m pip install matplotlib')
     finally:
         import matplotlib.pyplot as plt
+
 
 
 
