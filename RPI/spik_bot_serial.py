@@ -22,6 +22,7 @@ def serial_receive():
   if len(x)>2:
     print("Received: "+x.decode("utf-8")+"\n-----")
   else:
+    pass
     #print("Received message is invalid \n-----")
   ser.reset_output_buffer()
 
