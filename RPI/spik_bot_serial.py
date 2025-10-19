@@ -21,10 +21,13 @@ def serial_receive():
   x=ser.readline()
   if len(x)>2:
     print("Received: "+x.decode("utf-8")+"\n-----")
+    return x.decode("utf-8")
   else:
     pass
+    return None
     #print("Received message is invalid \n-----")
   ser.reset_output_buffer()
+
 
 def serial_close():
   global ser
