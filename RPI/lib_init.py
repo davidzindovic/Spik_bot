@@ -21,7 +21,7 @@ def library_setup():
     finally:
         import time
 
-	try:
+    try:
         import cv2
     except:
         os.system('python -m pip install python-opencv')
@@ -41,6 +41,7 @@ def library_setup():
         os.system('python -m pip install matplotlib')
     finally:
         import matplotlib.pyplot as plt
+
 
 
 
