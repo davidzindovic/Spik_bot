@@ -14,10 +14,10 @@ def serial_transmit(message):
   ser.write(message.encode('utf-8'))
 
 def serial_receive():
-  print("Receiving message.")
+  print("Receiving message...")
   x=ser.readline()
   if len(x)>2:
-    print("Received: "+x)
+    print("Received: "+x+"\n-----")
   else:
-    print("Received message is invalid")
+    print("Received message is invalid \n-----")
   ser.reset_output_buffer()
