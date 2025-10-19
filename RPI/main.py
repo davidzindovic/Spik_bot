@@ -2,8 +2,8 @@ import lib_init
 import spik_bot_serial
 
 try:
-  library_setup()
-  serial_init()
+  lib_init.library_setup()
+  spik_bot_serial.serial_init()
   
   while(1):
     print(serial_receive())
