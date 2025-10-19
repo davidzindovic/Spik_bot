@@ -24,3 +24,8 @@ def serial_receive():
   else:
     print("Received message is invalid \n-----")
   ser.reset_output_buffer()
+
+def serial_close():
+  global ser
+  print("closing")
+  ser.close()
