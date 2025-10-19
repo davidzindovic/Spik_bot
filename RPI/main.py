@@ -7,3 +7,7 @@ try:
   
   while(1):
     print(serial_receive())
+
+except KeyboardInterrupt:
+  print("closing")
+  ser.close()
