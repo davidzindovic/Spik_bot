@@ -1,4 +1,5 @@
 import serial
+import time
 
 def serial_init():
   ser=serial.Serial('/dev/ttyS0',115200,timeout=1.0)
