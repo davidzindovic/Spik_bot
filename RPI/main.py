@@ -7,6 +7,7 @@ try:
   
   while(1):
     sporocilo=spik_bot_serial.serial_receive()
+    print(sporocilo)
     if sporocilo is not None:
       spik_bot_serial.serial_transmit(sporocilo)
 
