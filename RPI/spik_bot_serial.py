@@ -17,15 +17,15 @@ def serial_transmit(message):
 
 def serial_receive():
   global ser
-  print("Receiving message...")
+  #print("Receiving message...")
   x=ser.readline()
   if len(x)>2:
     print("Received: "+x.decode("utf-8")+"\n-----")
   else:
-    print("Received message is invalid \n-----")
+    #print("Received message is invalid \n-----")
   ser.reset_output_buffer()
 
 def serial_close():
   global ser
-  print("closing")
+  print("Closing serial communication.")
   ser.close()
