@@ -21,8 +21,7 @@ def serial_receive():
   x=ser.readline()
   if len(x)>2:
     print("Received: "+x.decode("utf-8")+"\n-----")
-    return "a"  
-    #return x.decode("utf-8")
+    return x.decode("utf-8")
   else:
     pass
     return None
