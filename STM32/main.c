@@ -230,6 +230,12 @@ void uart_send_motor_status(void);
 static void MPU_Config(void);
 void USART3_Pin_Init(void);
 
+void configure_end_switch_interrupts(void);
+void EXTI2_IRQHandler(void);
+void EXTI3_IRQHandler(void);
+void EXTI4_IRQHandler(void);
+void EXTI15_10_IRQHandler(void);
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 //void USART_write(int ch);
 
 //void UART_Write_String(char *p);
@@ -478,6 +484,8 @@ int main(void) {
 		.num_steps_per_turn=200
 	};
 
+	configure_end_switch_interrupts();
+
 	/* Configure LED1 */
 	//BSP_LED_Init(LED1);
 
@@ -510,8 +518,8 @@ int main(void) {
 
 	char text[]="Nika\r\n";
 
-	uart_transmit(text);
-	//uart_transmit("Nika\r\n");
+	//uart_transmit(text);
+
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -550,9 +558,10 @@ int main(void) {
 
 
 		//char neki[30];
-		uart_receive(uart_rx_buffer);
-		HAL_Delay(1);
-		uart_empty_buffer(uart_rx_buffer,BUFFER_SIZE);
+
+		//uart_receive(uart_rx_buffer);
+		//HAL_Delay(1);
+		//uart_empty_buffer(uart_rx_buffer,BUFFER_SIZE);
 
 	    // Transmit data via USART3
 
@@ -1614,12 +1623,21 @@ static void MX_GPIO_Init(void) {
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin : PH15 */
+	/*
 	GPIO_InitStruct.Pin = GPIO_PIN_15;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;
 	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+	*/
+	/*
+	GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+	 */
 
 	/*Configure GPIO pin : LCD_DISPD7_Pin */
 	GPIO_InitStruct.Pin = LCD_DISPD7_Pin;
@@ -1656,35 +1674,82 @@ static void MX_GPIO_Init(void) {
     //konc
 
     // inicializacija digital inputov (expansion board)
+    /*
     GPIO_InitStruct.Pin = GPIO_PIN_3;
     GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
     GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+	*/
+    /*
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;  // Interrupt on rising edge
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+     */
 
+    /*
     GPIO_InitStruct.Pin = GPIO_PIN_15;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
 	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+     */
 
+	/*
     GPIO_InitStruct.Pin = GPIO_PIN_4;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
 	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	*/
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_4;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	*/
 
+	/*
     GPIO_InitStruct.Pin = GPIO_PIN_2;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
 	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
+	*/
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_2;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
+	*/
 
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_13;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+     */
+
+	/*
     GPIO_InitStruct.Pin = GPIO_PIN_3;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
 	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+	*/
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_3;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+     */
+
     //konc
 
 	/*Configure GPIO pins : USB_OTG_FS2_ID_Pin OTG_FS2_PSO_Pin */
@@ -2668,6 +2733,180 @@ static void MX_USART3_UART_Init(void) {
 
 	/* USER CODE END USART3_Init 2 */
 
+}
+
+void configure_end_switch_interrupts(void)
+{
+	GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+	    // Enable SYSCFG clock
+	    __HAL_RCC_SYSCFG_CLK_ENABLE();
+
+	    // First, configure all pins as simple inputs
+	    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+
+	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct); // PE3
+	    GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
+	    GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
+	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PI2
+	    GPIO_InitStruct.Pin = GPIO_PIN_13; HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD13
+	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD3
+
+	    // Now manually configure EXTI for each pin
+
+	    // PE3 - EXTI3 (Motor 0 Switch 1)
+	    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3_Msk;
+	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PE;
+
+	    // PD3 - EXTI3 (Motor 2 Switch 2) - SHARED with PE3
+	    // Both PE3 and PD3 will trigger EXTI3, we handle both in callback
+
+	    // PH15 - EXTI15 (Motor 0 Switch 2)
+	    SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI15_Msk;
+	    SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI15_PH;
+
+	    // PB4 - EXTI4 (Motor 1 Switch 1)
+	    SYSCFG->EXTICR[1] &= ~SYSCFG_EXTICR2_EXTI4_Msk;
+	    SYSCFG->EXTICR[1] |= SYSCFG_EXTICR2_EXTI4_PB;
+
+	    // PI2 - EXTI2 (Motor 1 Switch 2)
+	    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI2_Msk;
+	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PI;
+
+	    // PD13 - EXTI13 (Motor 2 Switch 1) - THIS IS CRITICAL
+	    SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI13_Msk;
+	    SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PD;
+
+	    // Enable rising edge trigger for ALL lines
+	    EXTI->RTSR1 |= (1 << 2) | (1 << 3) | (1 << 4) | (1 << 13) | (1 << 15);
+
+	    // Enable interrupt mask for ALL lines
+	    EXTI->IMR1 |= (1 << 2) | (1 << 3) | (1 << 4) | (1 << 13) | (1 << 15);
+
+	    // Clear any pending interrupts
+	    EXTI->PR1 = (1 << 2) | (1 << 3) | (1 << 4) | (1 << 13) | (1 << 15);
+
+	    // Configure NVIC
+	    HAL_NVIC_SetPriority(EXTI2_IRQn, 6, 0);
+	    HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+
+	    HAL_NVIC_SetPriority(EXTI3_IRQn, 6, 0);
+	    HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+
+	    HAL_NVIC_SetPriority(EXTI4_IRQn, 6, 0);
+	    HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+
+	    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 6, 0);
+	    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+void EXTI2_IRQHandler(void)
+{
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_2) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_2);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_2);
+    }
+}
+
+void EXTI3_IRQHandler(void)
+{
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_3) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_3);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_3);
+    }
+}
+
+void EXTI4_IRQHandler(void)
+{
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_4) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_4);
+    }
+}
+
+void EXTI15_10_IRQHandler(void)
+{
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_13) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_13);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_13);
+    }
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_15);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
+    }
+}
+
+// Enhanced callback with proper shared line handling
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    static uint32_t last_interrupt_time = 0;
+    uint32_t current_time = HAL_GetTick();
+
+    // Debouncing - ignore interrupts within 50ms
+    if(current_time - last_interrupt_time > 50) {
+        last_interrupt_time = current_time;
+
+        switch(GPIO_Pin) {
+            case GPIO_PIN_3:
+                // Shared EXTI3: Check which port actually triggered
+                if(HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3)) {
+                    // Motor 0 Switch 1 (PE3)
+                    stop_motor(0);
+                    motors[0].position = 0;
+                    motors[0].running = false;
+                    uart_transmit("M0: Switch1 (PE3) - STOPPED\r\n");
+                }
+                else if(HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_3)) {
+                    // Motor 2 Switch 2 (PD3)
+                    stop_motor(2);
+                    motors[2].position = motors[2].max_position;
+                    motors[2].running = false;
+                    uart_transmit("M2: Switch2 (PD3) - STOPPED\r\n");
+                }
+                break;
+
+            case GPIO_PIN_13:
+                // Motor 2 Switch 1 (PD13)
+                stop_motor(2);
+                motors[2].position = 0;
+                motors[2].running = false;
+                uart_transmit("M2: Switch1 (PD13) - STOPPED\r\n");
+                break;
+
+            case GPIO_PIN_15:
+                // Motor 0 Switch 2 (PH15)
+                stop_motor(0);
+                motors[0].position = motors[0].max_position;
+                motors[0].running = false;
+                uart_transmit("M0: Switch2 (PH15) - STOPPED\r\n");
+                break;
+
+            case GPIO_PIN_4:
+                // Motor 1 Switch 1 (PB4)
+                stop_motor(1);
+                motors[1].position = 0;
+                motors[1].running = false;
+                uart_transmit("M1: Switch1 (PB4) - STOPPED\r\n");
+                break;
+
+            case GPIO_PIN_2:
+                // Motor 1 Switch 2 (PI2)
+                stop_motor(1);
+                motors[1].position = motors[1].max_position;
+                motors[1].running = false;
+                uart_transmit("M1: Switch2 (PI2) - STOPPED\r\n");
+                break;
+
+            default:
+                // Unknown pin - this shouldn't happen
+                char msg[50];
+                snprintf(msg, sizeof(msg), "Unknown GPIO: %d\r\n", GPIO_Pin);
+                uart_transmit(msg);
+                break;
+        }
+    }
 }
 
 /* USER CODE END 4 */
