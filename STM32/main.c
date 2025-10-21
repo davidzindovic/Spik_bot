@@ -2802,39 +2802,45 @@ void configure_end_switch_interrupts(void)
 	    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
-void EXTI2_IRQHandler(void)
+void EXTI2_IRQHandler(void) //I2=M1_SW2
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_2) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_2);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_2);
+		motors[1].position=motors[1].max_position;
     }
 }
 
-void EXTI3_IRQHandler(void)
+void EXTI3_IRQHandler(void) //E3=M0_SW1,D3=M2_SW2
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_3) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_3);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_3);
+		//motors[0].position=0;
+		//motors[2].position=motors[2].max_position;
     }
 }
 
-void EXTI4_IRQHandler(void)
+void EXTI4_IRQHandler(void) //B4=M1_SW1
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_4) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_4);
+		motors[1].position=0;
     }
 }
 
-void EXTI15_10_IRQHandler(void)
+void EXTI15_10_IRQHandler(void) //H15=M0_SW2, D13=M2_SW1
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_13) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_13);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_13);
+		motors[2].position=0;
     }
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_15);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
+		motors[0].position=motors[0].max_position;
     }
 }
 
@@ -2940,5 +2946,6 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
