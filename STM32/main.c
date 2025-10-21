@@ -2232,7 +2232,7 @@ void run_motor(uint8_t motor_number)
 	    return;
 	}
 
-	if (motors[motor_number].running == false)
+	if (motors[motor_number].running == false && ((motors[motor_number].direction==motors[motor_number].direction_plus && motors[motor_number].position!=motors[motor_number].position_max) || (motors[motor_number].direction==motors[motor_number].direction_minus && motors[motor_number].position!=0)))
 	{
 		// Stop timer first
 		//HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
@@ -2952,6 +2952,7 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
 
