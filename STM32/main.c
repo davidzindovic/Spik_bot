@@ -554,7 +554,19 @@ int main(void) {
 			}
 		}*/
 
+        // PD13 - Motor 2 Switch 1
+        if (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_13)) {
 
+            motors[2].running = false;
+
+        }
+
+        // PD3 - Motor 2 Switch 2
+        if (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_3)) {
+
+            motors[2].running = false;
+
+        }
 
 
 		//char neki[30];
@@ -2232,7 +2244,7 @@ void run_motor(uint8_t motor_number)
 	    return;
 	}
 
-	if (motors[motor_number].running == false && ((motors[motor_number].direction==motors[motor_number].direction_plus && motors[motor_number].position!=motors[motor_number].position_max) || (motors[motor_number].direction==motors[motor_number].direction_minus && motors[motor_number].position!=0)))
+	if (motors[motor_number].running == false)
 	{
 		// Stop timer first
 		//HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
@@ -2737,10 +2749,62 @@ static void MX_USART3_UART_Init(void) {
 
 void configure_end_switch_interrupts(void)
 {
+
+	/*
+    // Disable all EXTI interrupts
+    EXTI->IMR1 = 0;
+    EXTI->EMR1 = 0;
+    EXTI->RTSR1 = 0;
+    EXTI->FTSR1 = 0;
+
+    // Clear all pending interrupts
+    EXTI->PR1 = 0xFFFFFFFF;
+
+    // Disable NVIC
+    HAL_NVIC_DisableIRQ(EXTI0_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI1_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI2_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI3_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI4_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
+    HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+
+    // Clear any pending NVIC interrupts
+    NVIC->ICPR[0] = 0xFFFFFFFF;
+    NVIC->ICPR[1] = 0xFFFFFFFF;
+
+    HAL_Delay(10);
+    */
+
+    // Disable FMC/SDRAM to free up PD13
+    __HAL_RCC_FMC_CLK_DISABLE();
+    //__HAL_RCC_SDRAM_CLK_DISABLE();
+
 	GPIO_InitTypeDef GPIO_InitStruct = {0};
 
 	    // Enable SYSCFG clock
 	    __HAL_RCC_SYSCFG_CLK_ENABLE();
+
+
+/*
+	    // Disable any alternate function
+	    GPIOD->AFR[1] &= ~(0xF << ((13-8)*4)); // PD13 AF reset
+	    GPIOD->AFR[0] &= ~(0xF << (3*4));      // PD3 AF reset
+
+	    // Set as input
+	    GPIOD->MODER &= ~(GPIO_MODER_MODE13 | GPIO_MODER_MODE3);
+
+	    // Configure interrupts again
+	    //GPIO_InitTypeDef GPIO_InitStruct = {0};
+	    GPIO_InitStruct.Pin = GPIO_PIN_13 | GPIO_PIN_3;
+	    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+*/
+
+
+
 
 	    // First, configure all pins as simple inputs
 	    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -2752,7 +2816,9 @@ void configure_end_switch_interrupts(void)
 	    GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
 	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PI2
 	    GPIO_InitStruct.Pin = GPIO_PIN_13; HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD13
-	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD3
+	    //GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD3
+
+
 
 	    // Now manually configure EXTI for each pin
 
@@ -2788,65 +2854,158 @@ void configure_end_switch_interrupts(void)
 	    // Clear any pending interrupts
 	    EXTI->PR1 = (1 << 2) | (1 << 3) | (1 << 4) | (1 << 13) | (1 << 15);
 
+
+	    // Clear any pending interrupts
+		//__HAL_GPIO_EXTI_CLEAR_FLAG(GPIO_PIN_13 | GPIO_PIN_3 | GPIO_PIN_15 | GPIO_PIN_4 | GPIO_PIN_2);
+
 	    // Configure NVIC
 	    HAL_NVIC_SetPriority(EXTI2_IRQn, 6, 0);
 	    HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
-	    HAL_NVIC_SetPriority(EXTI3_IRQn, 6, 0);
+	    HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
 	    HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
 	    HAL_NVIC_SetPriority(EXTI4_IRQn, 6, 0);
 	    HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
-	    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 6, 0);
+	    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
 	    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+	    // 1. Enable GPIOD clock
+		//__HAL_RCC_GPIOD_CLK_ENABLE();
+
+		// 2. Configure PD3 as input with pull-down
+		//GPIO_InitTypeDef GPIO_InitStruct = {0};
+		GPIO_InitStruct.Pin = GPIO_PIN_3;
+		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+		GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+		HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+		// 3. Manual EXTI configuration for PD3
+		__HAL_RCC_SYSCFG_CLK_ENABLE();
+
+		// Clear EXTI3 configuration
+		SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3_Msk;
+		// Set EXTI3 to GPIOD
+		SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PD;
+
+		// Enable rising edge trigger
+		EXTI->RTSR1 |= (1 << 3);
+		// Disable falling edge trigger
+		EXTI->FTSR1 &= ~(1 << 3);
+
+		// Enable interrupt mask
+		EXTI->IMR1 |= (1 << 3);
+
+		// Clear any pending interrupt
+		EXTI->PR1 = (1 << 3);
+
+		// Configure NVIC
+		HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
+		HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+		GPIOD->AFR[1] &= ~(0xF << ((13-8)*4)); // Clear alternate function
+
+		GPIO_InitStruct.Pin = GPIO_PIN_3;
+		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+		GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+		HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+		// 3. Manual EXTI configuration for PD3
+		__HAL_RCC_SYSCFG_CLK_ENABLE();
+
+		// Clear EXTI3 configuration
+		SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3_Msk;
+		// Set EXTI3 to GPIOD
+		SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PE;
+
+		// Enable rising edge trigger
+		EXTI->RTSR1 |= (1 << 3);
+		// Disable falling edge trigger
+		EXTI->FTSR1 &= ~(1 << 3);
+
+		// Enable interrupt mask
+		EXTI->IMR1 |= (1 << 3);
+
+		// Clear any pending interrupt
+		EXTI->PR1 = (1 << 3);
+
+		// Configure NVIC
+		HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
+		HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+		GPIOE->AFR[0] &= ~(0xF << (3 * 4));  // Clear alternate function for PE3
+
+		// For PD13
+		GPIO_InitStruct.Pin = GPIO_PIN_13;
+		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+		GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+		HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+		// Manual EXTI configuration for PD13
+		//__HAL_RCC_SYSCFG_CLK_ENABLE();
+
+		// Clear EXTI13 configuration
+		SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI13_Msk;
+		// Set EXTI13 to GPIOD
+		SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PD;
+
+		// Enable rising edge trigger
+		EXTI->RTSR1 |= (1 << 13);
+		// Disable falling edge trigger
+		EXTI->FTSR1 &= ~(1 << 13);
+
+		// Clear alternate function for PD13
+		GPIOD->AFR[1] &= ~(0xF << ((13-8)*4));
+
+		// Enable interrupt mask
+		EXTI->IMR1 |= (1 << 13);
+
+		// Clear any pending interrupt
+		EXTI->PR1 = (1 << 13);
+
+		// Configure NVIC
+		HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);  // PD13 uses EXTI15_10_IRQn
+		HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+
+
 }
 
-void EXTI2_IRQHandler(void) //I2=M1_SW2
+void EXTI2_IRQHandler(void)
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_2) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_2);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_2);
-		motors[1].position=motors[1].max_position;
-		stop_motor(1);
     }
 }
 
-void EXTI3_IRQHandler(void) //E3=M0_SW1,D3=M2_SW2
+void EXTI3_IRQHandler(void)
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_3) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_3);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_3);
-		//motors[0].position=0;
-		stop_motor(0);
-		//motors[2].position=motors[2].max_position;
-		stop_motor(2);
     }
 }
 
-void EXTI4_IRQHandler(void) //B4=M1_SW1
+void EXTI4_IRQHandler(void)
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_4) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_4);
-		motors[1].position=0;
-		stop_motor(1);
     }
 }
 
-void EXTI15_10_IRQHandler(void) //H15=M0_SW2, D13=M2_SW1
+void EXTI15_10_IRQHandler(void)
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_13) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_13);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_13);
-		motors[2].position=0;
-		stop_motor(2);
     }
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_15);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
-		motors[0].position=motors[0].max_position;
-		stop_motor(0);
     }
 }
 
@@ -2952,8 +3111,5 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-
-
 
 
