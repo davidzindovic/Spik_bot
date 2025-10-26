@@ -63,11 +63,8 @@ typedef struct {
     _Bool reset_requested;
     _Bool reset_completed;
 
-    uint16_t end_switch1_pin;
-    GPIO_TypeDef* end_switch1_port;
-
-    uint16_t end_switch2_pin;
-    GPIO_TypeDef* end_switch2_port;
+    uint16_t end_switch_pin;
+    GPIO_TypeDef* end_switch_port;
 
 	uint32_t unit_conversion; //number of steps per mm or deg
 
@@ -204,8 +201,7 @@ void reset_motors(void);
 void move_to_starting_position(uint8_t motor_number);
 _Bool move_effector(uint32_t x, uint32_t y, uint32_t orientation);
 void update_global_coordinates(void);
-_Bool read_switch1(uint8_t motor_number);
-_Bool read_switch2(uint8_t motor_number);
+_Bool read_switch(uint8_t motor_number);
 void run_motor(uint8_t motor_number);
 void stop_motor(uint8_t motor_number);
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
@@ -394,10 +390,10 @@ int main(void) {
 		.running = false,
 	    .reset_requested = false,
 	    .reset_completed = false,
-	    .end_switch1_pin = GPIO_PIN_3,//D8
-	    .end_switch1_port = GPIOE,
-	    .end_switch2_pin = GPIO_PIN_15,//D9
-	    .end_switch2_port = GPIOH,
+	    .end_switch_pin = GPIO_PIN_3,//D8
+	    .end_switch_port = GPIOE,
+	    //.end_switch2_pin = GPIO_PIN_15,//D9
+	    //.end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
 		.num_steps_per_turn=40000
 	};
@@ -420,10 +416,12 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch1_pin = GPIO_PIN_4,//D10
-		.end_switch1_port = GPIOB,
-	    .end_switch2_pin = GPIO_PIN_2,//D12
-	    .end_switch2_port = GPIOI,
+		.end_switch_pin = GPIO_PIN_15,//D9
+		.end_switch_port = GPIOH,
+		//.end_switch1_pin = GPIO_PIN_4,//D10
+		//.end_switch1_port = GPIOB,
+	    //.end_switch2_pin = GPIO_PIN_2,//D12
+	    //.end_switch2_port = GPIOI,
 		.unit_conversion=100, //steps per deg
 		.num_steps_per_turn=40000
 	};
@@ -446,10 +444,12 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch1_pin = GPIO_PIN_13,//D14
-		.end_switch1_port = GPIOD,
-		.end_switch2_pin = GPIO_PIN_3,//D13
-		.end_switch2_port = GPIOD,
+		.end_switch_pin = GPIO_PIN_4,//D10
+		.end_switch_port = GPIOB,
+		//.end_switch1_pin = GPIO_PIN_13,//D14
+		//.end_switch1_port = GPIOD,
+		//.end_switch2_pin = GPIO_PIN_3,//D13
+		//.end_switch2_port = GPIOD,
 		.unit_conversion=100, //steps per mm
 		.num_steps_per_turn=40000
 	};
@@ -474,16 +474,15 @@ int main(void) {
 		//NE UPORABLJAJ = IGNORIRAJ:
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch1_pin = GPIO_PIN_2,//D12
-		.end_switch1_port = GPIOI,
-		.end_switch2_pin = GPIO_PIN_3,//D13
-		.end_switch2_port = GPIOD,
+		.end_switch_pin = GPIO_PIN_2,//D12
+		.end_switch_port = GPIOI,
 		//konc prepovedi
 
 		.unit_conversion=100, //steps per mm
 		.num_steps_per_turn=200
 	};
 
+	//usable IO: I2
 	configure_end_switch_interrupts();
 
 	/* Configure LED1 */
@@ -554,19 +553,7 @@ int main(void) {
 			}
 		}*/
 
-        // PD13 - Motor 2 Switch 1
-        if (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_13)) {
 
-            motors[2].running = false;
-
-        }
-
-        // PD3 - Motor 2 Switch 2
-        if (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_3)) {
-
-            motors[2].running = false;
-
-        }
 
 
 		//char neki[30];
@@ -2061,7 +2048,7 @@ void reset_motors(void)
 
 		if(motors[motor_num].reset_requested)
 		{
-			while(!(read_switch1(motor_num) || read_switch2(motor_num)))
+			while(!(read_switch(motor_num)))
 			{} //trenutno je vseeno kateri switch zadane
 
 			stop_motor(motor_num);
@@ -2078,7 +2065,7 @@ void reset_motors(void)
 
 			run_motor(motor_num);
 
-			while(!(read_switch1(motor_num) || read_switch2(motor_num)))
+			while(!(read_switch(motor_num)))
 			{}
 
 			motors[motor_num].max_position=motors[motor_num].position;
@@ -2206,26 +2193,16 @@ void update_global_coordinates(void)
 }
 
 /**
-  * @brief  Reads the state of the first limit switch, of the chosen motor.
+  * @brief  Reads the state of either the limit switch, of the chosen motor.
   * @param  motor_number: number of the motor (starting with index 0),
 			whose first limit switch should be read.
   * @retval The state of the first limit switch.
   */
-_Bool read_switch1(uint8_t motor_number)
+_Bool read_switch(uint8_t motor_number)
 {
-	return HAL_GPIO_ReadPin(motors[motor_number].end_switch1_port, motors[motor_number].end_switch1_pin);
+	return HAL_GPIO_ReadPin(motors[motor_number].end_switch_port, motors[motor_number].end_switch_pin);
 }
 
-/**
-  * @brief  Reads the state of the second limit switch, of the chosen motor.
-  * @param  motor_number: number of the motor (starting with index 0),
-			whose second limit switch should be read.
-  * @retval The state of the second limit switch.
-  */
-_Bool read_switch2(uint8_t motor_number)
-{
-	return HAL_GPIO_ReadPin(motors[motor_number].end_switch2_port, motors[motor_number].end_switch2_pin);
-}
 
 /**
   * @brief  Runs the chosen motor with the struct defined speed/frequency.
@@ -2750,61 +2727,10 @@ static void MX_USART3_UART_Init(void) {
 void configure_end_switch_interrupts(void)
 {
 
-	/*
-    // Disable all EXTI interrupts
-    EXTI->IMR1 = 0;
-    EXTI->EMR1 = 0;
-    EXTI->RTSR1 = 0;
-    EXTI->FTSR1 = 0;
-
-    // Clear all pending interrupts
-    EXTI->PR1 = 0xFFFFFFFF;
-
-    // Disable NVIC
-    HAL_NVIC_DisableIRQ(EXTI0_IRQn);
-    HAL_NVIC_DisableIRQ(EXTI1_IRQn);
-    HAL_NVIC_DisableIRQ(EXTI2_IRQn);
-    HAL_NVIC_DisableIRQ(EXTI3_IRQn);
-    HAL_NVIC_DisableIRQ(EXTI4_IRQn);
-    HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
-    HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
-
-    // Clear any pending NVIC interrupts
-    NVIC->ICPR[0] = 0xFFFFFFFF;
-    NVIC->ICPR[1] = 0xFFFFFFFF;
-
-    HAL_Delay(10);
-    */
-
-    // Disable FMC/SDRAM to free up PD13
-    __HAL_RCC_FMC_CLK_DISABLE();
-    //__HAL_RCC_SDRAM_CLK_DISABLE();
-
-	GPIO_InitTypeDef GPIO_InitStruct = {0};
+		GPIO_InitTypeDef GPIO_InitStruct = {0};
 
 	    // Enable SYSCFG clock
 	    __HAL_RCC_SYSCFG_CLK_ENABLE();
-
-
-/*
-	    // Disable any alternate function
-	    GPIOD->AFR[1] &= ~(0xF << ((13-8)*4)); // PD13 AF reset
-	    GPIOD->AFR[0] &= ~(0xF << (3*4));      // PD3 AF reset
-
-	    // Set as input
-	    GPIOD->MODER &= ~(GPIO_MODER_MODE13 | GPIO_MODER_MODE3);
-
-	    // Configure interrupts again
-	    //GPIO_InitTypeDef GPIO_InitStruct = {0};
-	    GPIO_InitStruct.Pin = GPIO_PIN_13 | GPIO_PIN_3;
-	    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-	    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-	    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-	    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-*/
-
-
-
 
 	    // First, configure all pins as simple inputs
 	    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -2814,10 +2740,6 @@ void configure_end_switch_interrupts(void)
 	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct); // PE3
 	    GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
 	    GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
-	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PI2
-	    GPIO_InitStruct.Pin = GPIO_PIN_13; HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD13
-	    //GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD3
-
 
 
 	    // Now manually configure EXTI for each pin
@@ -2825,9 +2747,6 @@ void configure_end_switch_interrupts(void)
 	    // PE3 - EXTI3 (Motor 0 Switch 1)
 	    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3_Msk;
 	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PE;
-
-	    // PD3 - EXTI3 (Motor 2 Switch 2) - SHARED with PE3
-	    // Both PE3 and PD3 will trigger EXTI3, we handle both in callback
 
 	    // PH15 - EXTI15 (Motor 0 Switch 2)
 	    SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI15_Msk;
@@ -2837,30 +2756,20 @@ void configure_end_switch_interrupts(void)
 	    SYSCFG->EXTICR[1] &= ~SYSCFG_EXTICR2_EXTI4_Msk;
 	    SYSCFG->EXTICR[1] |= SYSCFG_EXTICR2_EXTI4_PB;
 
-	    // PI2 - EXTI2 (Motor 1 Switch 2)
-	    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI2_Msk;
-	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PI;
-
-	    // PD13 - EXTI13 (Motor 2 Switch 1) - THIS IS CRITICAL
-	    SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI13_Msk;
-	    SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PD;
 
 	    // Enable rising edge trigger for ALL lines
-	    EXTI->RTSR1 |= (1 << 2) | (1 << 3) | (1 << 4) | (1 << 13) | (1 << 15);
+	    EXTI->RTSR1 |= (1 << 3) | (1 << 4) | (1 << 15);
 
 	    // Enable interrupt mask for ALL lines
-	    EXTI->IMR1 |= (1 << 2) | (1 << 3) | (1 << 4) | (1 << 13) | (1 << 15);
+	    EXTI->IMR1 |= (1 << 3) | (1 << 4) | (1 << 15);
 
 	    // Clear any pending interrupts
-	    EXTI->PR1 = (1 << 2) | (1 << 3) | (1 << 4) | (1 << 13) | (1 << 15);
+	    EXTI->PR1 = (1 << 3) | (1 << 4) | (1 << 15);
 
 
 	    // Clear any pending interrupts
 		//__HAL_GPIO_EXTI_CLEAR_FLAG(GPIO_PIN_13 | GPIO_PIN_3 | GPIO_PIN_15 | GPIO_PIN_4 | GPIO_PIN_2);
 
-	    // Configure NVIC
-	    HAL_NVIC_SetPriority(EXTI2_IRQn, 6, 0);
-	    HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
 	    HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
 	    HAL_NVIC_EnableIRQ(EXTI3_IRQn);
@@ -2871,114 +2780,9 @@ void configure_end_switch_interrupts(void)
 	    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
 	    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
-	    // 1. Enable GPIOD clock
-		//__HAL_RCC_GPIOD_CLK_ENABLE();
 
-		// 2. Configure PD3 as input with pull-down
-		//GPIO_InitTypeDef GPIO_InitStruct = {0};
-		GPIO_InitStruct.Pin = GPIO_PIN_3;
-		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-		GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-		HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+		EXTI->PR1 = (1 << 3) | (1 << 4) | (1 << 15);
 
-		// 3. Manual EXTI configuration for PD3
-		__HAL_RCC_SYSCFG_CLK_ENABLE();
-
-		// Clear EXTI3 configuration
-		SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3_Msk;
-		// Set EXTI3 to GPIOD
-		SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PD;
-
-		// Enable rising edge trigger
-		EXTI->RTSR1 |= (1 << 3);
-		// Disable falling edge trigger
-		EXTI->FTSR1 &= ~(1 << 3);
-
-		// Enable interrupt mask
-		EXTI->IMR1 |= (1 << 3);
-
-		// Clear any pending interrupt
-		EXTI->PR1 = (1 << 3);
-
-		// Configure NVIC
-		HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
-		HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-		GPIOD->AFR[1] &= ~(0xF << ((13-8)*4)); // Clear alternate function
-
-		GPIO_InitStruct.Pin = GPIO_PIN_3;
-		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-		GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-		HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-		// 3. Manual EXTI configuration for PD3
-		__HAL_RCC_SYSCFG_CLK_ENABLE();
-
-		// Clear EXTI3 configuration
-		SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3_Msk;
-		// Set EXTI3 to GPIOD
-		SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PE;
-
-		// Enable rising edge trigger
-		EXTI->RTSR1 |= (1 << 3);
-		// Disable falling edge trigger
-		EXTI->FTSR1 &= ~(1 << 3);
-
-		// Enable interrupt mask
-		EXTI->IMR1 |= (1 << 3);
-
-		// Clear any pending interrupt
-		EXTI->PR1 = (1 << 3);
-
-		// Configure NVIC
-		HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
-		HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-		GPIOE->AFR[0] &= ~(0xF << (3 * 4));  // Clear alternate function for PE3
-
-		// For PD13
-		GPIO_InitStruct.Pin = GPIO_PIN_13;
-		GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-		GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-		GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-		HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-		// Manual EXTI configuration for PD13
-		//__HAL_RCC_SYSCFG_CLK_ENABLE();
-
-		// Clear EXTI13 configuration
-		SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI13_Msk;
-		// Set EXTI13 to GPIOD
-		SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PD;
-
-		// Enable rising edge trigger
-		EXTI->RTSR1 |= (1 << 13);
-		// Disable falling edge trigger
-		EXTI->FTSR1 &= ~(1 << 13);
-
-		// Clear alternate function for PD13
-		GPIOD->AFR[1] &= ~(0xF << ((13-8)*4));
-
-		// Enable interrupt mask
-		EXTI->IMR1 |= (1 << 13);
-
-		// Clear any pending interrupt
-		EXTI->PR1 = (1 << 13);
-
-		// Configure NVIC
-		HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);  // PD13 uses EXTI15_10_IRQn
-		HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
-
-
-}
-
-void EXTI2_IRQHandler(void)
-{
-    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_2) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_2);
-        HAL_GPIO_EXTI_Callback(GPIO_PIN_2);
-    }
 }
 
 void EXTI3_IRQHandler(void)
@@ -2999,10 +2803,6 @@ void EXTI4_IRQHandler(void)
 
 void EXTI15_10_IRQHandler(void)
 {
-    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_13) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_13);
-        HAL_GPIO_EXTI_Callback(GPIO_PIN_13);
-    }
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_15);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
@@ -3020,54 +2820,49 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         last_interrupt_time = current_time;
 
         switch(GPIO_Pin) {
-            case GPIO_PIN_3:
-                // Shared EXTI3: Check which port actually triggered
-                if(HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3)) {
-                    // Motor 0 Switch 1 (PE3)
-                    stop_motor(0);
-                    motors[0].position = 0;
-                    motors[0].running = false;
-                    uart_transmit("M0: Switch1 (PE3) - STOPPED\r\n");
-                }
-                else if(HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_3)) {
-                    // Motor 2 Switch 2 (PD3)
-                    stop_motor(2);
-                    motors[2].position = motors[2].max_position;
-                    motors[2].running = false;
-                    uart_transmit("M2: Switch2 (PD3) - STOPPED\r\n");
-                }
+            case GPIO_PIN_3://motors[0].end_switch_pin:
+				// Motor 0 Switch 1 (PE3)
+				stop_motor(0);
+				if (motors[0].direction=motors[0].direction_plus)
+				{
+					motors[0].position = motors[0].max_position;
+				}
+				else if (motors[0].direction=motors[0].direction_minus)
+				{
+					motors[0].position = 0;
+				}
+				motors[0].running = false;
+				uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
                 break;
 
-            case GPIO_PIN_13:
-                // Motor 2 Switch 1 (PD13)
+            case GPIO_PIN_15://motors[1].end_switch_pin:
+                // Motor 0 (PH15)
+                stop_motor(1);
+            	if (motors[1].direction=motors[1].direction_plus)
+				{
+					motors[1].position = motors[1].max_position;
+				}
+				else if (motors[1].direction=motors[1].direction_minus)
+				{
+					motors[1].position = 0;
+				}
+				motors[1].running = false;
+                uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
+                break;
+
+            case GPIO_PIN_4://motors[2].end_switch_pin:
+                // Motor 1 (PB4)
                 stop_motor(2);
-                motors[2].position = 0;
+                if (motors[2].direction=motors[2].direction_plus)
+                {
+                	motors[2].position = motors[2].max_position;
+                }
+                else if (motors[2].direction=motors[2].direction_minus)
+				{
+					motors[2].position = 0;
+				}
                 motors[2].running = false;
-                uart_transmit("M2: Switch1 (PD13) - STOPPED\r\n");
-                break;
-
-            case GPIO_PIN_15:
-                // Motor 0 Switch 2 (PH15)
-                stop_motor(0);
-                motors[0].position = motors[0].max_position;
-                motors[0].running = false;
-                uart_transmit("M0: Switch2 (PH15) - STOPPED\r\n");
-                break;
-
-            case GPIO_PIN_4:
-                // Motor 1 Switch 1 (PB4)
-                stop_motor(1);
-                motors[1].position = 0;
-                motors[1].running = false;
-                uart_transmit("M1: Switch1 (PB4) - STOPPED\r\n");
-                break;
-
-            case GPIO_PIN_2:
-                // Motor 1 Switch 2 (PI2)
-                stop_motor(1);
-                motors[1].position = motors[1].max_position;
-                motors[1].running = false;
-                uart_transmit("M1: Switch2 (PI2) - STOPPED\r\n");
+                uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
                 break;
 
             default:
