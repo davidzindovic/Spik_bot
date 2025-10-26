@@ -204,6 +204,9 @@ void update_global_coordinates(void);
 _Bool read_switch(uint8_t motor_number);
 void run_motor(uint8_t motor_number);
 void stop_motor(uint8_t motor_number);
+void pump_liquid(uint32_t ammount_of_liquid);
+void test_motor(uint8_t motor_number);
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void TIM1_UP_IRQHandler(void);
 void TIM15_IRQHandler(void);
@@ -227,7 +230,7 @@ static void MPU_Config(void);
 void USART3_Pin_Init(void);
 
 void configure_end_switch_interrupts(void);
-void EXTI2_IRQHandler(void);
+//void EXTI2_IRQHandler(void);
 void EXTI3_IRQHandler(void);
 void EXTI4_IRQHandler(void);
 void EXTI15_10_IRQHandler(void);
@@ -523,51 +526,10 @@ int main(void) {
 	while (1) {
 		/* USER CODE END WHILE */
 
-		/*
-		for (uint8_t neki=0;neki<num_of_motors;neki++)
-		{
-			values[neki*2+0]=read_switch1(neki);
-			values[neki*2+1]=read_switch2(neki);
-			HAL_GPIO_WritePin(motors[neki].direction_port,motors[neki].direction_pin,GPIO_PIN_SET);
-		}
-		*/
-		//stall(5);
-
-
-		/*
-		for (uint8_t i=3;i<4;i++)
-		{
-			direction_change(i,motors[i].direction_plus);
-			run_motor(i);
-			if ((motors[i].position)==(motors[i].num_steps_per_turn))
-			{
-				stop_motor(i);
-				HAL_Delay(1000);
-			}
-			direction_change(i,motors[i].direction_minus);
-			run_motor(i);
-			if ((motors[i].position)==0)
-			{
-				stop_motor(i);
-				HAL_Delay(1000);
-			}
-		}*/
-
-
-
-
-		//char neki[30];
-
-		//uart_receive(uart_rx_buffer);
-		//HAL_Delay(1);
-		//uart_empty_buffer(uart_rx_buffer,BUFFER_SIZE);
-
-	    // Transmit data via USART3
-
-	    //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
-	    //HAL_Delay(500);
-	    //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
-	    //HAL_Delay(500);
+		test_motor(0);
+		test_motor(1);
+		test_motor(2);
+		test_motor(3);
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1670,6 +1632,12 @@ static void MX_GPIO_Init(void) {
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_12;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;  // Push-pull output
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
     //konc
 
     // inicializacija digital inputov (expansion board)
@@ -2291,6 +2259,20 @@ void pump_liquid(uint32_t ammount_of_liquid)
 	run_motor(3);
 	while(J4_ammount_of_liquid!=ammount_of_liquid){}
 	stop_motor(3);
+}
+
+void test_motor(uint8_t motor_number)
+{
+	//if(motors[motor_number].running)
+	//{
+		direction_change(motor_number,motors[motor_number].direction_plus);
+		run_motor(motor_number);
+		HAL_Delay(3000);
+		direction_change(motor_number,motors[motor_number].direction_minus);
+		run_motor(motor_number);
+		HAL_Delay(3000);
+		stop_motor(motor_number);
+	//}
 }
 
 /**
