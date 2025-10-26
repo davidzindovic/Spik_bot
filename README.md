@@ -1,3 +1,8 @@
+# 26.10.2025:
+- end switch pini spremenjeni na en kos na motor (prej bila dva). Prostanek rešen SW
+- end SW za M1=PE3, M2=PH15, M3=PB4
+- en switch pini imajo delujoče GPIO triggerje (potrebno urediti še ustrezen odziv)
+
 useful link:
 https://github.com/LAPSyLAB/STM32H7_Discovery_VIN_Projects/blob/main/STM32H750B-DK_VIN_Basic/Core/Src/main.c
 
