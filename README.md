@@ -2,6 +2,7 @@
 - end switch pini spremenjeni na en kos na motor (prej bila dva). Prostanek rešen SW
 - end SW za M1=PE3, M2=PH15, M3=PB4
 - en switch pini imajo delujoče GPIO triggerje (potrebno urediti še ustrezen odziv)
+- dodan direction pin (v SW) za M4
 
 # 13.10.2025:
 - ST UART skor konc
