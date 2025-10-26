@@ -3,9 +3,6 @@
 - end SW za M1=PE3, M2=PH15, M3=PB4
 - en switch pini imajo delujoče GPIO triggerje (potrebno urediti še ustrezen odziv)
 
-useful link:
-https://github.com/LAPSyLAB/STM32H7_Discovery_VIN_Projects/blob/main/STM32H750B-DK_VIN_Basic/Core/Src/main.c
-
 # 13.10.2025:
 - ST UART skor konc
 - RPI lahko transmita UART (se mi zdi)
@@ -41,3 +38,7 @@ TO DO:
 TO DO: 
 - ~~tranzistorji/optocouplerji za TTL~~
 - ~~test kode za motorje~~
+
+
+useful link:
+https://github.com/LAPSyLAB/STM32H7_Discovery_VIN_Projects/blob/main/STM32H750B-DK_VIN_Basic/Core/Src/main.c
