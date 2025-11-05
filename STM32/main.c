@@ -285,6 +285,8 @@ uint32_t J3_offset_base=30; //popravi
 uint32_t J4_ammount_of_liquid=0;
 uint32_t J4_volume_per_turn=0;
 
+_Bool end_switch_triggered=0;
+
 /* USER CODE END 0 */
 
 /**
@@ -2798,7 +2800,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     uint32_t current_time = HAL_GetTick();
 
     // Debouncing - ignore interrupts within 50ms
-    if(current_time - last_interrupt_time > 50) {
+    if((current_time - last_interrupt_time > 50)&& !end_switch_triggered) {
         last_interrupt_time = current_time;
 
         switch(GPIO_Pin) {
@@ -2815,6 +2817,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 				}
 				motors[0].running = false;
 				uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
+				end_switch_triggered=1;
                 break;
 
             case GPIO_PIN_15://motors[1].end_switch_pin:
@@ -2830,6 +2833,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 				}
 				motors[1].running = false;
                 uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
+                end_switch_triggered=1;
                 break;
 
             case GPIO_PIN_4://motors[2].end_switch_pin:
@@ -2845,6 +2849,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 				}
                 motors[2].running = false;
                 uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
+                end_switch_triggered=1;
                 break;
 
             default:
