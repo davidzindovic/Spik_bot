@@ -44,6 +44,7 @@ typedef struct {
     _Bool direction;
 	_Bool direction_plus;
 	_Bool direction_minus;
+	uint8_t allowed_direction;//2=any, sicer je limited=+/-
 
     uint16_t direction_pin;
     GPIO_TypeDef* direction_port;
@@ -285,7 +286,9 @@ uint32_t J3_offset_base=30; //popravi
 uint32_t J4_ammount_of_liquid=0;
 uint32_t J4_volume_per_turn=0;
 
-_Bool end_switch_triggered=0;
+_Bool end_switch0_triggered=0;
+_Bool end_switch1_triggered=0;
+_Bool end_switch2_triggered=0;
 
 /* USER CODE END 0 */
 
@@ -382,6 +385,7 @@ int main(void) {
 	    .direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
+		.allowed_direction=2,
 	    .direction_pin = GPIO_PIN_3,
 	    .direction_port = GPIOG,//D2
 	    .timer = &htim3,
@@ -408,6 +412,7 @@ int main(void) {
 		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
+		.allowed_direction=2,
 		.direction_pin = GPIO_PIN_1,
 		.direction_port = GPIOK,//D4
 		.timer = &htim1,
@@ -436,6 +441,7 @@ int main(void) {
 		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
+		.allowed_direction=2,
 		.direction_pin = GPIO_PIN_8,
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
@@ -464,6 +470,7 @@ int main(void) {
 		.direction = 1,
 		.direction_plus = 1,
 		.direction_minus = 0,
+		.allowed_direction = 2,
 		.direction_pin = GPIO_PIN_12,
 		.direction_port = GPIOD,//D15
 		.timer = &htim12,
@@ -528,9 +535,9 @@ int main(void) {
 	while (1) {
 		/* USER CODE END WHILE */
 
-		test_motor(0);
-		test_motor(1);
-		test_motor(2);
+		//test_motor(0);
+		//test_motor(1);
+		//test_motor(2);
 		test_motor(3);
 
 		/* USER CODE BEGIN 3 */
@@ -1985,6 +1992,7 @@ void stop_all_motors(void)
   */
 void direction_change(uint8_t motor_number, _Bool direction)
 {
+	stop_motor(motor_number);
 	motors[motor_number].direction=direction;
 	HAL_GPIO_WritePin(motors[motor_number].direction_port, motors[motor_number].direction_pin, motors[motor_number].direction);
 }
@@ -2191,6 +2199,9 @@ void run_motor(uint8_t motor_number)
 	    return;
 	}
 
+	//prepreči premikanje v napačno smer
+	if(!((motors[motor_number].direction==motors[motor_number].allowed_direction)||(motors[motor_number].allowed_direction==2))) return;
+
 	if (motors[motor_number].running == false)
 	{
 		// Stop timer first
@@ -2363,6 +2374,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void TIM1_UP_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim1);
+    if((1000<motors[1].position && motors[1].position<(motors[1].max_position-1000))&&(end_switch1_triggered)) end_switch1_triggered=0;
 }
 
 /**
@@ -2373,6 +2385,7 @@ void TIM1_UP_IRQHandler(void)
 void TIM15_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim15);
+    if((1000<motors[2].position && motors[2].position<(motors[2].max_position-1000))&&(end_switch2_triggered)) end_switch2_triggered=0;
 }
 
 /**
@@ -2383,6 +2396,7 @@ void TIM15_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim3);
+    if((1000<motors[0].position && motors[0].position<(motors[0].max_position-1000))&&(end_switch0_triggered)) end_switch0_triggered=0;
 }
 
 /**
@@ -2800,56 +2814,71 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     uint32_t current_time = HAL_GetTick();
 
     // Debouncing - ignore interrupts within 50ms
-    if((current_time - last_interrupt_time > 50)&& !end_switch_triggered) {
+    if((current_time - last_interrupt_time > 50)) {
         last_interrupt_time = current_time;
 
         switch(GPIO_Pin) {
             case GPIO_PIN_3://motors[0].end_switch_pin:
 				// Motor 0 Switch 1 (PE3)
-				stop_motor(0);
-				if (motors[0].direction=motors[0].direction_plus)
-				{
-					motors[0].position = motors[0].max_position;
-				}
-				else if (motors[0].direction=motors[0].direction_minus)
-				{
-					motors[0].position = 0;
-				}
-				motors[0].running = false;
-				uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
-				end_switch_triggered=1;
+            	if(!end_switch0_triggered)
+            	{
+					stop_motor(0);
+					if (motors[0].direction=motors[0].direction_plus)
+					{
+						motors[0].position = motors[0].max_position;
+						motors[0].allowed_direction=motors[0].direction_minus;
+					}
+					else if (motors[0].direction=motors[0].direction_minus)
+					{
+						motors[0].position = 0;
+						motors[0].allowed_direction=motors[0].direction_plus;
+					}
+					motors[0].running = false;
+					uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
+					end_switch0_triggered=1;
+            	}
                 break;
 
             case GPIO_PIN_15://motors[1].end_switch_pin:
                 // Motor 0 (PH15)
-                stop_motor(1);
-            	if (motors[1].direction=motors[1].direction_plus)
-				{
-					motors[1].position = motors[1].max_position;
-				}
-				else if (motors[1].direction=motors[1].direction_minus)
-				{
-					motors[1].position = 0;
-				}
-				motors[1].running = false;
-                uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
-                end_switch_triggered=1;
+            	if(!end_switch1_triggered)
+            	{
+					stop_motor(1);
+					if (motors[1].direction=motors[1].direction_plus)
+					{
+						motors[1].position = motors[1].max_position;
+						motors[1].allowed_direction=motors[1].direction_minus;
+					}
+					else if (motors[1].direction=motors[1].direction_minus)
+					{
+						motors[1].position = 0;
+						motors[1].allowed_direction=motors[1].direction_plus;
+					}
+					motors[1].running = false;
+					uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
+					end_switch1_triggered=1;
+            	}
                 break;
 
             case GPIO_PIN_4://motors[2].end_switch_pin:
                 // Motor 1 (PB4)
-                stop_motor(2);
-                if (motors[2].direction=motors[2].direction_plus)
-                {
-                	motors[2].position = motors[2].max_position;
-                }
-                else if (motors[2].direction=motors[2].direction_minus)
-				{
-					motors[2].position = 0;
-				}
-                motors[2].running = false;
-                uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
-                end_switch_triggered=1;
+            	if(!end_switch2_triggered)
+            	{
+					stop_motor(2);
+					if (motors[2].direction=motors[2].direction_plus)
+					{
+						motors[2].position = motors[2].max_position;
+						motors[2].allowed_direction=motors[2].direction_minus;
+					}
+					else if (motors[2].direction=motors[2].direction_minus)
+					{
+						motors[2].position = 0;
+						motors[2].allowed_direction=motors[2].direction_plus;
+					}
+					motors[2].running = false;
+					uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
+					end_switch2_triggered=1;
+            	}
                 break;
 
             default:
@@ -2893,5 +2922,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
