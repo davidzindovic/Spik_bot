@@ -46,6 +46,8 @@ typedef struct {
 	_Bool direction_minus;
 	uint8_t allowed_direction;//2=any, sicer je limited=+/-
 
+	uint32_t num_steps_for_switch_release;
+
     uint16_t direction_pin;
     GPIO_TypeDef* direction_port;
 
@@ -66,6 +68,7 @@ typedef struct {
 
     uint16_t end_switch_pin;
     GPIO_TypeDef* end_switch_port;
+	_Bool end_switch_triggered;
 
 	uint32_t unit_conversion; //number of steps per mm or deg
 
@@ -286,9 +289,9 @@ uint32_t J3_offset_base=30; //popravi
 uint32_t J4_ammount_of_liquid=0;
 uint32_t J4_volume_per_turn=0;
 
-_Bool end_switch0_triggered=0;
-_Bool end_switch1_triggered=0;
-_Bool end_switch2_triggered=0;
+//_Bool end_switch0_triggered=0;
+//_Bool end_switch1_triggered=0;
+//_Bool end_switch2_triggered=0;
 
 /* USER CODE END 0 */
 
@@ -386,6 +389,7 @@ int main(void) {
 		.direction_plus = 1,
 		.direction_minus = 0,
 		.allowed_direction=2,
+		.num_steps_for_switch_release=1000, //spremeni
 	    .direction_pin = GPIO_PIN_3,
 	    .direction_port = GPIOG,//D2
 	    .timer = &htim3,
@@ -394,13 +398,14 @@ int main(void) {
 	    .motor_pin = GPIO_PIN_6,//D3
 	    .motor_port = GPIOA,
 	    .max_position = 100000,
-		.starting_position=5000,
+		.starting_position = 5000,
 	    .position = 0,
 		.running = false,
 	    .reset_requested = false,
 	    .reset_completed = false,
 	    .end_switch_pin = GPIO_PIN_3,//D8
 	    .end_switch_port = GPIOE,
+		.end_switch_triggered = 0,
 	    //.end_switch2_pin = GPIO_PIN_15,//D9
 	    //.end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
@@ -413,6 +418,7 @@ int main(void) {
 		.direction_plus = 1,
 		.direction_minus = 0,
 		.allowed_direction=2,
+		.num_steps_for_switch_release=1000, //spremeni
 		.direction_pin = GPIO_PIN_1,
 		.direction_port = GPIOK,//D4
 		.timer = &htim1,
@@ -428,6 +434,7 @@ int main(void) {
 		.reset_completed = false,
 		.end_switch_pin = GPIO_PIN_15,//D9
 		.end_switch_port = GPIOH,
+		.end_switch_triggered = 0,
 		//.end_switch1_pin = GPIO_PIN_4,//D10
 		//.end_switch1_port = GPIOB,
 	    //.end_switch2_pin = GPIO_PIN_2,//D12
@@ -442,6 +449,7 @@ int main(void) {
 		.direction_plus = 1,
 		.direction_minus = 0,
 		.allowed_direction=2,
+		.num_steps_for_switch_release=1000, //spremeni
 		.direction_pin = GPIO_PIN_8,
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
@@ -457,6 +465,7 @@ int main(void) {
 		.reset_completed = false,
 		.end_switch_pin = GPIO_PIN_4,//D10
 		.end_switch_port = GPIOB,
+		.end_switch_triggered = 0,
 		//.end_switch1_pin = GPIO_PIN_13,//D14
 		//.end_switch1_port = GPIOD,
 		//.end_switch2_pin = GPIO_PIN_3,//D13
@@ -471,6 +480,7 @@ int main(void) {
 		.direction_plus = 1,
 		.direction_minus = 0,
 		.allowed_direction = 2,
+		.num_steps_for_switch_release=1000, //ne rabis tukaj
 		.direction_pin = GPIO_PIN_12,
 		.direction_port = GPIOD,//D15
 		.timer = &htim12,
@@ -488,6 +498,7 @@ int main(void) {
 		.reset_completed = false,
 		.end_switch_pin = GPIO_PIN_2,//D12
 		.end_switch_port = GPIOI,
+		.end_switch_triggered = 0,
 		//konc prepovedi
 
 		.unit_conversion=100, //steps per mm
@@ -2003,7 +2014,7 @@ void direction_change(uint8_t motor_number, _Bool direction)
   * @param  None
   * @retval None
   */
-void reset_motors(void)
+void reset_motors(void) //POPRAVI!!
 {
 	//motor 4 - pumpa (preskočil - nima reset)
 	//motor 3 - J3 (trapezoidal thread axle)
@@ -2374,7 +2385,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void TIM1_UP_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim1);
-    if((1000<motors[1].position && motors[1].position<(motors[1].max_position-1000))&&(end_switch1_triggered)) end_switch1_triggered=0;
+    if((motors[1].num_steps_for_switch_release<motors[1].position && motors[1].position<(motors[1].max_position-motors[1].num_steps_for_switch_release))&&(motors[1].end_switch_triggered)&&(!read_switch(1))) 
+	{
+		motors[1].end_switch_triggered=0;
+		motors[1].allowed_direction=2;
+	}
 }
 
 /**
@@ -2385,7 +2400,11 @@ void TIM1_UP_IRQHandler(void)
 void TIM15_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim15);
-    if((1000<motors[2].position && motors[2].position<(motors[2].max_position-1000))&&(end_switch2_triggered)) end_switch2_triggered=0;
+	if((motors[2].num_steps_for_switch_release<motors[2].position && motors[2].position<(motors[2].max_position-motors[2].num_steps_for_switch_release))&&(motors[2].end_switch_triggered)&&(!read_switch(2))) 
+	{
+		motors[2].end_switch_triggered=0;
+		motors[2].allowed_direction=2;
+	}
 }
 
 /**
@@ -2396,7 +2415,11 @@ void TIM15_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim3);
-    if((1000<motors[0].position && motors[0].position<(motors[0].max_position-1000))&&(end_switch0_triggered)) end_switch0_triggered=0;
+	if((motors[0].num_steps_for_switch_release<motors[0].position && motors[0].position<(motors[0].max_position-motors[0].num_steps_for_switch_release))&&(motors[0].end_switch_triggered)&&(!read_switch(0))) 
+	{
+		motors[0].end_switch_triggered=0;
+		motors[0].allowed_direction=2;
+	}
 }
 
 /**
