@@ -2104,23 +2104,29 @@ void move_to_starting_position(uint8_t motor_number)
   *	@param	x: x coordinate of end effector position.
   * @param  y: x coordinate of end effector position.
   * @param  orientation: orientation (in degrees) with 0° being
-			parralel to the pulley rail.s
+			parralel to the pulley rail. Mathematically positive direction needed
   * @retval None
   */
 bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orientation)
 {
+	update_global_coordinates();
+
 	stop_all_motors();
 
 	//ce neke tocke ni mozno doseci pod doloceno orientacijo
-	if (target_y<(motors[2].offset*sin(180-target_orientation))) //DOPOLNI!
+	if (target_y<((motors[2].offset/motors[2].unit_conversion)*sin(target_orientation))) //DOPOLNI!
 	{	//PRENIZKO ZA TO ORIENTACIJO
 		return false;
 	}
-	if (target_y>max_effector_y || target_x>max_effector_x)
+	else if (target_y>((motors[2].max_position/motors[2].unit_conversion)*sin(target_orientation))) //DOPOLNI!
+	{	//PREVISOKO, OUT OF BOUNDS
+		return false;
+	}
+	/*else if (target_y>max_effector_y || target_x>max_effector_x)
 	{
 		//OUT OF BOUNDS
 		return false;
-	}
+	}*/
 
 	if(target_orientation!=effector_orientation)
 	{
@@ -2385,7 +2391,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void TIM1_UP_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim1);
-    if((motors[1].num_steps_for_switch_release<motors[1].position && motors[1].position<(motors[1].max_position-motors[1].num_steps_for_switch_release))&&(motors[1].end_switch_triggered)&&(!read_switch(1))) 
+    if((motors[1].num_steps_for_switch_release<motors[1].position && motors[1].position<(motors[1].max_position-motors[1].num_steps_for_switch_release))&&(motors[1].end_switch_triggered)&&(!read_switch(1)))
 	{
 		motors[1].end_switch_triggered=0;
 		motors[1].allowed_direction=2;
@@ -2400,7 +2406,7 @@ void TIM1_UP_IRQHandler(void)
 void TIM15_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim15);
-	if((motors[2].num_steps_for_switch_release<motors[2].position && motors[2].position<(motors[2].max_position-motors[2].num_steps_for_switch_release))&&(motors[2].end_switch_triggered)&&(!read_switch(2))) 
+	if((motors[2].num_steps_for_switch_release<motors[2].position && motors[2].position<(motors[2].max_position-motors[2].num_steps_for_switch_release))&&(motors[2].end_switch_triggered)&&(!read_switch(2)))
 	{
 		motors[2].end_switch_triggered=0;
 		motors[2].allowed_direction=2;
@@ -2415,7 +2421,7 @@ void TIM15_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim3);
-	if((motors[0].num_steps_for_switch_release<motors[0].position && motors[0].position<(motors[0].max_position-motors[0].num_steps_for_switch_release))&&(motors[0].end_switch_triggered)&&(!read_switch(0))) 
+	if((motors[0].num_steps_for_switch_release<motors[0].position && motors[0].position<(motors[0].max_position-motors[0].num_steps_for_switch_release))&&(motors[0].end_switch_triggered)&&(!read_switch(0)))
 	{
 		motors[0].end_switch_triggered=0;
 		motors[0].allowed_direction=2;
@@ -2945,4 +2951,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
