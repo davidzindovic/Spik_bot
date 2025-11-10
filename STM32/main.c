@@ -376,7 +376,7 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
-	MX_TIM12_Init(); //VRŽE ERROR!
+	//MX_TIM12_Init(); //VRŽE ERROR!
 
 	/* USER CODE BEGIN 2 */
 	// freq=100000 -> hitro
@@ -542,13 +542,12 @@ int main(void) {
 
 	//uart_transmit(text);
 
-
 	while (1) {
 		/* USER CODE END WHILE */
 
-		//test_motor(0);
-		//test_motor(1);
-		//test_motor(2);
+		test_motor(0);
+		test_motor(1);
+		test_motor(2);
 		test_motor(3);
 
 		/* USER CODE BEGIN 3 */
@@ -2295,10 +2294,16 @@ void test_motor(uint8_t motor_number)
 {
 	//if(motors[motor_number].running)
 	//{
+		stop_motor(motor_number);
+		HAL_Delay(500);
 		direction_change(motor_number,motors[motor_number].direction_plus);
+		HAL_Delay(100);
 		run_motor(motor_number);
 		HAL_Delay(3000);
-		direction_change(motor_number,motors[motor_number].direction_minus);
+		stop_motor(motor_number);
+		HAL_Delay(500);
+		direction_change(motor_number,motors[motor_number].direction_plus);
+		HAL_Delay(100);
 		run_motor(motor_number);
 		HAL_Delay(3000);
 		stop_motor(motor_number);
@@ -2374,7 +2379,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if (motors[3].running=true && motors[3].direction==motors[3].direction_plus)
 		{
 			motors[3].position += 1;
-			//J4_ammount_of_liquid=J4_volume_per_turn*motors[3].position/motors[3].num_steps_per_turn;
+			J4_ammount_of_liquid=J4_volume_per_turn*motors[3].position/motors[3].num_steps_per_turn;
 		}
 		else if (motors[3].running=true && motors[3].direction==motors[3].direction_minus)
 		{
@@ -2849,7 +2854,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         switch(GPIO_Pin) {
             case GPIO_PIN_3://motors[0].end_switch_pin:
 				// Motor 0 Switch 1 (PE3)
-            	if(!end_switch0_triggered)
+            	if(!motors[0].end_switch_triggered)
             	{
 					stop_motor(0);
 					if (motors[0].direction=motors[0].direction_plus)
@@ -2864,13 +2869,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[0].running = false;
 					uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
-					end_switch0_triggered=1;
+					motors[0].end_switch_triggered=1;
             	}
                 break;
 
             case GPIO_PIN_15://motors[1].end_switch_pin:
                 // Motor 0 (PH15)
-            	if(!end_switch1_triggered)
+            	if(!motors[1].end_switch_triggered)
             	{
 					stop_motor(1);
 					if (motors[1].direction=motors[1].direction_plus)
@@ -2885,13 +2890,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[1].running = false;
 					uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
-					end_switch1_triggered=1;
+					motors[1].end_switch_triggered=1;
             	}
                 break;
 
             case GPIO_PIN_4://motors[2].end_switch_pin:
                 // Motor 1 (PB4)
-            	if(!end_switch2_triggered)
+            	if(!motors[2].end_switch_triggered)
             	{
 					stop_motor(2);
 					if (motors[2].direction=motors[2].direction_plus)
@@ -2906,7 +2911,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[2].running = false;
 					uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
-					end_switch2_triggered=1;
+					motors[2].end_switch_triggered=1;
             	}
                 break;
 
