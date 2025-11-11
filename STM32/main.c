@@ -542,7 +542,8 @@ int main(void) {
 
 	//uart_transmit(text);
 
-	//Motor 2 trokira (PWM le nekaj časa na štartu)
+	// mcu da pwm in smer pravilno od sebe. Vezje jebe
+
 	//run_motor(0);
 	//run_motor(1);
 	//run_motor(2);
@@ -2308,7 +2309,7 @@ void test_motor(uint8_t motor_number)
 	//{
 		stop_motor(motor_number);
 		HAL_Delay(1000);
-		direction_change(motor_number,motors[motor_number].direction_plus);
+		direction_change(motor_number,motors[motor_number].direction_minus);
 		HAL_Delay(500);
 		run_motor(motor_number);
 		HAL_Delay(3000);
