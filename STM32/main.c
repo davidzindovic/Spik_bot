@@ -454,7 +454,7 @@ int main(void) {
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 50000,
+		.frequency = 500000,
 		.motor_pin = GPIO_PIN_6,//D6
 		.motor_port = GPIOE,
 		.max_position = 100000,
@@ -541,14 +541,18 @@ int main(void) {
 	char text[]="Nika\r\n";
 
 	//uart_transmit(text);
-
+	run_motor(0);
+	run_motor(1);
+	run_motor(2);
 	while (1) {
 		/* USER CODE END WHILE */
 
-		test_motor(0);
-		test_motor(1);
-		test_motor(2);
-		test_motor(3);
+		//test_motor(0);
+		//test_motor(1);
+		//test_motor(2);
+		//test_motor(3);
+
+
 
 		/* USER CODE BEGIN 3 */
 	}
