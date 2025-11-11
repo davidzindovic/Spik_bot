@@ -376,7 +376,7 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
-	//MX_TIM12_Init(); //VRŽE ERROR!
+	MX_TIM12_Init();
 
 	/* USER CODE BEGIN 2 */
 	// freq=100000 -> hitro
@@ -454,7 +454,7 @@ int main(void) {
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 500000,
+		.frequency = 50000,
 		.motor_pin = GPIO_PIN_6,//D6
 		.motor_port = GPIOE,
 		.max_position = 100000,
@@ -541,18 +541,19 @@ int main(void) {
 	char text[]="Nika\r\n";
 
 	//uart_transmit(text);
-	run_motor(0);
-	run_motor(1);
-	run_motor(2);
+
+	//Motor 2 trokira (PWM le nekaj časa na štartu)
+	//run_motor(0);
+	//run_motor(1);
+	//run_motor(2);
+	//run_motor(3);
 	while (1) {
 		/* USER CODE END WHILE */
 
-		//test_motor(0);
-		//test_motor(1);
-		//test_motor(2);
-		//test_motor(3);
-
-
+		test_motor(0);
+		test_motor(1);
+		test_motor(2);
+		test_motor(3);
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1120,11 +1121,13 @@ static void MX_TIM12_Init(void)
   TIM_OC_InitTypeDef sConfigOC = {0};
 
   htim12.Instance = TIM12;
+  htim12.State = HAL_TIM_STATE_RESET;
   htim12.Init.Prescaler = 79;
   htim12.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim12.Init.Period = 1999;
   htim12.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim12.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  htim12.Init.RepetitionCounter = 0;
   if (HAL_TIM_Base_Init(&htim12) != HAL_OK)
   {
     Error_Handler();
@@ -1161,8 +1164,8 @@ static void MX_TIM12_Init(void)
 
   HAL_TIM_MspPostInit(&htim12);
 
-  HAL_TIM_Base_Start_IT(&htim12);
-  HAL_TIM_PWM_Start(&htim12, TIM_CHANNEL_2);
+  //HAL_TIM_Base_Start_IT(&htim12);
+  //HAL_TIM_PWM_Start(&htim12, TIM_CHANNEL_2);
 }
 
 /**
@@ -1961,7 +1964,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
   else if(timHandle->Instance==TIM12)
   {
     /* TIM12 CH2 on PB15 */
-    __HAL_RCC_GPIOE_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
     GPIO_InitStruct.Pin = GPIO_PIN_15;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -2226,8 +2229,10 @@ void run_motor(uint8_t motor_number)
 	{
 		// Stop timer first
 		//HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
-		htim15.Instance->DIER &= ~(1);
+		//htim15.Instance->DIER &= ~(1);
 		HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
+		HAL_TIM_Base_Stop(motors[motor_number].timer);
+		HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
 
 		uint32_t frequency_hz = motors[motor_number].frequency;
 		frequency_hz = frequency_hz / 2;
@@ -2255,8 +2260,11 @@ void run_motor(uint8_t motor_number)
 
 		// Restart timer
 		//HAL_TIM_Base_Start_IT(motors[motor_number].timer);
-		htim15.Instance->DIER |= TIM_DIER_UIE;
-		motors[motor_number].timer->Instance->CR1 |= TIM_CR1_CEN;
+		//htim15.Instance->DIER |= TIM_DIER_UIE;
+		//motors[motor_number].timer->Instance->CR1 |= TIM_CR1_CEN;
+
+		HAL_TIM_Base_Start(motors[motor_number].timer);
+		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
 		HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
 
 		motors[motor_number].running = true;
@@ -2272,9 +2280,9 @@ void run_motor(uint8_t motor_number)
   */
 void stop_motor(uint8_t motor_number)
 {
-	HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
-	HAL_TIM_Base_Stop(motors[motor_number].timer);
 	HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
+	//HAL_TIM_Base_Stop(motors[motor_number].timer);
+	HAL_TIM_Base_Stop_IT(motors[motor_number].timer);
 	motors[motor_number].running=false;
 }
 
@@ -2299,15 +2307,15 @@ void test_motor(uint8_t motor_number)
 	//if(motors[motor_number].running)
 	//{
 		stop_motor(motor_number);
-		HAL_Delay(500);
+		HAL_Delay(1000);
 		direction_change(motor_number,motors[motor_number].direction_plus);
-		HAL_Delay(100);
+		HAL_Delay(500);
 		run_motor(motor_number);
 		HAL_Delay(3000);
 		stop_motor(motor_number);
-		HAL_Delay(500);
+		HAL_Delay(1000);
 		direction_change(motor_number,motors[motor_number].direction_plus);
-		HAL_Delay(100);
+		HAL_Delay(500);
 		run_motor(motor_number);
 		HAL_Delay(3000);
 		stop_motor(motor_number);
