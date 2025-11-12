@@ -1,3 +1,8 @@
+# 14.11.2025:
+- za poštimat settinge driverjev (najbolje dela POKI)
+- direction switch dela probleme
+- za stestirat on board driverček
+
 # 26.10.2025:
 - end switch pini spremenjeni na en kos na motor (prej bila dva). Prostanek rešen SW
 - end SW za M1=PE3, M2=PH15, M3=PB4
