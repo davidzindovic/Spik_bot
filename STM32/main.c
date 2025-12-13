@@ -61,6 +61,7 @@ typedef struct {
     uint32_t max_position; //in numbers of steps
 	uint32_t starting_position;
     uint32_t position;
+    uint32_t offset;
 	_Bool running;
 
     _Bool reset_requested;
@@ -267,7 +268,7 @@ char vnos[100];
 
 _Bool uart_command_ready = false;
 
-uint8_t num_of_motors=3; //število vseh motorjev
+uint8_t num_of_motors=4; //število vseh motorjev
 
 uint32_t effector_x=0;   //end effector x coordinate [mm]
 uint32_t effector_y=0;   //end effector y coordinate [mm]
@@ -400,6 +401,7 @@ int main(void) {
 	    .max_position = 100000,
 		.starting_position = 5000,
 	    .position = 0,
+		.offset=30,//odmik od osi vrtenja v mm? popravi
 		.running = false,
 	    .reset_requested = false,
 	    .reset_completed = false,
@@ -429,6 +431,7 @@ int main(void) {
 		.max_position = 100000,
 		.starting_position=5000,
 		.position = 0,
+		.offset=0,//tukaj offset v deg?
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
@@ -460,6 +463,7 @@ int main(void) {
 		.max_position = 100000,
 		.starting_position=5000,
 		.position = 0,
+		.offset=50,//odmik od osi vrtenja v mm? popravi
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
@@ -491,6 +495,7 @@ int main(void) {
 		.max_position = 10000,
 		.starting_position=5000,
 		.position = 0,
+		.offset=0,//odmik od osi vrtenja v mm?
 		.running = false,
 
 		//NE UPORABLJAJ = IGNORIRAJ:
@@ -2017,11 +2022,12 @@ void direction_change(uint8_t motor_number, _Bool direction)
 
 /**
   * @brief  Resets all the motors and configures max positions,
-			then moves the motors to their starting positions.
+			then moves the motors to their starting positions
+			(half of maximum).
   * @param  None
   * @retval None
   */
-void reset_motors(void) //POPRAVI!!
+void reset_motors(void) //mislim da bi moralo delati :)
 {
 	//motor 4 - pumpa (preskočil - nima reset)
 	//motor 3 - J3 (trapezoidal thread axle)
@@ -2031,10 +2037,10 @@ void reset_motors(void) //POPRAVI!!
 	for (uint8_t motor_num=0;motor_num<(num_of_motors-1);motor_num++)
 	{
 
-		motors[motor_num].reset_requested=true; //da ignorira pogoje za pozicijo
+		motors[motor_num].reset_requested=true; //da ignorira pogoje za pozicijo (pri timerjih)
 		motors[motor_num].reset_completed=false;
 
-		direction_change(motor_num, 0);
+		direction_change(motor_num, motors[motor_num].direction_minus);
 		motors[motor_num].current_speed=10; // rot/s - ni še; raje frekvenco!
 
 		if (motors[motor_num].running==false)
@@ -2044,25 +2050,20 @@ void reset_motors(void) //POPRAVI!!
 
 		if(motors[motor_num].reset_requested)
 		{
-			while(!(read_switch(motor_num)))
-			{} //trenutno je vseeno kateri switch zadane
+			while(!motors[motor_num].end_switch_triggered){}
 
 			stop_motor(motor_num);
 
 			motors[motor_num].position=0; //mogoče bi lahko offsetal start position da ne udari v limit switch
 
-			motors[motor_num].direction_minus=motors[motor_num].direction;
+			direction_change(motor_num,motors[motor_num].direction_plus);
 
-			direction_change(motor_num,!motors[motor_num].direction);
-
-			motors[motor_num].direction_plus=motors[motor_num].direction;
-
-			motors[motor_num].reset_completed=true; //da lahko zdaj spremlja korake
+			motors[motor_num].reset_completed=true; //da lahko zdaj spremlja korake (pri timerjih)
 
 			run_motor(motor_num);
 
-			while(!(read_switch(motor_num)))
-			{}
+			while(motors[motor_num].end_switch_triggered){}//prvo pocakamo da se umakne stran od stikala
+			while(!motors[motor_num].end_switch_triggered){}//potem pocakamo da zadane kontra stikalo
 
 			motors[motor_num].max_position=motors[motor_num].position;
 			motors[motor_num].starting_position=motors[motor_num].max_position/2;
@@ -2084,7 +2085,7 @@ void reset_motors(void) //POPRAVI!!
 			whose second limit switch should be read.
   * @retval None
   */
-void move_to_starting_position(uint8_t motor_number)
+void move_to_starting_position(uint8_t motor_number)//POPRAVI (DA CALLAŠ END EFFECTOR)
 {
 	if (motors[motor_number].position>motors[motor_number].starting_position)
 		{
@@ -2112,29 +2113,56 @@ void move_to_starting_position(uint8_t motor_number)
   * @param  y: x coordinate of end effector position.
   * @param  orientation: orientation (in degrees) with 0° being
 			parralel to the pulley rail. Mathematically positive direction needed
-  * @retval None
+  * @retval false: the desired point cannot be reached under the desired orientation
+  * 		true: the desired point has been reached under the desired orientation
   */
-bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orientation)
-{
+_Bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orientation)
+{//koordinatno izhodišče zgoraj levo [0 do x) (tloris) ali pa na vrhu na sredini [-x do +x]
 	update_global_coordinates();
 
 	stop_all_motors();
 
-	//ce neke tocke ni mozno doseci pod doloceno orientacijo
-	if (target_y<((motors[2].offset/motors[2].unit_conversion)*sin(target_orientation))) //DOPOLNI!
+	//ce neke tocke ni mozno doseci pod doloceno orientacijo vrnemo false
+
+	if (target_y<(motors[2].offset)) //PAZI, VERJETNO RABIŠ DEG2RAD
 	{	//PRENIZKO ZA TO ORIENTACIJO
 		return false;
 	}
-	else if (target_y>((motors[2].max_position/motors[2].unit_conversion)*sin(target_orientation))) //DOPOLNI!
+	else if (target_y>((motors[2].max_position/motors[2].unit_conversion+motors[2].offset)*sin(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
 	{	//PREVISOKO, OUT OF BOUNDS
 		return false;
 	}
-	/*else if (target_y>max_effector_y || target_x>max_effector_x)
-	{
-		//OUT OF BOUNDS
-		return false;
-	}*/
 
+	//pri x koordinati moramo gledati pri pogojih minimalen/maksimalen izteg glede na orientiranost
+	// (če je točka levo ali desno od vozička)
+
+	if (target_orientation<90)
+	{//levo od vozička?
+
+		if (target_x<((motors[2].max_position/motors[2].unit_conversion+motors[2].offset)*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
+		{
+			return false;
+		}
+		if (target_x>(motors[2].offset*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
+		{
+			return false;
+		}
+	}
+	else if ((target_orientation>=90) && (target_orientation<180))
+	{//desno od vozička?
+
+		if (target_x<(motors[2].offset*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
+		{
+			return false;
+		}
+		if (target_x>((motors[2].max_position/motors[2].unit_conversion+motors[2].offset)*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
+		{
+			return false;
+		}
+	}
+
+
+	//Doseže pravilno orientacijo:
 	if(target_orientation!=effector_orientation)
 	{
 		if(target_orientation>effector_orientation)
@@ -2147,30 +2175,43 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
 			motors[1].direction=motors[1].direction_minus;
 			start_motor(1);
 		}
+
+		while(target_orientation!=effector_orientation){update_global_coordinates();}
+		stop_motor(1);
 	}
 
 	if(target_x!=effector_x || target_y!=effector_y)
 	{
-		uint32_t cart_x_position_mm=motors[0].position;
-		//x:
-		if (target_x<(J1_offset_mm+J3_offset_mm*cos(180-target_orientation)))
+		//y: orientacija že delno naštima y, samo že izteg navojne palice popravi
+		if (target_y>effector_y)
 		{
-			motors[0].direction=motors[0].direction_minus;
-			start_motor(0);
+			motors[2].direction=motors[2].direction_plus;
+			start_motor(2);
 		}
-		else if (target_x>(J1_offset_mm+J3_offset_mm*cos(180-target_orientation)))
+		else if (target_y<effector_y)
+		{
+			motors[2].direction=motors[2].direction_minus;
+			start_motor(2);
+		}
+		while(target_y!=effector_y){update_global_coordinates();} //popravljamo globalne koordinate
+		stop_motor(2);
+
+		//x: orientacija že delno naštima x, samo še jermen da popravi
+		if (target_x>effector_x)
 		{
 			motors[0].direction=motors[0].direction_plus;
 			start_motor(0);
 		}
-
-		//y:
-		if (target_y<(motors[2].offset*sin(180-J2_offset_deg)))
+		else if (target_x<effector_x)
 		{
-			uint8_t neki=0;
+			motors[0].direction=motors[0].direction_plus;
+			start_motor(0);
 		}
+		while(target_x!=effector_x){update_global_coordinates();} //popravljamo globalne koordinate
+		stop_motor(0);
 	}
 
+	return true;
 }
 
 /**
@@ -2179,7 +2220,7 @@ bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orienta
   * @param  None
   * @retval None
   */
-void update_global_coordinates(void)
+void update_global_coordinates(void) //PREGLEJ!!
 {		//PREVERI DELJENJE CELIH ŠTEVIL
 
 	if (min_effector_x==0) //določanje skrajno leve točke, opcija je da bi bilo bolj levo od motorja
@@ -2331,6 +2372,9 @@ void test_motor(uint8_t motor_number)
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
+	static uint16_t end_switch_reset_cnt={0,0,0};//[M0,M1,M2]
+
+
     if (htim->Instance == TIM3)
     {
     	//if (false)
@@ -2349,6 +2393,24 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			motors[0].position -= 1;
 			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
+
+		if (motors[0].end_switch_triggered)
+		{
+			if (read_switch(0))
+			{
+				end_switch_reset_cnt[0]=0;
+			}
+			else if(!read_switch(0))
+			{
+				end_switch_reset_cnt[0]++;
+			}
+
+			if (end_switch_reset_cnt[0]>1000)
+			{
+				motors[0].end_switch_triggered=0;
+			}
+		}
+
 	}
     else if (htim->Instance == TIM1)
     {
@@ -2367,6 +2429,23 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			motors[1].position -= 1;
 			J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
+
+		if (motors[1].end_switch_triggered)
+		{
+			if (read_switch(1))
+			{
+				end_switch_reset_cnt[1]=0;
+			}
+			else if(!read_switch(1))
+			{
+				end_switch_reset_cnt[1]++;
+			}
+
+			if (end_switch_reset_cnt[1]>1000)
+			{
+				motors[1].end_switch_triggered=0;
+			}
+		}
     }
     else if (htim->Instance == TIM15)
     {
@@ -2384,6 +2463,23 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			motors[2].position -= 1;
 			J3_offset_mm=J3_offset_base+motors[2].position*motors[2].unit_conversion/motors[2].num_steps_per_turn;
+		}
+
+		if (motors[2].end_switch_triggered)
+		{
+			if (read_switch(2))
+			{
+				end_switch_reset_cnt[2]=0;
+			}
+			else if(!read_switch(2))
+			{
+				end_switch_reset_cnt[2]++;
+			}
+
+			if (end_switch_reset_cnt[2]>1000)
+			{
+				motors[2].end_switch_triggered=0;
+			}
 		}
     }
     else if (htim->Instance == TIM12)
@@ -2881,7 +2977,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 						motors[0].allowed_direction=motors[0].direction_plus;
 					}
 					motors[0].running = false;
-					uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
+					//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
 					motors[0].end_switch_triggered=1;
             	}
                 break;
@@ -2902,7 +2998,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 						motors[1].allowed_direction=motors[1].direction_plus;
 					}
 					motors[1].running = false;
-					uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
+					//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
 					motors[1].end_switch_triggered=1;
             	}
                 break;
@@ -2923,16 +3019,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 						motors[2].allowed_direction=motors[2].direction_plus;
 					}
 					motors[2].running = false;
-					uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
+					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
 					motors[2].end_switch_triggered=1;
             	}
                 break;
 
             default:
                 // Unknown pin - this shouldn't happen
-                char msg[50];
-                snprintf(msg, sizeof(msg), "Unknown GPIO: %d\r\n", GPIO_Pin);
-                uart_transmit(msg);
+                //char msg[50];
+                //snprintf(msg, sizeof(msg), "Unknown GPIO: %d\r\n", GPIO_Pin);
+                //uart_transmit(msg);
                 break;
         }
     }
