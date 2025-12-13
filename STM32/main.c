@@ -547,19 +547,24 @@ int main(void) {
 
 	//uart_transmit(text);
 
-	// mcu da pwm in smer pravilno od sebe. Vezje jebe
-
 	//run_motor(0);
 	//run_motor(1);
 	//run_motor(2);
 	//run_motor(3);
+
+	//uart test za koordinate:
+	char prejeto_sporocilo[];
+	uart_receive(prejeto_sporocilo);
+	uart_transmit(text);
+	HAL_Delay(1);
+
 	while (1) {
 		/* USER CODE END WHILE */
 
-		test_motor(0);
-		test_motor(1);
-		test_motor(2);
-		test_motor(3);
+		//test_motor(0);
+		//test_motor(1);
+		//test_motor(2);
+		//test_motor(3);
 
 		/* USER CODE BEGIN 3 */
 	}
