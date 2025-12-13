@@ -9,7 +9,8 @@ try:
     sporocilo=spik_bot_serial.serial_receive()
     print(sporocilo)
     if sporocilo is not None:
-      spik_bot_serial.serial_transmit(sporocilo)
+      #spik_bot_serial.serial_transmit(sporocilo)
+      spik_bot_serial.serial_transmit("X:35 Y:100")
 
 except KeyboardInterrupt:
   spik_bot_serial.serial_close()
