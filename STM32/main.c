@@ -2817,60 +2817,26 @@ void receive_target_point(uint32_t* x_coordinate, uint32_t* y_coordinate)
 		else receive_success=false;
 	}
 
-	//sporocilo razdelimo na x in y del
-	char str_x[15];
-	char str_y[15];
-	uint8_t str_ptr=0;
+	// Začasni spremenljivki za varno branje
+	unsigned long temp_x = 0;
+	unsigned long temp_y = 0;
 
+	// sscanf vrne število uspešno prebranih argumentov.
+	// Format "X:%lu Y:%lu" preskoči fiksne znake in prebere številke.
+	int parsed_count = sscanf(prejeto_sporocilo, "X:%lu Y:%lu", &temp_x, &temp_y);
 
-	//ne dela:
-	for (uint8_t i=0;i<30;i++)//30 je max dolzina sporocila
+	if (parsed_count == 2)
 	{
-		_Bool assign_x=false;
-		_Bool assign_y=false;
-
-		//if (strcmp(prejeto_sporocilo[i],"X")==0)
-		if (prejeto_sporocilo[i]=='X')
-		{
-			assign_x=true;
-		}
-		if (prejeto_sporocilo[i]=='Y')
-		{
-			assign_y=true;
-		}
-
-		if (prejeto_sporocilo[i]==' ')
-		{
-			assign_x=false;
-			assign_y=false;
-			str_ptr=0;
-		}
-
-		if (prejeto_sporocilo[i]=='\n')
-		{
-			break;
-		}
-
-		if (assign_x)
-		{
-			char c=prejeto_sporocilo[i];
-			str_x[str_ptr]=c;
-			str_ptr++;
-		}
-		if (assign_y)
-		{
-			char c=prejeto_sporocilo[i];
-			str_y[str_ptr]=c;
-			str_ptr++;
-		}
+		// Če smo uspešno prebrali obe številki, ju zapišemo na naslova
+		*x_coordinate = (uint32_t)temp_x;
+		*y_coordinate = (uint32_t)temp_y;
 	}
-
-	char *endptrx;
-	char *endptry;
-
-	//točki iz sporočila zapišemo v spremenljivki
-	*x_coordinate = (uint32_t)strtol(str_x, &endptrx, 10);
-	*y_coordinate = (uint32_t)strtol(str_y, &endptry, 10);
+	else
+	{
+		// V primeru napake pri formatu lahko nastaviš privzeto vrednost
+		*x_coordinate = 0;
+		*y_coordinate = 0;
+	}
 }
 
 /**
