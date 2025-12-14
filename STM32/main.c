@@ -75,8 +75,6 @@ typedef struct {
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
 
-	uint32_t offset; // offset due to mechanical structure (spindle joint)
-
 }motor_struct_t;
 /* USER CODE END PTD */
 
@@ -231,6 +229,8 @@ void process_message(char message);
 void uart_process_command(const char* command);
 void uart_send_motor_status(void);
 
+void receive_target_point(uint32_t *x_coordinate, uint32_t *y_coordinate);
+
 static void MPU_Config(void);
 void USART3_Pin_Init(void);
 
@@ -273,6 +273,9 @@ uint8_t num_of_motors=4; //število vseh motorjev
 uint32_t effector_x=0;   //end effector x coordinate [mm]
 uint32_t effector_y=0;   //end effector y coordinate [mm]
 uint32_t effector_orientation=0;   //end effector orientation [deg]
+
+uint32_t target_x_coordinate;
+uint32_t target_y_coordinate;
 
 uint32_t min_effector_y=0;
 uint32_t max_effector_y=0;
@@ -543,7 +546,7 @@ int main(void) {
 
 	//run_motor(2);
 
-	char text[]="Nika\r\n";
+
 
 	//uart_transmit(text);
 
@@ -552,10 +555,7 @@ int main(void) {
 	//run_motor(2);
 	//run_motor(3);
 
-	//uart test za koordinate:
-	char prejeto_sporocilo[];
-	uart_receive(prejeto_sporocilo);
-	uart_transmit(text);
+	receive_target_point(&target_x_coordinate,&target_y_coordinate);
 	HAL_Delay(1);
 
 	while (1) {
@@ -2377,7 +2377,7 @@ void test_motor(uint8_t motor_number)
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	static uint16_t end_switch_reset_cnt={0,0,0};//[M0,M1,M2]
+	static uint16_t end_switch_reset_cnt[]={0,0,0};//[M0,M1,M2]
 
 
     if (htim->Instance == TIM3)
@@ -2655,6 +2655,7 @@ void TestADCs() {
     ADC3->SMPR1 = 7 << (3*0);
 }
 
+//ne rabim:
 void uart_process_command(const char* command) {
     char response[128];
 
@@ -2695,6 +2696,7 @@ void uart_process_command(const char* command) {
     }
 }
 
+//ne rabim:
 void uart_send_motor_status(void) {
     char status[256];
     snprintf(status, sizeof(status),
@@ -2714,6 +2716,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     HAL_UART_Receive_IT(&huart1, rx_buff, 30);
 }
 
+//maybe rabim?
 void izpis_v_serijc(char *sporocilo)
 {
 	uint8_t X = 0;
@@ -2755,7 +2758,7 @@ char uart_receive(char *beseda)
 
 			if(uart_read_pos==30)uart_read_pos=0;
 
-			if(first_read!=1 && rx_buff[0]!='\0')//prvo branje opravimo ko je prvi element različen od '\0', da ne listamo po nepotrebnem
+			if(first_read!=1 && rx_buff[uart_read_pos]!='\0')//prvo branje opravimo ko je prvi element različen od '\0', da ne listamo po nepotrebnem
 			{
 				first_read=1;
 				//znak_temp=znak;
@@ -2778,15 +2781,96 @@ char uart_receive(char *beseda)
 		//}
 	}
 	first_read=0;
+	znak='\0';
 	//return *beseda;
 }
 
+//ne rabim:
 void uart_empty_buffer(char *buffer, uint8_t buffer_size)
 {
 	for(uint8_t buff_ptr=0;buff_ptr<buffer_size;buff_ptr++)
 	{
 		buffer[buff_ptr]='\0';
 	}
+}
+
+void receive_target_point(uint32_t* x_coordinate, uint32_t* y_coordinate)
+{
+	_Bool receive_success=false;
+
+	//char text[]="Nika\r\n";
+
+	char prejeto_sporocilo[30];
+	char potrditveno_sporocilo[30];
+
+	while (!receive_success)//verjetno bi bilo pametno dodat timeout?
+	{
+		uart_receive(prejeto_sporocilo);
+		uart_transmit(prejeto_sporocilo);
+		uart_receive(potrditveno_sporocilo);
+
+		char good_message[]="OK\n";
+
+		//če prejmemo pravilno potrditveno sporočilo,
+		//vemo da smo prejeli pravilne podatke za točki
+		if(strcmp(potrditveno_sporocilo,"OK\n")==0)receive_success=true;
+		else receive_success=false;
+	}
+
+	//sporocilo razdelimo na x in y del
+	char str_x[15];
+	char str_y[15];
+	uint8_t str_ptr=0;
+
+
+	//ne dela:
+	for (uint8_t i=0;i<30;i++)//30 je max dolzina sporocila
+	{
+		_Bool assign_x=false;
+		_Bool assign_y=false;
+
+		//if (strcmp(prejeto_sporocilo[i],"X")==0)
+		if (prejeto_sporocilo[i]=='X')
+		{
+			assign_x=true;
+		}
+		if (prejeto_sporocilo[i]=='Y')
+		{
+			assign_y=true;
+		}
+
+		if (prejeto_sporocilo[i]==' ')
+		{
+			assign_x=false;
+			assign_y=false;
+			str_ptr=0;
+		}
+
+		if (prejeto_sporocilo[i]=='\n')
+		{
+			break;
+		}
+
+		if (assign_x)
+		{
+			char c=prejeto_sporocilo[i];
+			str_x[str_ptr]=c;
+			str_ptr++;
+		}
+		if (assign_y)
+		{
+			char c=prejeto_sporocilo[i];
+			str_y[str_ptr]=c;
+			str_ptr++;
+		}
+	}
+
+	char *endptrx;
+	char *endptry;
+
+	//točki iz sporočila zapišemo v spremenljivki
+	*x_coordinate = (uint32_t)strtol(str_x, &endptrx, 10);
+	*y_coordinate = (uint32_t)strtol(str_y, &endptry, 10);
 }
 
 /**
