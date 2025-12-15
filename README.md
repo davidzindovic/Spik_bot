@@ -1,3 +1,9 @@
+# 14.12.2025:
+- za zajet point cloud
+- potrebno procesiranje point clouda (za točko in orientacijo vboda)
+- 3d model nosilcev motorjev z reduktorji (todo)
+- akse in gredi na stružnici za narest
+
 # 14.11.2025:
 - za poštimat settinge driverjev (najbolje dela POKI)
 - direction switch dela probleme
