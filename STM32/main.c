@@ -209,6 +209,7 @@ void run_motor(uint8_t motor_number);
 void stop_motor(uint8_t motor_number);
 void pump_liquid(uint32_t ammount_of_liquid);
 void test_motor(uint8_t motor_number);
+void test_all_motors();
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void TIM1_UP_IRQHandler(void);
@@ -398,7 +399,7 @@ int main(void) {
 	    .direction_port = GPIOG,//D2
 	    .timer = &htim3,
 	    .timer_channel = TIM_CHANNEL_1,
-		.frequency = 50000,
+		.frequency = 500,
 	    .motor_pin = GPIO_PIN_6,//D3
 	    .motor_port = GPIOA,
 	    .max_position = 100000,
@@ -460,7 +461,7 @@ int main(void) {
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 50000,
+		.frequency = 500,
 		.motor_pin = GPIO_PIN_6,//D6
 		.motor_port = GPIOE,
 		.max_position = 100000,
@@ -492,7 +493,7 @@ int main(void) {
 		.direction_port = GPIOD,//D15
 		.timer = &htim12,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 500,
+		.frequency = 50000,
 		.motor_pin = GPIO_PIN_15,//D11
 		.motor_port = GPIOB,
 		.max_position = 10000,
@@ -555,8 +556,8 @@ int main(void) {
 	//run_motor(2);
 	//run_motor(3);
 
-	receive_target_point(&target_x_coordinate,&target_y_coordinate);
-	HAL_Delay(1);
+	//receive_target_point(&target_x_coordinate,&target_y_coordinate);
+	//HAL_Delay(1);
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -565,6 +566,7 @@ int main(void) {
 		//test_motor(1);
 		//test_motor(2);
 		//test_motor(3);
+		test_all_motors();
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -2367,6 +2369,37 @@ void test_motor(uint8_t motor_number)
 		HAL_Delay(3000);
 		stop_motor(motor_number);
 	//}
+}
+
+void test_all_motors()
+{
+	stop_motor(0);
+	stop_motor(1);
+	stop_motor(2);
+	HAL_Delay(1000);
+	direction_change(0,motors[0].direction_minus);
+	direction_change(1,motors[1].direction_minus);
+	direction_change(2,motors[2].direction_minus);
+	HAL_Delay(500);
+	run_motor(0);
+	run_motor(1);
+	run_motor(2);
+	HAL_Delay(30000);
+	stop_motor(0);
+	stop_motor(1);
+	stop_motor(2);
+	HAL_Delay(1000);
+	direction_change(0,motors[0].direction_plus);
+	direction_change(1,motors[1].direction_plus);
+	direction_change(2,motors[2].direction_plus);
+	HAL_Delay(500);
+	run_motor(0);
+	run_motor(1);
+	run_motor(2);
+	HAL_Delay(30000);
+	stop_motor(0);
+	stop_motor(1);
+	stop_motor(2);
 }
 
 /**
