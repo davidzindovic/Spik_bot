@@ -10,10 +10,22 @@ def serial_init():
   ser.reset_input_buffer()
   print("Serial OK")
 
+# spremembe, potestiraj
 def serial_transmit(message):
   global ser
   print("Sending: "+message)
   ser.write((message+"\n").encode('utf-8'))
+  sporocilo=None
+  while(sporocilo is None):
+    sporocilo=serial_receive()
+  if sporocilo==poslano:
+    print("Uspesno!")
+    ser.write(("OK"+"\n").encode('utf-8'))
+    while(1):
+      pass
+  else:
+    print("Neuspesno!")
+    ser.write(("NOT OK"+"\n").encode('utf-8'))
 
 def serial_receive():
   global ser
