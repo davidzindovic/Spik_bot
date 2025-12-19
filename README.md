@@ -1,3 +1,12 @@
+# 19.12.2025:
+- zamenjani nekateri motorji
+- jermenski sklop se premika zelo počasi
+- motor na jermenskem sklopu ima reduktor in se vseeno greje. Morda potrebna opora zaradi akse?
+- pumpa stestirana in dela. Festo 4mm cevi špilajo
+- potreben nov cable managment
+- potrebna izvedba kalibracijskega postopka
+- potreben preizkus pridobivanja informacij iz RPI kamere in prenos na ST (prilagoditev kode)
+
 # 14.12.2025:
 - za zajet point cloud
 - potrebno procesiranje point clouda (za točko in orientacijo vboda)
