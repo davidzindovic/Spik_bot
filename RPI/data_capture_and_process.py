@@ -46,7 +46,7 @@ def exec(color_path, depth_path):
     color_img_path=color_path
     depth_img_path=depth_path
     
-    if not os.path.exists(depth_img_path): continue
+    #if not os.path.exists(depth_img_path): continue
     
     try:
         color_img = cv2.imread(color_img_path)
@@ -128,16 +128,17 @@ def exec(color_path, depth_path):
 
             vnos = input("> ").lower()
             
-            if vnos == 'q': break
-            if vnos == 'n': continue
+            #if vnos == 'q': break
+            #if vnos == 'n': continue
             if vnos in ['1', '2', '3']:
                 idx = int(vnos)-1
                 if points[idx][3]:
                     p, d = points[idx][0], points[idx][1]
-                    print(f"Točka {vnos}: X={p[0]:.1f}, Z={p[2]:.1f}, Rot={d}°")
+                    #print(f"Točka {vnos}: X={p[0]:.1f}, Z={p[2]:.1f}, Rot={d}°")
 
-        if cv2.waitKey(1) == ord('q'): break
+        #if cv2.waitKey(1) == ord('q'): break
     except Exception as e: print(f"Napaka: {e}")
     
     cv2.destroyAllWindows()
+    print("X:"+str(p[0])+" Y:"+str(p[1])+" Z:"+str(p[2])+" ROT:"+str(d))
     return "X:"+str(p[0])+" Y:"+str(p[1])+" Z:"+str(p[2])+" ROT:"+str(d)
