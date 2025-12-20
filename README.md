@@ -6,6 +6,7 @@
 - potreben nov cable managment
 - potrebna izvedba kalibracijskega postopka
 - potreben preizkus pridobivanja informacij iz RPI kamere in prenos na ST (prilagoditev kode)
+- potreben preizkus majhnega krmilnika
 
 # 14.12.2025:
 - za zajet point cloud
