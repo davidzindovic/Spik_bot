@@ -1,5 +1,6 @@
 import lib_init
 import spik_bot_serial
+import data_capture_and_process
 
 try:
   lib_init.library_setup()
@@ -14,8 +15,8 @@ try:
         depth_img_path = f"{img_number}globina.npy"
         if not os.path.exists(depth_img_path): continue
     
-    poslano="X:35 Y:100"
-    spik_bot_serial.serial_transmit(poslano)
+        poslano=data_capture_and_process.exec(color_img_path,depth_img_path)
+        spik_bot_serial.serial_transmit(poslano)
 
 except KeyboardInterrupt:
   spik_bot_serial.serial_close()
