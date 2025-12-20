@@ -277,6 +277,7 @@ uint32_t effector_orientation=0;   //end effector orientation [deg]
 
 uint32_t target_x_coordinate;
 uint32_t target_y_coordinate;
+int target_phi;
 
 uint32_t min_effector_y=0;
 uint32_t max_effector_y=0;
@@ -556,7 +557,7 @@ int main(void) {
 	//run_motor(2);
 	//run_motor(3);
 
-	//receive_target_point(&target_x_coordinate,&target_y_coordinate);
+	//receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_phi);
 	//HAL_Delay(1);
 
 	while (1) {
@@ -2827,7 +2828,7 @@ void uart_empty_buffer(char *buffer, uint8_t buffer_size)
 	}
 }
 
-void receive_target_point(uint32_t* x_coordinate, uint32_t* y_coordinate)
+void receive_target_point(uint32_t* x_coordinate, uint32_t* y_coordinate, int* phi)
 {
 	_Bool receive_success=false;
 
@@ -2853,22 +2854,25 @@ void receive_target_point(uint32_t* x_coordinate, uint32_t* y_coordinate)
 	// Začasni spremenljivki za varno branje
 	unsigned long temp_x = 0;
 	unsigned long temp_y = 0;
+	unsigned long temp_rot = 0;
 
 	// sscanf vrne število uspešno prebranih argumentov.
 	// Format "X:%lu Y:%lu" preskoči fiksne znake in prebere številke.
-	int parsed_count = sscanf(prejeto_sporocilo, "X:%lu Y:%lu", &temp_x, &temp_y);
+	int parsed_count = sscanf(prejeto_sporocilo, "X:%lu Y:%lu ROT:%lu", &temp_x, &temp_y, &temp_rot);
 
 	if (parsed_count == 2)
 	{
 		// Če smo uspešno prebrali obe številki, ju zapišemo na naslova
 		*x_coordinate = (uint32_t)temp_x;
 		*y_coordinate = (uint32_t)temp_y;
+		*phi = (int)temp_rot;
 	}
 	else
 	{
 		// V primeru napake pri formatu lahko nastaviš privzeto vrednost
 		*x_coordinate = 0;
 		*y_coordinate = 0;
+		*phi = 0;
 	}
 }
 
@@ -3153,3 +3157,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
