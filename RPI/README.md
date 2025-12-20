@@ -1,6 +1,9 @@
 # Knjižnice
 Za poenostavljanje programa so temu namenjene knjižnice za:
 - namestitev potrebnih knjižnice = ```lib_init.py```
+- serijsko komunikacijo z STM32 = ```spik_bot_serial.py```
+- obdelavo shranjenih slik = ```data_capture_and_process.py```
+- zajem in shranjevanje slik = ```capture_and_save_images.py```
 
 # Launch realsense GUI
 ```realsense-viewer```
