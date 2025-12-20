@@ -15,4 +15,4 @@ Shutdown virtual environment:
 
 # Zajeti podatki
 V mapi ```zajeti_podatki``` so pari barvnih in globinskih slik skupaj s programskimi datotekami, ki so po korakih prispevale k nastanku ```data_capture_and_process.py```.
-Program ```data_capture.py``` je namenjen le zajemu in shranjevanju podatkov v podmapo ```zajeti_podatki```.
+Program ```capture_and_save_images.py``` je namenjen le zajemu in shranjevanju podatkov v podmapo ```zajeti_podatki```.
