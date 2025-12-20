@@ -140,4 +140,4 @@ def exec(color_path, depth_path):
     except Exception as e: print(f"Napaka: {e}")
     
     cv2.destroyAllWindows()
-    return(p[0],p[1],p[2],d)
+    return "X:"+str(p[0])+" Y:"+str(p[1])+" Z:"+str(p[2])+" ROT:"+str(d)
