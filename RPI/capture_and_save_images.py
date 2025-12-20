@@ -64,7 +64,7 @@ def save_frames(color_frame, depth_frame_data, depth_scale):
     # print(f"Vizualizacija globine shranjena kot: {depth_visual_filename}")
 
 
-def main():
+def exec():
     # Preverjanje/ustvarjanje izhodnega direktorija
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
@@ -119,5 +119,5 @@ def main():
         cv2.destroyAllWindows()
         print("Program končan.")
 
-if __name__ == "__main__":
-    main()
+#if __name__ == "__main__":
+#    main()
