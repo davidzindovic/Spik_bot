@@ -1,3 +1,7 @@
+# Knjižnice
+Za poenostavljanje programa so temu namenjene knjižnice za:
+- namestitev potrebnih knjižnice = ```lib_init.py```
+
 # Launch realsense GUI
 ```realsense-viewer```
 
