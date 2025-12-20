@@ -1,6 +1,8 @@
 import lib_init
 import spik_bot_serial
 import data_capture_and_process
+import capture_and_save_images
+
 import glob
 import os
 
@@ -9,7 +11,9 @@ try:
 
   #odkomentiraj za test na hw:
   spik_bot_serial.serial_init()
-  
+
+  capture_and_save_images.exec()  
+
   while(1):
 
     color_images = glob.glob("zajeti_podatki/*barva.png")
