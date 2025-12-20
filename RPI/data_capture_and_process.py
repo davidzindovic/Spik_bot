@@ -3,7 +3,6 @@ import numpy as np
 import os
 import glob
 import math
-import random
 
 #ta koda zanemarja radij pri izrisu
 
@@ -141,3 +140,4 @@ def exec(color_path, depth_path):
     except Exception as e: print(f"Napaka: {e}")
     
     cv2.destroyAllWindows()
+    return(p[0],p[1],p[2],d)
