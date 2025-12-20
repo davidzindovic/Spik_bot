@@ -1,11 +1,13 @@
 import serial
 import time
 
+#za test na hw odkomentiraj
 ser=serial.Serial('/dev/ttyS0',115200,timeout=1.0)
 
 def serial_init():
   global ser
-  #ser=serial.Serial('/dev/ttyS0',115200,timeout=1.0)
+  #za test na hw zakomentiraj
+  ser=serial.Serial('/dev/ttyS0',115200,timeout=1.0)
   time.sleep(3)
   ser.reset_input_buffer()
   print("Serial OK")
