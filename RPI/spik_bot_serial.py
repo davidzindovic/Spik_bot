@@ -20,7 +20,7 @@ def serial_transmit(message):
   sporocilo=None
   while(sporocilo is None):
     sporocilo=serial_receive()
-  if sporocilo==poslano:
+  if sporocilo==message:
     print("Uspesno!")
     ser.write(("OK"+"\n").encode('utf-8'))
     while(1):
