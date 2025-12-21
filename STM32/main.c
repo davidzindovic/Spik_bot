@@ -230,7 +230,7 @@ void process_message(char message);
 void uart_process_command(const char* command);
 void uart_send_motor_status(void);
 
-void receive_target_point(uint32_t *x_coordinate, uint32_t *y_coordinate);
+void receive_target_point(int *x_coordinate, int *y_coordinate, int* z_coordinate, int *phi);
 
 static void MPU_Config(void);
 void USART3_Pin_Init(void);
@@ -275,8 +275,9 @@ uint32_t effector_x=0;   //end effector x coordinate [mm]
 uint32_t effector_y=0;   //end effector y coordinate [mm]
 uint32_t effector_orientation=0;   //end effector orientation [deg]
 
-uint32_t target_x_coordinate;
-uint32_t target_y_coordinate;
+int target_x_coordinate;
+int target_y_coordinate;
+int target_z_coordinate;
 int target_phi;
 
 uint32_t min_effector_y=0;
@@ -557,7 +558,7 @@ int main(void) {
 	//run_motor(2);
 	//run_motor(3);
 
-	//receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_phi);
+	//receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_z_coordinate,&target_phi);
 	//HAL_Delay(1);
 
 	while (1) {
@@ -567,7 +568,7 @@ int main(void) {
 		//test_motor(1);
 		//test_motor(2);
 		//test_motor(3);
-		test_all_motors();
+		//test_all_motors();
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -2828,7 +2829,7 @@ void uart_empty_buffer(char *buffer, uint8_t buffer_size)
 	}
 }
 
-void receive_target_point(uint32_t* x_coordinate, uint32_t* y_coordinate, int* phi)
+void receive_target_point(int* x_coordinate, int* y_coordinate, int* z_coordinate, int* phi)
 {
 	_Bool receive_success=false;
 
@@ -2852,26 +2853,29 @@ void receive_target_point(uint32_t* x_coordinate, uint32_t* y_coordinate, int* p
 	}
 
 	// Začasni spremenljivki za varno branje
-	unsigned long temp_x = 0;
-	unsigned long temp_y = 0;
-	unsigned long temp_rot = 0;
+	int temp_x = 0;
+	int temp_y = 0;
+	int temp_z = 0;
+	int temp_rot = 0;
 
 	// sscanf vrne število uspešno prebranih argumentov.
 	// Format "X:%lu Y:%lu" preskoči fiksne znake in prebere številke.
-	int parsed_count = sscanf(prejeto_sporocilo, "X:%lu Y:%lu ROT:%lu", &temp_x, &temp_y, &temp_rot);
+	int parsed_count = sscanf(prejeto_sporocilo, "X:%d Y:%d Z:%d ROT:%d", &temp_x, &temp_y, &temp_z, &temp_rot);
 
-	if (parsed_count == 2)
+	if (parsed_count == 4)
 	{
 		// Če smo uspešno prebrali obe številki, ju zapišemo na naslova
-		*x_coordinate = (uint32_t)temp_x;
-		*y_coordinate = (uint32_t)temp_y;
-		*phi = (int)temp_rot;
+		*x_coordinate = temp_x;
+		*y_coordinate = temp_y;
+		*z_coordinate = temp_z;
+		*phi = temp_rot;
 	}
 	else
 	{
 		// V primeru napake pri formatu lahko nastaviš privzeto vrednost
 		*x_coordinate = 0;
 		*y_coordinate = 0;
+		*z_coordinate = 0;
 		*phi = 0;
 	}
 }
@@ -3157,4 +3161,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
