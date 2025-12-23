@@ -401,7 +401,7 @@ int main(void) {
 	    .direction_port = GPIOG,//D2
 	    .timer = &htim3,
 	    .timer_channel = TIM_CHANNEL_1,
-		.frequency = 500,
+		.frequency = 50000,
 	    .motor_pin = GPIO_PIN_6,//D3
 	    .motor_port = GPIOA,
 	    .max_position = 100000,
@@ -463,7 +463,7 @@ int main(void) {
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 500,
+		.frequency = 50000,
 		.motor_pin = GPIO_PIN_6,//D6
 		.motor_port = GPIOE,
 		.max_position = 100000,
@@ -561,6 +561,9 @@ int main(void) {
 	//receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_z_coordinate,&target_phi);
 	//HAL_Delay(1);
 
+	//hitrost motorjev lahko štelamo tudi s stikali (pulz/rev)
+	//jermen gre samo eno stopnjo hitreje, pri več pa ruži
+	
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -568,7 +571,7 @@ int main(void) {
 		//test_motor(1);
 		//test_motor(2);
 		//test_motor(3);
-		//test_all_motors();
+		test_all_motors();
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -2386,7 +2389,7 @@ void test_all_motors()
 	run_motor(0);
 	run_motor(1);
 	run_motor(2);
-	HAL_Delay(30000);
+	HAL_Delay(3000);
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
@@ -2398,7 +2401,7 @@ void test_all_motors()
 	run_motor(0);
 	run_motor(1);
 	run_motor(2);
-	HAL_Delay(30000);
+	HAL_Delay(3000);
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
