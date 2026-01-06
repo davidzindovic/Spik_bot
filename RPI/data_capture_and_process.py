@@ -4,17 +4,12 @@ import os
 import glob
 import math
 
-#ta koda zanemarja radij pri izrisu
-
-# --- NASTAVITVE PARAMETROV KAMERE ---
+# --- PARAMETERS ---
 FX, FY = 600.0, 600.0  
 CX, CY = 320.0, 240.0  
-
-# --- TRANSFORMACIJA KAMERA -> AKTUATOR (v mm) ---
 OFF_X, OFF_Y, OFF_Z = 50.0, -100.0, 20.0  
 RADIUS_OFFSET = 5.0  
 
-# --- DEFINICIJA DELOVNEGA OBMOČJA AKTUATORJA (v mm glede na kamero) ---
 WORKSPACE_RECT = np.array([
     [OFF_X - 400, OFF_Z + 100],
     [OFF_X + 400, OFF_Z + 100],
@@ -31,22 +26,13 @@ def is_in_workspace(px, pz):
     return res >= 0
 
 def exec(color_path, depth_path):
-    # --- BARVNE MEJE ---
     rgb_low, rgb_high = [32, 38, 26], [52, 54, 43]
     hsv_low_base, hsv_high_base = rgb_to_hsv_threshold(rgb_low), rgb_to_hsv_threshold(rgb_high)
     lower_hsv = np.array([np.clip(hsv_low_base[0]-15, 0, 180), np.clip(hsv_low_base[1]-30, 0, 255), np.clip(hsv_low_base[2]-40, 0, 255)], dtype=np.uint8)
     upper_hsv = np.array([np.clip(hsv_high_base[0]+15, 0, 180), np.clip(hsv_high_base[1]+120, 0, 255), np.clip(hsv_high_base[2]+180, 0, 255)], dtype=np.uint8)
     
-    #color_images = glob.glob("*barva.png")
-    
-    #for color_img_path in sorted(color_images):
-    #img_number = color_img_path.replace("barva.png", "")
-    #depth_img_path = f"{img_number}globina.npy"
-
-    color_img_path=color_path
-    depth_img_path=depth_path
-    
-    #if not os.path.exists(depth_img_path): continue
+    color_img_path = color_path
+    depth_img_path = depth_path
     
     try:
         color_img = cv2.imread(color_img_path)
@@ -82,65 +68,104 @@ def exec(color_path, depth_path):
                     final_data = {'center': ((ux-CX)*z_front/FX, (uy-CY)*z_front/FY, z_front+r_mm), 'radius': r_mm}
 
         if best_cnt is not None:
-            # --- OZNAČEVANJE NA IZVORNI SLIKI ---
-            # 1. Nariši konturo (zelena barva, debelina 2)
             cv2.drawContours(display_img, [best_cnt], -1, (0, 255, 0), 2)
-            
             cx, cy, cz = final_data['center']
             r = final_data['radius']
             angle_to_cam = math.atan2(-cz, -cx)
             points = []
             
-            for offset_deg in [0, 30, -30]:
+            # --- IZRAČUN TOČK (Vrstni red popravljen na -30, 0, 30 za skladnost) ---
+            for offset_deg in [-30, 0, 30]:
                 off_rad = math.radians(offset_deg)
                 ang = angle_to_cam + off_rad
                 px, pz = cx + r * math.cos(ang), cz + r * math.sin(ang)
                 safe = is_in_workspace(px, pz)
                 points.append(((px, cy, pz), offset_deg, ang, safe))
-                
-                # 2. Nariši točke še na izvorno sliko (projekcija iz 3D v 2D)
-                # Formula: u = (x * FX / z) + CX
-                u_img = int((px * FX / pz) + CX)
-                v_img = int((cy * FY / pz) + CY)
-                cv2.circle(display_img, (u_img, v_img), 5, (0, 0, 255) if not safe else (0, 255, 255), -1)
-                cv2.putText(display_img, str(len(points)), (u_img+10, v_img), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-            # --- TLORIS ---
-            top_down = np.zeros((1000, 1000, 3), dtype=np.uint8)
-            scale, ox, oz = 0.6, 500, 950
+            # --- DETECTION: VRSTICA Z NAPISI IN POVEZOVALNIMI ČRTAMI ---
+            y_offset = 30  # Vaš parameter
+            x_spread = 60  # Vaš parameter
+
+            for i, p_data in enumerate(points):
+                p, deg, ang, safe = p_data
+                # Projekcija 3D točke v 2D koordinatni sistem slike
+                u_img = int((p[0] * FX / p[2]) + CX)
+                v_img = int((p[1] * FY / p[2]) + CY)
+                
+                # Narišemo piko na obodu
+                cv2.circle(display_img, (u_img, v_img), 4, (0, 0, 255), -1)
+                
+                # Izračun pozicije napisa glede na indeks
+                if i == 0:     # Točka 1 (Leva)
+                    label_x = u_img - x_spread
+                elif i == 1:   # Točka 2 (Sredinska)
+                    label_x = u_img
+                else:          # Točka 3 (Desna)
+                    label_x = u_img + x_spread
+                
+                text_y = v_img + y_offset
+                label_pos = (label_x - 10, text_y + 15) # +15 da je tekst pod koncem črte
+                
+                # Povezovalna črta v barvi teksta (bela z obrobo)
+                # Rišemo od pike (u_img, v_img) do začetka teksta
+                cv2.line(display_img, (u_img, v_img), (label_x, text_y), (0, 0, 0), 2)       # Črna obroba črte
+                cv2.line(display_img, (u_img, v_img), (label_x, text_y), (255, 255, 255), 1) # Bela črta
+                
+                # Izpis številke s kontrastno obrobo
+                cv2.putText(display_img, str(i+1), label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3)
+                cv2.putText(display_img, str(i+1), label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            # --- TLORIS: Minimalistično ---
+            top_down = np.ones((1000, 1000, 3), dtype=np.uint8) * 255
+            scale, ox, oz = 0.5, 500, 850 
+            vis_r_px = int(r * scale)
+
+            # Kamera X in Napis
+            cv2.line(top_down, (ox-12, oz-12), (ox+12, oz+12), (0, 0, 0), 2)
+            cv2.line(top_down, (ox-12, oz+12), (ox+12, oz-12), (0, 0, 0), 2)
+            cv2.putText(top_down, "KAMERA", (ox-45, oz+55), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (40, 40, 40), 2)
+
+            # Workspace in Deblo
             ws_pts_px = np.array([[int(ox + p[0]*scale), int(oz - p[1]*scale)] for p in WORKSPACE_RECT], np.int32)
-            cv2.polylines(top_down, [ws_pts_px], True, (80, 80, 80), 2)
+            cv2.polylines(top_down, [ws_pts_px], True, (150, 150, 150), 2)
             
-            vis_r = 120
             bx, bz = int(ox + cx * scale), int(oz - cz * scale)
-            cv2.circle(top_down, (bx, bz), vis_r, (35, 35, 35), -1)
+            cv2.circle(top_down, (bx, bz), vis_r_px, (240, 240, 240), -1)
+            cv2.circle(top_down, (bx, bz), vis_r_px, (100, 100, 100), 2)
 
             for i, (p, deg, raw_ang, safe) in enumerate(points):
-                vpx, vpz = int(bx + vis_r * math.cos(raw_ang)), int(bz - vis_r * math.sin(raw_ang))
-                cv2.circle(top_down, (vpx, vpz), 5, (0, 255, 0) if safe else (0, 0, 255), -1)
-                cv2.putText(top_down, str(i+1), (int(bx+(vis_r+35)*math.cos(raw_ang))-5, int(bz-(vis_r+35)*math.sin(raw_ang))+5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                vpx, vpz = int(bx + vis_r_px * math.cos(raw_ang)), int(bz - vis_r_px * math.sin(raw_ang))
+                color = (0, 160, 0) if safe else (0, 0, 220)
+                cv2.circle(top_down, (vpx, vpz), 4, color, -1)
+                
+                # Črta in napis na tlorisu
+                text_dist = vis_r_px + 70
+                tx, tz = int(bx + text_dist * math.cos(raw_ang)), int(bz - text_dist * math.sin(raw_ang))
+                cv2.line(top_down, (vpx, vpz), (tx, tz), (200, 200, 200), 1)
+                cv2.putText(top_down, str(i+1), (tx-10, tz+10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
             cv2.imshow("Detection", display_img)
             cv2.imshow("TLORIS", top_down)
-            cv2.waitKey(1)
-
-            print(f"\nIzberi 1-3 (n=naslednja, q=konec):")
-
-            vnos = input("> ").lower()
             
-            #if vnos == 'q': break
-            #if vnos == 'n': continue
-            if vnos in ['1', '2', '3']:
-                idx = int(vnos)-1
-                if points[idx][3]:
-                    p, d = points[idx][0], points[idx][1]
-                    #print(f"Točka {vnos}: X={p[0]:.1f}, Z={p[2]:.1f}, Rot={d}°")
+            # --- NON-BLOCKING INPUT ---
+            print("Pritisni tipko 1, 2, ali 3 na tipkovnici (ali 'n' za naslednjo)...")
+            while True:
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('n'):
+                    return "Next"
+                if key in [ord('1'), ord('2'), ord('3')]:
+                    idx = int(chr(key)) - 1
+                    if points[idx][3]:
+                        p, d = points[idx][0], points[idx][1]
+                        message = f"X:{math.floor(p[0])} Y:{math.floor(p[1])} Z:{math.floor(p[2])} ROT:{math.floor(d)}"
+                        print(f"Izbrano: {message}")
+                        cv2.destroyAllWindows()
+                        return message
+                    else:
+                        print("Izbrana točka je izven delovnega območja!")
 
-        #if cv2.waitKey(1) == ord('q'): break
-    except Exception as e: print(f"Napaka: {e}")
+    except Exception as e: 
+        print(f"Napaka: {e}")
     
     cv2.destroyAllWindows()
-    
-    message="X:"+str(math.floor(p[0]))+" Y:"+str(math.floor(p[1]))+" Z:"+str(math.floor(p[2]))+" ROT:"+str(math.floor(d))
-    print(message)
-    return message
+    return "No selection"
