@@ -71,7 +71,8 @@ typedef struct {
     GPIO_TypeDef* end_switch_port;
 	_Bool end_switch_triggered;
 
-	uint32_t unit_conversion; //number of steps per mm or deg
+	uint32_t unit_conversion; //number of mm or deg per step
+	uint32_t travel_length; //maximum travel length distance of segment
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
 
@@ -418,6 +419,7 @@ int main(void) {
 	    //.end_switch2_pin = GPIO_PIN_15,//D9
 	    //.end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
+		.travel_length=1000, //mm
 		.num_steps_per_turn=40000
 	};
 	motors[1] = (motor_struct_t){
@@ -450,6 +452,7 @@ int main(void) {
 	    //.end_switch2_pin = GPIO_PIN_2,//D12
 	    //.end_switch2_port = GPIOI,
 		.unit_conversion=100, //steps per deg
+		.travel_length=170, //deg
 		.num_steps_per_turn=40000
 	};
 	motors[2] = (motor_struct_t){
@@ -482,6 +485,7 @@ int main(void) {
 		//.end_switch2_pin = GPIO_PIN_3,//D13
 		//.end_switch2_port = GPIOD,
 		.unit_conversion=100, //steps per mm
+		.travel_length=300, //mm
 		.num_steps_per_turn=40000
 	};
 	motors[3] = (motor_struct_t){ //max 50000 freq
@@ -514,6 +518,7 @@ int main(void) {
 		//konc prepovedi
 
 		.unit_conversion=100, //steps per mm
+		.travel_length=360, //deg
 		.num_steps_per_turn=200
 	};
 
@@ -572,8 +577,10 @@ int main(void) {
 		//test_motor(1);
 		//test_motor(2);
 		//test_motor(3);
-		test_all_motors();
+		//test_all_motors();
 
+		demo_za_predstavitev();
+		
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
@@ -2420,19 +2427,14 @@ void test_all_motors()
   */
 void demo_za_predstavitev()
 {
-	//če end switch ni pritisnjen zalaufa motor v x smer
-	if(!read_switch())
-	{
-		direction_change(1);
-		run_motor(1);
-	}
-	
-	while(read_switch())
+	calibrate_motor(2);
 }
 
 /**
   * @brief  Function for calibrating the chosen motor by reaching the end switches.
   			Once calibrated the segment should move to the center.
+			Calibration result is the change of the motors parameters:
+			max_position, unit_conversion
   * @param  motor_number: number of the motor that should be calibrated
   * @retval None
   */
@@ -2448,36 +2450,43 @@ void calibrate_motor(uint8_t motor_number)
 		stop_motor(motor_number);
 		while(1){};
 	}
-		direction_change(motor_number,motors[motor_number].direction_plus);
-		run_motor(motor_number);
 	
-		while(!read_switch(motor_number)){}
-		
-		stop_motor(motor_number);
-		direction_change(motor_number,motors[motor_number].direction_minus);
-		HAL_Delay(100);
+	direction_change(motor_number,motors[motor_number].direction_minus);
+	run_motor(motor_number);
 
-		uint32_t tickstart = HAL_GetTick();
-		uint32_t temp_motor_position=motors[motor_number].position;
-		run_motor(motor_number);
+	while(!read_switch(motor_number)){}
+	motors[motor_number].start_position=0;
+	motors[motor_number].position=0;
+	
+	stop_motor(motor_number);
+	direction_change(motor_number,motors[motor_number].direction_plus);
+	HAL_Delay(100);
 
-		// run until switch encounter
-		while(!read_switch(motor_number))
-			{
-				if((motors[motor_number].position-temp_motor_position)>motors[motor_number].num_steps_for_switch_release)
-				{
-					stop_motor(motor_number);
-					while(1){};
-				}
-			}
+	uint32_t tickstart = HAL_GetTick();
+	run_motor(motor_number);
 
-		// abort if switch is pressed to early (less than 0.5s) or if there is an error in step counting
-		if ((HAL_GetTick()-tickstart)<500)
-		{
-			motor_stop(motor_number);
-			while(1){};
-		}
+	// run until switch encounter; the number of steps for switch release is taken into account
+	while(!(read_switch(motor_number)&&(motors[motor_number].position>motors[motor_number].num_steps_for_switch_release))){}
+
+	motor_stop(motor_number);
+
+	// abort if switch is pressed to early (less than 0.5s) or if there is an error in step counting
+	if ((HAL_GetTick()-tickstart)<500)
+	{
+		while(1){};
 	}
+
+	motors[motor_number].max_position=motors[motor_number].position;
+	motors[motors_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
+
+	direction_change(motor_number,motors[motor_number].direction_minus);
+	HAL_Delay(100);
+	
+	run_motor(motor_number);
+	
+	while(motors[motor_number].position>(motors[motor_number].max_position/2)){}
+	
+	stop_motor(motor_number);
 }
 
 /**
@@ -3237,4 +3246,5 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
