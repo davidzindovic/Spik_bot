@@ -210,6 +210,7 @@ void stop_motor(uint8_t motor_number);
 void pump_liquid(uint32_t ammount_of_liquid);
 void test_motor(uint8_t motor_number);
 void test_all_motors();
+void demo_za_predstavitev();
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void TIM1_UP_IRQHandler(void);
@@ -2376,6 +2377,11 @@ void test_motor(uint8_t motor_number)
 	//}
 }
 
+/**
+  * @brief  Runs the 3 segment motors at the same time for the 3 seconds in each direction.
+  * @param  None
+  * @retval None
+  */
 void test_all_motors()
 {
 	stop_motor(0);
@@ -2405,6 +2411,73 @@ void test_all_motors()
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
+}
+
+/**
+  * @brief  Runs the motors for a specific time to reach a predetermined point.
+  * @param  None
+  * @retval None
+  */
+void demo_za_predstavitev()
+{
+	//če end switch ni pritisnjen zalaufa motor v x smer
+	if(!read_switch())
+	{
+		direction_change(1);
+		run_motor(1);
+	}
+	
+	while(read_switch())
+}
+
+/**
+  * @brief  Function for calibrating the chosen motor by reaching the end switches.
+  			Once calibrated the segment should move to the center.
+  * @param  motor_number: number of the motor that should be calibrated
+  * @retval None
+  */
+void calibrate_motor(uint8_t motor_number)
+{	//WARNING: If the robot is shutdown in one of two end positions (pressing the switch)
+	//			the user should move the unit away from the switch manually. 
+	//			The robot does not move if the segment's switch is pressed. Freezes the software.
+
+	// In case of contact with the switch at the start the software disables the motors.
+	// The reason is that we cannot know which switch s pressed due to lack of IO pins.
+	if(read_switch(motor_number))
+	{	
+		stop_motor(motor_number);
+		while(1){};
+	}
+		direction_change(motor_number,motors[motor_number].direction_plus);
+		run_motor(motor_number);
+	
+		while(!read_switch(motor_number)){}
+		
+		stop_motor(motor_number);
+		direction_change(motor_number,motors[motor_number].direction_minus);
+		HAL_Delay(100);
+
+		uint32_t tickstart = HAL_GetTick();
+		uint32_t temp_motor_position=motors[motor_number].position;
+		run_motor(motor_number);
+
+		// run until switch encounter
+		while(!read_switch(motor_number))
+			{
+				if((motors[motor_number].position-temp_motor_position)>motors[motor_number].num_steps_for_switch_release)
+				{
+					stop_motor(motor_number);
+					while(1){};
+				}
+			}
+
+		// abort if switch is pressed to early (less than 0.5s) or if there is an error in step counting
+		if ((HAL_GetTick()-tickstart)<500)
+		{
+			motor_stop(motor_number);
+			while(1){};
+		}
+	}
 }
 
 /**
@@ -3164,3 +3237,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
