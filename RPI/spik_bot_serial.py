@@ -23,8 +23,6 @@ def serial_transmit(message):
   if sporocilo==message:
     print("Uspesno!")
     ser.write(("OK"+"\n").encode('utf-8'))
-    while(1):
-      pass
   else:
     print("Neuspesno!")
     ser.write(("NOT OK"+"\n").encode('utf-8'))
