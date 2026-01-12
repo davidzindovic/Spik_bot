@@ -212,6 +212,7 @@ void pump_liquid(uint32_t ammount_of_liquid);
 void test_motor(uint8_t motor_number);
 void test_all_motors();
 void demo_za_predstavitev();
+void move_motor_2_end_switch(uint8_t motor_number, _Bool direction);
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void TIM1_UP_IRQHandler(void);
@@ -2047,6 +2048,7 @@ void direction_change(uint8_t motor_number, _Bool direction)
   * @param  None
   * @retval None
   */
+// STARO
 void reset_motors(void) //mislim da bi moralo delati :)
 {
 	//motor 4 - pumpa (preskočil - nima reset)
@@ -2105,6 +2107,7 @@ void reset_motors(void) //mislim da bi moralo delati :)
 			whose second limit switch should be read.
   * @retval None
   */
+// STARO
 void move_to_starting_position(uint8_t motor_number)//POPRAVI (DA CALLAŠ END EFFECTOR)
 {
 	if (motors[motor_number].position>motors[motor_number].starting_position)
@@ -2427,7 +2430,75 @@ void test_all_motors()
   */
 void demo_za_predstavitev()
 {
+	uint16_t motor0_move_time=1000;
+	uint16_t motor1_move_time=1000;
+	uint16_t motor2_move_time=1000;
+	uint16_t poke_time=200;
+	
 	calibrate_motor(2);
+	move_motor_2_end_switch(2, motors[2].direction_minus);
+	receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_z_coordinate,&target_phi);
+
+	direction_change(0, motors[0].direction_plus);
+	run_motor(0);
+	HAL_Delay(motor0_move_time);
+	stop_motor(0);
+
+	direction_change(1, motors[1].direction_plus);
+	run_motor(1);
+	HAL_Delay(motor1_move_time);
+	stop_motor(1);
+
+	direction_change(2, motors[2].direction_plus);
+	run_motor(2);
+	HAL_Delay(motor2_move_time);
+	stop_motor(2);
+
+	char move_msg[30];
+	uart_receive(move_msg);
+
+	run_motor(2);
+	HAL_Delay(poke_time);
+	stop_motor(2);
+
+	HAL_Delay(2000);
+
+	direction_change(2, motors[2].direction_minus);
+	run_motor(2);
+	HAL_Delay(poke_time);
+	stop_motor(2);
+
+	direction_change(2, motors[2].direction_minus);
+	run_motor(2);
+	HAL_Delay(motor2_move_time);
+	stop_motor(2);
+
+	direction_change(1, motors[1].direction_minus);
+	run_motor(1);
+	HAL_Delay(motor1_move_time);
+	stop_motor(1);
+
+	direction_change(0, motors[0].direction_minus);
+	run_motor(0);
+	HAL_Delay(motor0_move_time);
+	stop_motor(0);
+}
+
+/**
+  * @brief  Function for moving the segment to the end switch in the desired direction.
+  * @param  motor_number: number of the motor that should be calibrated
+  *			direction: direction of the segment movement
+  * @retval None
+  */
+void move_motor_2_end_switch(uint8_t motor_number, _Bool direction)
+{
+	if(!read_switch(motor_number)
+	{
+		direction_change(motor_number,direction);
+		run_motor(motor_number);
+		while(!read_switch(motor_number)){}
+		stop_motor(motor_number);
+	}
 }
 
 /**
@@ -3246,5 +3317,6 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
