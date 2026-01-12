@@ -76,7 +76,7 @@ try:
   spik_bot_serial.serial_transmit(poslano)
 
   res=pridobi_potrditev_vboda_cv2()
-  spik_bot_serial.serial_transmit(res)
+  spik_bot_serial.serial_transmit(str(res))
 
 except KeyboardInterrupt:
   pass
