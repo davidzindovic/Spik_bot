@@ -44,8 +44,11 @@ def save_frames(color_frame, depth_frame_data, depth_scale):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Imena datotek
-    color_filename = os.path.join(OUTPUT_DIR, f"{timestamp}_barva.png")
-    depth_raw_filename = os.path.join(OUTPUT_DIR, f"{timestamp}_globina_surova.npy")
+    #color_filename = os.path.join(OUTPUT_DIR, f"{timestamp}_barva.png")
+    #depth_raw_filename = os.path.join(OUTPUT_DIR, f"{timestamp}_globina_surova.npy")
+    color_filename = os.path.join(OUTPUT_DIR, f"TRENUTNA_barva.png")
+    depth_raw_filename = os.path.join(OUTPUT_DIR, f"TRENUTNA_globina_surova.npy")
+    
     # depth_visual_filename = os.path.join(OUTPUT_DIR, f"{timestamp}_globina_vizualizacija.png") # Lahko dodate za vizualizacijo
 
     # Shranjevanje barvne slike
