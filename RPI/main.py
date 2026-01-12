@@ -72,7 +72,7 @@ try:
 
   capture_and_save_images.exec()
 
-  poslano=data_capture_and_process.exec("/zajeti_podatki/TRENUTNA_barva.png","/zajeti_podatki/TRENUTNA_globina_surova.npy")
+  poslano=data_capture_and_process.exec("/home/lr/Desktop/Spik_bot-main/RPI/zajeti_podatki/TRENUTNA_barva.png","/home/lr/Desktop/Spik_bot-main/RPI/zajeti_podatki/TRENUTNA_globina_surova.npy")
   spik_bot_serial.serial_transmit(poslano)
 
   res=pridobi_potrditev_vboda_cv2()
