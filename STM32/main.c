@@ -2454,6 +2454,11 @@ void demo_za_predstavitev()
 	HAL_Delay(motor2_move_time);
 	stop_motor(2);
 
+	//Sporocimo, da smo prispeli do spik lege
+	char vbod_msg[]="Spikanje?\r\n";
+	uart_transmit(vbod_msg);
+
+	//pocakamo, da uporabnik na rpi vnese odgovor
 	char move_msg[30];
 	uart_receive(move_msg);
 
@@ -3317,6 +3322,7 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
 
