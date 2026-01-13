@@ -570,7 +570,7 @@ int main(void) {
 
 	//hitrost motorjev lahko štelamo tudi s stikali (pulz/rev)
 	//jermen gre samo eno stopnjo hitreje, pri več pa ruži
-	
+
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -581,7 +581,7 @@ int main(void) {
 		//test_all_motors();
 
 		demo_za_predstavitev();
-		
+
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
@@ -2265,8 +2265,22 @@ void update_global_coordinates(void) //PREGLEJ!!
   * @retval The state of the first limit switch.
   */
 _Bool read_switch(uint8_t motor_number)
-{
-	return HAL_GPIO_ReadPin(motors[motor_number].end_switch_port, motors[motor_number].end_switch_pin);
+{	// za stabilnost počaka za 10 zaporednih "1". Čudno, ampak nujno za predstavitev :)
+	_Bool sw_value=HAL_GPIO_ReadPin(motors[motor_number].end_switch_port, motors[motor_number].end_switch_pin);
+
+	uint8_t swtich_stable_cnt=0;
+	uint8_t proc_cycle_cnt=0;
+	while((swtich_stable_cnt<30)&&(proc_cycle_cnt<100))
+	{
+		sw_value=HAL_GPIO_ReadPin(motors[motor_number].end_switch_port, motors[motor_number].end_switch_pin);
+
+		if(sw_value==1)	swtich_stable_cnt++;
+		else swtich_stable_cnt=0;
+
+		proc_cycle_cnt++;
+		HAL_Delay(1);
+	}
+	return (swtich_stable_cnt>=30);
 }
 
 
@@ -2430,14 +2444,22 @@ void test_all_motors()
   */
 void demo_za_predstavitev()
 {
-	uint16_t motor0_move_time=1000;
-	uint16_t motor1_move_time=1000;
-	uint16_t motor2_move_time=1000;
-	uint16_t poke_time=200;
-	
-	calibrate_motor(2);
-	move_motor_2_end_switch(2, motors[2].direction_minus);
+	uint16_t motor0_move_time=3000;
+	uint16_t motor1_move_time=700;
+	uint16_t motor2_move_time=16000;
+	uint16_t poke_time=2000;
+
+	//ne rabim za zdaj
+	//calibrate_motor(2);
+
+	//BRANJE STIKAL ZELO NESTABILNO
+	//rabim:
+	move_motor_2_end_switch(2, motors[2].direction_plus);
+	//za test samo:
+	//while(!read_switch(2)){}
+
 	receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_z_coordinate,&target_phi);
+
 
 	direction_change(0, motors[0].direction_plus);
 	run_motor(0);
@@ -2449,10 +2471,11 @@ void demo_za_predstavitev()
 	HAL_Delay(motor1_move_time);
 	stop_motor(1);
 
-	direction_change(2, motors[2].direction_plus);
+	direction_change(2, motors[2].direction_minus);
 	run_motor(2);
 	HAL_Delay(motor2_move_time);
 	stop_motor(2);
+
 
 	//Sporocimo, da smo prispeli do spik lege
 	char vbod_msg[]="Spikanje?\r\n";
@@ -2468,12 +2491,11 @@ void demo_za_predstavitev()
 
 	HAL_Delay(2000);
 
-	direction_change(2, motors[2].direction_minus);
+	direction_change(2, motors[2].direction_plus);
 	run_motor(2);
 	HAL_Delay(poke_time);
 	stop_motor(2);
 
-	direction_change(2, motors[2].direction_minus);
 	run_motor(2);
 	HAL_Delay(motor2_move_time);
 	stop_motor(2);
@@ -2497,13 +2519,13 @@ void demo_za_predstavitev()
   */
 void move_motor_2_end_switch(uint8_t motor_number, _Bool direction)
 {
-	if(!read_switch(motor_number)
-	{
+	//if(!read_switch(motor_number))
+	//{
 		direction_change(motor_number,direction);
 		run_motor(motor_number);
 		while(!read_switch(motor_number)){}
 		stop_motor(motor_number);
-	}
+	//}
 }
 
 /**
@@ -2516,24 +2538,24 @@ void move_motor_2_end_switch(uint8_t motor_number, _Bool direction)
   */
 void calibrate_motor(uint8_t motor_number)
 {	//WARNING: If the robot is shutdown in one of two end positions (pressing the switch)
-	//			the user should move the unit away from the switch manually. 
+	//			the user should move the unit away from the switch manually.
 	//			The robot does not move if the segment's switch is pressed. Freezes the software.
 
 	// In case of contact with the switch at the start the software disables the motors.
 	// The reason is that we cannot know which switch s pressed due to lack of IO pins.
 	if(read_switch(motor_number))
-	{	
+	{
 		stop_motor(motor_number);
 		while(1){};
 	}
-	
+
 	direction_change(motor_number,motors[motor_number].direction_minus);
 	run_motor(motor_number);
 
 	while(!read_switch(motor_number)){}
-	motors[motor_number].start_position=0;
+	motors[motor_number].starting_position=0;
 	motors[motor_number].position=0;
-	
+
 	stop_motor(motor_number);
 	direction_change(motor_number,motors[motor_number].direction_plus);
 	HAL_Delay(100);
@@ -2544,7 +2566,7 @@ void calibrate_motor(uint8_t motor_number)
 	// run until switch encounter; the number of steps for switch release is taken into account
 	while(!(read_switch(motor_number)&&(motors[motor_number].position>motors[motor_number].num_steps_for_switch_release))){}
 
-	motor_stop(motor_number);
+	stop_motor(motor_number);
 
 	// abort if switch is pressed to early (less than 0.5s) or if there is an error in step counting
 	if ((HAL_GetTick()-tickstart)<500)
@@ -2553,15 +2575,15 @@ void calibrate_motor(uint8_t motor_number)
 	}
 
 	motors[motor_number].max_position=motors[motor_number].position;
-	motors[motors_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
+	motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
 
 	direction_change(motor_number,motors[motor_number].direction_minus);
 	HAL_Delay(100);
-	
+
 	run_motor(motor_number);
-	
+
 	while(motors[motor_number].position>(motors[motor_number].max_position/2)){}
-	
+
 	stop_motor(motor_number);
 }
 
@@ -3139,7 +3161,7 @@ void configure_end_switch_interrupts(void)
 	    GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
 	    GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
 
-
+	    /*
 	    // Now manually configure EXTI for each pin
 
 	    // PE3 - EXTI3 (Motor 0 Switch 1)
@@ -3180,7 +3202,7 @@ void configure_end_switch_interrupts(void)
 
 
 		EXTI->PR1 = (1 << 3) | (1 << 4) | (1 << 15);
-
+	     */
 }
 
 void EXTI3_IRQHandler(void)
@@ -3322,7 +3344,6 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
 
 
