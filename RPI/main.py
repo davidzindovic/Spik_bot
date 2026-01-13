@@ -75,6 +75,12 @@ try:
   poslano=data_capture_and_process.exec("/home/lr/Desktop/Spik_bot-main/RPI/zajeti_podatki/TRENUTNA_barva.png","/home/lr/Desktop/Spik_bot-main/RPI/zajeti_podatki/TRENUTNA_globina_surova.npy")
   spik_bot_serial.serial_transmit(poslano)
 
+  # pocakamo na stm32 da pošlje sporočilo, ko prispe v špik lego,
+  # nato šele ponudimo vbod
+  msg=None
+  while(msg is None):
+    msg=serial_receive()
+    
   res=pridobi_potrditev_vboda_cv2()
   spik_bot_serial.serial_transmit(str(res))
 
