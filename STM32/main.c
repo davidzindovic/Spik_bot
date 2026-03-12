@@ -76,6 +76,17 @@ typedef struct {
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
 
+	//encoder only one cable per channel due to lack of pins
+	uint32_t encoder_A_state;
+	uint16_t encoder_A_pin;
+    GPIO_TypeDef* encoder_A_port;
+	uint32_t encoder_B_state;
+	uint16_t encoder_B_pin;
+    GPIO_TypeDef* encoder_B_port;
+	_Bool encoder_Z_state;
+	uint16_t encoder_Z_pin;
+    GPIO_TypeDef* encoder_Z_port;
+
 }motor_struct_t;
 /* USER CODE END PTD */
 
@@ -214,6 +225,8 @@ void test_all_motors();
 void demo_za_predstavitev();
 void move_motor_2_end_switch(uint8_t motor_number, _Bool direction);
 
+void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z);
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 void TIM1_UP_IRQHandler(void);
 void TIM15_IRQHandler(void);
@@ -298,6 +311,8 @@ uint32_t J3_offset_mm=0;
 uint32_t J3_offset_base=30; //popravi
 uint32_t J4_ammount_of_liquid=0;
 uint32_t J4_volume_per_turn=0;
+
+uint32_t encoder_maximum=4096; //popravi!!!
 
 //_Bool end_switch0_triggered=0;
 //_Bool end_switch1_triggered=0;
@@ -421,7 +436,16 @@ int main(void) {
 	    //.end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
 		.travel_length=1000, //mm
-		.num_steps_per_turn=40000
+		.num_steps_per_turn=40000,
+		.encoder_A_state = 0,
+		.encoder_A_pin = GPIO_PIN_3,
+	    .encoder_A_port = GPIOE,
+		.encoder_B_state = 0,
+		.encoder_B_pin = GPIO_PIN_3,
+	    .encoder_B_port = GPIOE,
+		.encoder_Z_state = 0,
+		.encoder_Z_pin = GPIO_PIN_3,
+	    .encoder_Z_port = GPIOE
 	};
 	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
@@ -454,7 +478,16 @@ int main(void) {
 	    //.end_switch2_port = GPIOI,
 		.unit_conversion=100, //steps per deg
 		.travel_length=170, //deg
-		.num_steps_per_turn=40000
+		.num_steps_per_turn=40000,
+		.encoder_A_state = 0,
+		.encoder_A_pin = GPIO_PIN_3,
+	    .encoder_A_port = GPIOE,
+		.encoder_B_state = 0,
+		.encoder_B_pin = GPIO_PIN_3,
+	    .encoder_B_port = GPIOE,
+		.encoder_Z_state = 0,
+		.encoder_Z_pin = GPIO_PIN_3,
+	    .encoder_Z_port = GPIOE
 	};
 	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
@@ -487,7 +520,16 @@ int main(void) {
 		//.end_switch2_port = GPIOD,
 		.unit_conversion=100, //steps per mm
 		.travel_length=300, //mm
-		.num_steps_per_turn=40000
+		.num_steps_per_turn=40000,
+		.encoder_A_state = 0,
+		.encoder_A_pin = GPIO_PIN_3,
+	    .encoder_A_port = GPIOE,
+		.encoder_B_state = 0,
+		.encoder_B_pin = GPIO_PIN_3,
+	    .encoder_B_port = GPIOE,
+		.encoder_Z_state = 0,
+		.encoder_Z_pin = GPIO_PIN_3,
+	    .encoder_Z_port = GPIOE
 	};
 	motors[3] = (motor_struct_t){ //max 50000 freq
 		.max_speed = 10000,
@@ -520,7 +562,19 @@ int main(void) {
 
 		.unit_conversion=100, //steps per mm
 		.travel_length=360, //deg
-		.num_steps_per_turn=200
+		.num_steps_per_turn=200,
+
+		//NE UPORABLJAJ = IGNORIRAJ:
+		.encoder_A_state = 0,
+		.encoder_A_pin = GPIO_PIN_3,
+	    .encoder_A_port = GPIOE,
+		.encoder_B_state = 0,
+		.encoder_B_pin = GPIO_PIN_3,
+	    .encoder_B_port = GPIOE,
+		.encoder_Z_state = 0,
+		.encoder_Z_pin = GPIO_PIN_3,
+	    .encoder_Z_port = GPIOE
+		//konc prepovedi
 	};
 
 	//usable IO: I2
@@ -2381,6 +2435,26 @@ void pump_liquid(uint32_t ammount_of_liquid)
 	stop_motor(3);
 }
 
+void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z)
+{//POPRAVI
+//zamaknjena vrednost: namesto -max do +max je 0 do 2*max
+
+	static _Bool A_prej = 0;
+	static _Bool B_prej = 0;
+	
+	if A 
+	{
+		motors[encoder_number].encoder_A_state+;
+	}
+	else if B 
+	{
+		motors[encoder_number].encoder_B_state++;
+	}
+
+	if (motors[encoder_number].encoder_A_state>encoder_maximum)motors[encoder_number].encoder_A_state=0;
+	
+}
+
 void test_motor(uint8_t motor_number)
 {
 	//if(motors[motor_number].running)
@@ -3344,6 +3418,7 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
 
 
 
