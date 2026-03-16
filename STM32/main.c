@@ -76,6 +76,8 @@ typedef struct {
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
 
+	uint32_t num_turns_from_encoder;
+
 	//encoder only one cable per channel due to lack of pins
 	uint32_t encoder_A_state;
 	uint16_t encoder_A_pin;
@@ -437,6 +439,7 @@ int main(void) {
 		.unit_conversion=100, //steps per mm
 		.travel_length=1000, //mm
 		.num_steps_per_turn=40000,
+		.num_turns_from_encoder=0,
 		.encoder_A_state = 0,
 		.encoder_A_pin = GPIO_PIN_3,
 	    .encoder_A_port = GPIOE,
@@ -479,6 +482,7 @@ int main(void) {
 		.unit_conversion=100, //steps per deg
 		.travel_length=170, //deg
 		.num_steps_per_turn=40000,
+		.num_turns_from_encoder=0,
 		.encoder_A_state = 0,
 		.encoder_A_pin = GPIO_PIN_3,
 	    .encoder_A_port = GPIOE,
@@ -521,6 +525,7 @@ int main(void) {
 		.unit_conversion=100, //steps per mm
 		.travel_length=300, //mm
 		.num_steps_per_turn=40000,
+		.num_turns_from_encoder=0,
 		.encoder_A_state = 0,
 		.encoder_A_pin = GPIO_PIN_3,
 	    .encoder_A_port = GPIOE,
@@ -563,6 +568,7 @@ int main(void) {
 		.unit_conversion=100, //steps per mm
 		.travel_length=360, //deg
 		.num_steps_per_turn=200,
+		.num_turns_from_encoder=0,
 
 		//NE UPORABLJAJ = IGNORIRAJ:
 		.encoder_A_state = 0,
@@ -2437,22 +2443,42 @@ void pump_liquid(uint32_t ammount_of_liquid)
 
 void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z)
 {//POPRAVI
-//zamaknjena vrednost: namesto -max do +max je 0 do 2*max
+//vrednost 0 do max (začne se šele po kalibraciji z end switchi)
 
 	static _Bool A_prej = 0;
 	static _Bool B_prej = 0;
-	
-	if A 
-	{
-		motors[encoder_number].encoder_A_state+;
-	}
-	else if B 
-	{
-		motors[encoder_number].encoder_B_state++;
-	}
+	static _Bool Z_prej = 0;
 
-	if (motors[encoder_number].encoder_A_state>encoder_maximum)motors[encoder_number].encoder_A_state=0;
+	if (!A_prej && A)
+	{
+		motors[encoder_number].encoder_A_state+=(!motors[encoder_number].direction)*(-1)+motors[encoder_number].direction;
+		
+		if (!A_prej && A && B_prej && (motors[encoder_number].direction)) 
+		{
+			motors[encoder_number].direction=motors[encoder_number].direction_plus;
+		}
+	}
+	if (!B_prej && B)
+	{
+		motors[encoder_number].encoder_B_state+=(!motors[encoder_number].direction)*(-1)+motors[encoder_number].direction;
 	
+		if (!B_prej && B && A_prej && !(motors[encoder_number].direction))  
+		{
+			motors[encoder_number].direction=motors[encoder_number].direction_minus;
+		}	
+	}
+	if (!Z_prej && Z)
+	{
+		motors[encoder_number].num_turns_from_encoder+=(!motors[encoder_number].direction)*(-1)+motors[encoder_number].direction;
+		motors[encoder_number].encoder_B_state=0;
+		motors[encoder_number].encoder_A_state=0;
+	}
+	
+	//if (motors[encoder_number].encoder_A_state>encoder_maximum)motors[encoder_number].encoder_A_state=0;
+
+	A_prej=A;
+	B_prej=B;
+	Z_prej=Z;
 }
 
 void test_motor(uint8_t motor_number)
