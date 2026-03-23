@@ -641,8 +641,9 @@ int main(void) {
 		//test_motor(3);
 		//test_all_motors();
 
-		demo_za_predstavitev();
-
+		//demo_za_predstavitev();
+		test_tipke_na_roke();
+		
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
