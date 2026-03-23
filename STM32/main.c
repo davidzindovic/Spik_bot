@@ -248,6 +248,7 @@ void process_message(char message);
 void uart_process_command(const char* command);
 void uart_send_motor_status(void);
 
+void test_tipke_na_roke(void);
 void receive_target_point(int *x_coordinate, int *y_coordinate, int* z_coordinate, int *phi);
 
 static void MPU_Config(void);
@@ -2610,6 +2611,60 @@ void demo_za_predstavitev()
 	HAL_Delay(motor0_move_time);
 	stop_motor(0);
 }
+
+void test_tipke_na_roke()
+{
+	const uint8_t stevilka_tipka_zelena_1=0;
+	const uint8_t stevilka_tipka_zelena_2=1;
+	const uint8_t stevilka_tipka_rdeca_1=2;
+	const uint8_t stevilka_tipka_rdeca_2=3;
+
+	_Bool stanje_tipka_zelena_1 = read_switch(stevilka_tipka_zelena_1);
+	_Bool stanje_tipka_zelena_2 = read_switch(stevilka_tipka_zelena_2);
+	_Bool stanje_tipka_rdeca_1 = read_switch(stevilka_tipka_rdeca_1);
+	_Bool stanje_tipka_rdeca_2 = read_switch(stevilka_tipka_rdeca_2);
+
+	const uint8_t stevilka_motorja=2;
+
+	//static uint32_t speed=10000;
+
+	//tipka naprej (če držiš tipko in motor ne laufa, ga zalaufa)
+	if(stanje_tipka_zelena_1 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_2)
+	{
+		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
+		run_motor(stevilka_motorja);
+	}
+	// če spustimo tipko naprej (in motor laufa) ustavi motor
+	if(!stanje_tipka_zelena_1 && motors[stevilka_motorja].running )
+	{
+		stop_motor(stevilka_motorja);
+	}
+	
+	//tipka nazaj (če držiš tipko in motor ne laufa, ga zalaufa)
+	if(stanje_tipka_zelena_2 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_1)
+	{
+		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+		run_motor(stevilka_motorja);
+	}
+	// če spustimo tipko naprej (in motor laufa) ustavi motor
+	if(!stanje_tipka_zelena_2 && motors[stevilka_motorja].running )
+	{
+		stop_motor(stevilka_motorja);
+	}
+
+	if(stanje_tipka_rdeca_1)
+	{
+		motors[stevilka_motorja].frequency+=10;
+		//funkcija za izpis stanja update na ekranu?
+	}
+	else if(stanje_tipka_rdeca_2)
+	{
+		motors[stevilka_motorja].frequency-=10;
+		//funkcija za izpis stanja update na ekranu?
+	}
+
+}
+
 
 /**
   * @brief  Function for moving the segment to the end switch in the desired direction.
