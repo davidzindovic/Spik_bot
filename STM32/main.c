@@ -561,6 +561,7 @@ int main(void) {
 		//NE UPORABLJAJ = IGNORIRAJ:
 		.reset_requested = false,
 		.reset_completed = false,
+		//začasno v uporabi (za 4 knofe):
 		.end_switch_pin = GPIO_PIN_2,//D12
 		.end_switch_port = GPIOI,
 		.end_switch_triggered = 0,
@@ -2615,52 +2616,57 @@ void demo_za_predstavitev()
 
 void test_tipke_na_roke()
 {
-	const uint8_t stevilka_tipka_zelena_1=0;
-	const uint8_t stevilka_tipka_zelena_2=1;
-	const uint8_t stevilka_tipka_rdeca_1=2;
-	const uint8_t stevilka_tipka_rdeca_2=3;
+	const uint8_t stevilka_tipka_zelena_1=0; //E3, D8 (zgoraj)
+	const uint8_t stevilka_tipka_zelena_2=1; //K1, D4 (spodaj)
+	const uint8_t stevilka_tipka_rdeca_1=2;  //B4, D10 (zgoraj)
+	const uint8_t stevilka_tipka_rdeca_2=3;  //I2, D12 (zgoraj)
 
+	//pobere stabilizirane vrednosti tipk, bere "end switche" motorjev
+	//samo po en trenutno v funkciji, kasneje bosta 2 (upam)
 	_Bool stanje_tipka_zelena_1 = read_switch(stevilka_tipka_zelena_1);
 	_Bool stanje_tipka_zelena_2 = read_switch(stevilka_tipka_zelena_2);
 	_Bool stanje_tipka_rdeca_1 = read_switch(stevilka_tipka_rdeca_1);
 	_Bool stanje_tipka_rdeca_2 = read_switch(stevilka_tipka_rdeca_2);
 
+	
 	const uint8_t stevilka_motorja=2;
 
 	//static uint32_t speed=10000;
 
-	//tipka naprej (če držiš tipko in motor ne laufa, ga zalaufa)
-	if(stanje_tipka_zelena_1 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_2)
-	{
-		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
-		run_motor(stevilka_motorja);
-	}
 	// če spustimo tipko naprej (in motor laufa) ustavi motor
 	if(!stanje_tipka_zelena_1 && motors[stevilka_motorja].running )
 	{
 		stop_motor(stevilka_motorja);
 	}
-	
-	//tipka nazaj (če držiš tipko in motor ne laufa, ga zalaufa)
-	if(stanje_tipka_zelena_2 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_1)
+	//tipka naprej (če držiš tipko in motor ne laufa, ga zalaufa)
+	else if(stanje_tipka_zelena_1 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_2)
 	{
-		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
 		run_motor(stevilka_motorja);
 	}
+
+
 	// če spustimo tipko naprej (in motor laufa) ustavi motor
 	if(!stanje_tipka_zelena_2 && motors[stevilka_motorja].running )
 	{
 		stop_motor(stevilka_motorja);
 	}
+	//tipka nazaj (če držiš tipko in motor ne laufa, ga zalaufa)
+	else if(stanje_tipka_zelena_2 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_1)
+	{
+		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+		run_motor(stevilka_motorja);
+	}
+
 
 	if(stanje_tipka_rdeca_1)
 	{
-		motors[stevilka_motorja].frequency+=10;
+		if (motors[stevilka_motorja].frequency<=100000000)motors[stevilka_motorja].frequency+=10;
 		//funkcija za izpis stanja update na ekranu?
 	}
 	else if(stanje_tipka_rdeca_2)
 	{
-		motors[stevilka_motorja].frequency-=10;
+		if (motors[stevilka_motorja].frequency>=10)motors[stevilka_motorja].frequency-=10;
 		//funkcija za izpis stanja update na ekranu?
 	}
 
