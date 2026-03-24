@@ -516,8 +516,8 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch_pin = GPIO_PIN_4,//D10
-		.end_switch_port = GPIOB,
+		.end_switch_pin = GPIO_PIN_3,//D10
+		.end_switch_port = GPIOD,//prej PB4
 		.end_switch_triggered = 0,
 		//.end_switch1_pin = GPIO_PIN_13,//D14
 		//.end_switch1_port = GPIOD,
@@ -562,8 +562,8 @@ int main(void) {
 		.reset_requested = false,
 		.reset_completed = false,
 		//začasno v uporabi (za 4 knofe):
-		.end_switch_pin = GPIO_PIN_2,//D12
-		.end_switch_port = GPIOI,
+		.end_switch_pin = GPIO_PIN_4,//D12
+		.end_switch_port = GPIOB,//prej I2
 		.end_switch_triggered = 0,
 		//konc prepovedi
 
@@ -644,7 +644,7 @@ int main(void) {
 
 		//demo_za_predstavitev();
 		test_tipke_na_roke();
-		
+
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
@@ -2333,7 +2333,8 @@ _Bool read_switch(uint8_t motor_number)
 
 	uint8_t swtich_stable_cnt=0;
 	uint8_t proc_cycle_cnt=0;
-	while((swtich_stable_cnt<30)&&(proc_cycle_cnt<100))
+	uint8_t successful_press_limit=5;
+	while((swtich_stable_cnt<successful_press_limit)&&(proc_cycle_cnt<100))
 	{
 		sw_value=HAL_GPIO_ReadPin(motors[motor_number].end_switch_port, motors[motor_number].end_switch_pin);
 
@@ -2341,9 +2342,9 @@ _Bool read_switch(uint8_t motor_number)
 		else swtich_stable_cnt=0;
 
 		proc_cycle_cnt++;
-		HAL_Delay(1);
+		//HAL_Delay(1);
 	}
-	return (swtich_stable_cnt>=30);
+	return (swtich_stable_cnt>=successful_press_limit);
 }
 
 
@@ -2455,8 +2456,8 @@ void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z)
 	if (!A_prej && A)
 	{
 		motors[encoder_number].encoder_A_state+=(!motors[encoder_number].direction)*(-1)+motors[encoder_number].direction;
-		
-		if (!A_prej && A && B_prej && (motors[encoder_number].direction)) 
+
+		if (!A_prej && A && B_prej && (motors[encoder_number].direction))
 		{
 			motors[encoder_number].direction=motors[encoder_number].direction_plus;
 		}
@@ -2464,11 +2465,11 @@ void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z)
 	if (!B_prej && B)
 	{
 		motors[encoder_number].encoder_B_state+=(!motors[encoder_number].direction)*(-1)+motors[encoder_number].direction;
-	
-		if (!B_prej && B && A_prej && !(motors[encoder_number].direction))  
+
+		if (!B_prej && B && A_prej && !(motors[encoder_number].direction))
 		{
 			motors[encoder_number].direction=motors[encoder_number].direction_minus;
-		}	
+		}
 	}
 	if (!Z_prej && Z)
 	{
@@ -2476,7 +2477,7 @@ void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z)
 		motors[encoder_number].encoder_B_state=0;
 		motors[encoder_number].encoder_A_state=0;
 	}
-	
+
 	//if (motors[encoder_number].encoder_A_state>encoder_maximum)motors[encoder_number].encoder_A_state=0;
 
 	A_prej=A;
@@ -2617,9 +2618,9 @@ void demo_za_predstavitev()
 void test_tipke_na_roke()
 {
 	const uint8_t stevilka_tipka_zelena_1=0; //E3, D8 (zgoraj)
-	const uint8_t stevilka_tipka_zelena_2=1; //K1, D4 (spodaj)
-	const uint8_t stevilka_tipka_rdeca_1=2;  //B4, D10 (zgoraj)
-	const uint8_t stevilka_tipka_rdeca_2=3;  //I2, D12 (zgoraj)
+	const uint8_t stevilka_tipka_zelena_2=1; //H15, D9 (zgoraj)
+	const uint8_t stevilka_tipka_rdeca_1=3;  //B4, D10 (zgoraj)
+	const uint8_t stevilka_tipka_rdeca_2=2;  //I2, D12 (zgoraj)
 
 	//pobere stabilizirane vrednosti tipk, bere "end switche" motorjev
 	//samo po en trenutno v funkciji, kasneje bosta 2 (upam)
@@ -2628,13 +2629,15 @@ void test_tipke_na_roke()
 	_Bool stanje_tipka_rdeca_1 = read_switch(stevilka_tipka_rdeca_1);
 	_Bool stanje_tipka_rdeca_2 = read_switch(stevilka_tipka_rdeca_2);
 
-	
+	static _Bool stanje_tipka_rdeca_1_prej=0;
+	static _Bool stanje_tipka_rdeca_2_prej=0;
+
 	const uint8_t stevilka_motorja=2;
 
 	//static uint32_t speed=10000;
 
 	// če spustimo tipko naprej (in motor laufa) ustavi motor
-	if(!stanje_tipka_zelena_1 && motors[stevilka_motorja].running )
+	if(!stanje_tipka_zelena_1 && motors[stevilka_motorja].running && !stanje_tipka_zelena_2)
 	{
 		stop_motor(stevilka_motorja);
 	}
@@ -2644,13 +2647,6 @@ void test_tipke_na_roke()
 		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
 		run_motor(stevilka_motorja);
 	}
-
-
-	// če spustimo tipko naprej (in motor laufa) ustavi motor
-	if(!stanje_tipka_zelena_2 && motors[stevilka_motorja].running )
-	{
-		stop_motor(stevilka_motorja);
-	}
 	//tipka nazaj (če držiš tipko in motor ne laufa, ga zalaufa)
 	else if(stanje_tipka_zelena_2 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_1)
 	{
@@ -2659,16 +2655,25 @@ void test_tipke_na_roke()
 	}
 
 
-	if(stanje_tipka_rdeca_1)
+	if(stanje_tipka_rdeca_1 && !stanje_tipka_rdeca_1_prej && !stanje_tipka_zelena_1 && !stanje_tipka_zelena_2)
 	{
-		if (motors[stevilka_motorja].frequency<=100000000)motors[stevilka_motorja].frequency+=10;
+		if (motors[stevilka_motorja].frequency<50000)
+		{
+			motors[stevilka_motorja].frequency+=10000;
+		}
 		//funkcija za izpis stanja update na ekranu?
 	}
-	else if(stanje_tipka_rdeca_2)
+	else if(stanje_tipka_rdeca_2 && !stanje_tipka_rdeca_2_prej && !stanje_tipka_zelena_1 && !stanje_tipka_zelena_2)
 	{
-		if (motors[stevilka_motorja].frequency>=10)motors[stevilka_motorja].frequency-=10;
+		if (motors[stevilka_motorja].frequency>10000)
+		{
+			motors[stevilka_motorja].frequency-=10000;
+		}
 		//funkcija za izpis stanja update na ekranu?
 	}
+
+	stanje_tipka_rdeca_1_prej=stanje_tipka_rdeca_1;
+	stanje_tipka_rdeca_2_prej=stanje_tipka_rdeca_2;
 
 }
 
@@ -3322,6 +3327,8 @@ void configure_end_switch_interrupts(void)
 	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct); // PE3
 	    GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
 	    GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
+	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PB4
+	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PB4
 
 	    /*
 	    // Now manually configure EXTI for each pin
@@ -3506,7 +3513,6 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
 
 
