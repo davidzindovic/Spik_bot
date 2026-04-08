@@ -2669,6 +2669,10 @@ void test_tipke_na_roke()
 		{
 			motors[stevilka_motorja].frequency-=10000;
 		}
+		else if (motors[stevilka_motorja].frequency>1000)
+		{
+			motors[stevilka_motorja].frequency-=1000;
+		}
 		//funkcija za izpis stanja update na ekranu?
 	}
 
