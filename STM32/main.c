@@ -90,6 +90,15 @@ typedef struct {
     GPIO_TypeDef* encoder_Z_port;
 
 }motor_struct_t;
+
+typedef struct {
+    uint8_t pin_number;      // A0, A1, etc.
+    uint32_t adc_channel;    // ADC channel number
+    ADC_HandleTypeDef* hadc; // ADC handle to use
+    uint32_t gpio_pin;       // GPIO pin
+    GPIO_TypeDef* gpio_port; // GPIO port
+    char* name;              // Pin name for display
+} analog_pin_config_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -182,6 +191,8 @@ extern TIM_HandleTypeDef htim12;
 
 motor_struct_t motors[4]; // Declaration only
 
+analog_pin_config_t analog_pins[6];
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -265,6 +276,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 //void UART_Write_String(char *p);
 
 //uint32_t Read_ADC(ADC_HandleTypeDef* hadc);
+
+void MX_ADC_Init_AnalogPins(void);
+void configure_analog_pins(void);
+uint16_t read_analog_pin(uint8_t pin_index);
 
 /* USER CODE END PFP */
 
@@ -585,6 +600,12 @@ int main(void) {
 		//konc prepovedi
 	};
 
+	// Initialize analog pins A0-A5
+	configure_analog_pins();
+
+	// Optional: Test analog readings
+	uint16_t test_value = read_analog_pin(5);
+	
 	//usable IO: I2
 	configure_end_switch_interrupts();
 
@@ -2014,6 +2035,246 @@ static void MX_GPIO_Init(void) {
 
 /* USER CODE BEGIN 4 */
 
+/**
+ * @brief Initialize all ADCs for analog pins A0-A5
+ * @param None
+ * @retval None
+ */
+void MX_ADC_Init_AnalogPins(void)
+{
+    // Configure ADC1 for A2 (PA0_C) and A3 (PA1_C)
+    // Configure ADC3 for A1 (PF8), A4 (PC2_C), A5 (PC3_C)
+
+    // ADC1 Configuration (for channels 0 and 1)
+    __HAL_RCC_ADC12_CLK_ENABLE();
+
+    // ADC3 Configuration (for channels 0,1,7)
+    __HAL_RCC_ADC3_CLK_ENABLE();
+
+    HAL_Delay(10);
+
+    // Power up ADC1
+    ADC1->CR &= ~ADC_CR_DEEPPWD;
+    ADC1->CR |= ADC_CR_ADVREGEN;
+    HAL_Delay(1);
+
+    // Power up ADC3
+    ADC3->CR &= ~ADC_CR_DEEPPWD;
+    ADC3->CR |= ADC_CR_ADVREGEN;
+    HAL_Delay(1);
+
+    // Calibrate ADC1
+    if(ADC1->CR & ADC_CR_ADEN) ADC1->CR &= ~ADC_CR_ADEN;
+    ADC1->CR |= ADC_CR_ADCAL;
+    while(ADC1->CR & ADC_CR_ADCAL);
+
+    // Calibrate ADC3
+    if(ADC3->CR & ADC_CR_ADEN) ADC3->CR &= ~ADC_CR_ADEN;
+    ADC3->CR |= ADC_CR_ADCAL;
+    while(ADC3->CR & ADC_CR_ADCAL);
+
+    // Enable ADCs with boost for high speed
+    ADC1->CR |= ADC_CR_ADEN | ADC_CR_BOOST;
+    ADC3->CR |= ADC_CR_ADEN | ADC_CR_BOOST;
+
+    // Wait for ADCs ready
+    while(!(ADC1->ISR & ADC_ISR_ADRDY));
+    while(!(ADC3->ISR & ADC_ISR_ADRDY));
+
+    // Configure sample times (810.5 cycles for stability)
+    ADC1->SMPR1 = (7 << (3*0)) | (7 << (3*1));  // Channels 0 and 1
+    ADC3->SMPR1 = (7 << (3*0)) | (7 << (3*1));  // Channels 0 and 1
+    ADC3->SMPR2 = (7 << (3*7));                 // Channel 7
+
+    // Set number of conversions to 1 for each ADC
+    ADC1->SQR1 = (0 << 0);  // 1 conversion
+    ADC3->SQR1 = (0 << 0);  // 1 conversion
+}
+
+/**
+ * @brief Configure all analog pins as analog inputs
+ * @param None
+ * @retval None
+ */
+void configure_analog_pins(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    // Enable GPIO clocks
+    __HAL_RCC_GPIOC_CLK_ENABLE();  // For PC0, PC2_C, PC3_C
+    __HAL_RCC_GPIOF_CLK_ENABLE();  // For PF8
+    __HAL_RCC_GPIOA_CLK_ENABLE();  // For PA0_C, PA1_C
+
+    // Configure PC0 as analog (A0)
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    // Configure PF8 as analog (A1)
+    GPIO_InitStruct.Pin = GPIO_PIN_8;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
+    // Configure PA0_C as analog (A2)
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    // Enable PA0_C special function
+    SYSCFG->PMCR |= SYSCFG_PMCR_PA0SO;
+
+    // Configure PA1_C as analog (A3)
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    // Enable PA1_C special function
+    SYSCFG->PMCR |= SYSCFG_PMCR_PA1SO;
+
+    // Configure PC2_C as analog (A4)
+    GPIO_InitStruct.Pin = GPIO_PIN_2;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    // Configure PC3_C as analog (A5)
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    // Initialize ADC peripherals
+    MX_ADC_Init_AnalogPins();
+
+    // Initialize the analog pins configuration structure
+    analog_pins[0] = (analog_pin_config_t){
+        .pin_number = 0,
+        .adc_channel = ADC_CHANNEL_10,
+        .hadc = &hadc1,  // Using ADC1 for PC0 (ADC123_IN10)
+        .gpio_pin = GPIO_PIN_0,
+        .gpio_port = GPIOC,
+        .name = "A0"
+    };
+
+    analog_pins[1] = (analog_pin_config_t){
+        .pin_number = 1,
+        .adc_channel = ADC_CHANNEL_7,
+        .hadc = &hadc3,  // Using ADC3 for PF8 (ADC3_IN7)
+        .gpio_pin = GPIO_PIN_8,
+        .gpio_port = GPIOF,
+        .name = "A1"
+    };
+
+    analog_pins[2] = (analog_pin_config_t){
+        .pin_number = 2,
+        .adc_channel = ADC_CHANNEL_0,
+        .hadc = &hadc1,  // Using ADC1 for PA0_C (ADC12_IN0)
+        .gpio_pin = GPIO_PIN_0,
+        .gpio_port = GPIOA,
+        .name = "A2"
+    };
+
+    analog_pins[3] = (analog_pin_config_t){
+        .pin_number = 3,
+        .adc_channel = ADC_CHANNEL_1,
+        .hadc = &hadc1,  // Using ADC1 for PA1_C (ADC12_IN1)
+        .gpio_pin = GPIO_PIN_1,
+        .gpio_port = GPIOA,
+        .name = "A3"
+    };
+
+    analog_pins[4] = (analog_pin_config_t){
+        .pin_number = 4,
+        .adc_channel = ADC_CHANNEL_0,
+        .hadc = &hadc3,  // Using ADC3 for PC2_C (ADC3_IN0)
+        .gpio_pin = GPIO_PIN_2,
+        .gpio_port = GPIOC,
+        .name = "A4"
+    };
+
+    analog_pins[5] = (analog_pin_config_t){
+        .pin_number = 5,
+        .adc_channel = ADC_CHANNEL_1,
+        .hadc = &hadc3,  // Using ADC3 for PC3_C (ADC3_IN1)
+        .gpio_pin = GPIO_PIN_3,
+        .gpio_port = GPIOC,
+        .name = "A5"
+    };
+}
+
+/**
+ * @brief Direct register read for analog pins (most reliable)
+ * @param pin_index: 0-5 for A0-A5
+ * @retval 12-bit ADC value (0-4095)
+ */
+uint16_t read_analog_pin(uint8_t pin_index)
+{
+    if(pin_index >= 6) return 0;
+
+    ADC_TypeDef* adc_instance;
+    uint32_t channel;
+
+    // Get ADC instance and channel based on pin
+    switch(pin_index) {
+        case 0: // A0 - PC0, ADC123_IN10
+            adc_instance = ADC1;
+            channel = 10;
+            break;
+        case 1: // A1 - PF8, ADC3_IN7
+            adc_instance = ADC3;
+            channel = 7;
+            break;
+        case 2: // A2 - PA0_C, ADC12_IN0
+            adc_instance = ADC1;
+            channel = 0;
+            break;
+        case 3: // A3 - PA1_C, ADC12_IN1
+            adc_instance = ADC1;
+            channel = 1;
+            break;
+        case 4: // A4 - PC2_C, ADC3_IN0
+            adc_instance = ADC3;
+            channel = 0;
+            break;
+        case 5: // A5 - PC3_C, ADC3_IN1
+            adc_instance = ADC3;
+            channel = 1;
+            break;
+        default:
+            return 0;
+    }
+
+    // Configure channel in SQR register (regular sequence)
+    adc_instance->SQR1 = (channel << 6);  // Set first conversion in sequence
+
+    // Set sampling time (810.5 cycles for stability)
+    if(channel < 10) {
+        adc_instance->SMPR1 |= (7 << (3 * channel));
+    } else {
+        adc_instance->SMPR2 |= (7 << (3 * (channel - 10)));
+    }
+
+    // Clear EOC flag
+    adc_instance->ISR |= ADC_ISR_EOC;
+
+    // Start conversion
+    adc_instance->CR |= ADC_CR_ADSTART;
+
+    // Wait for conversion complete with timeout
+    uint32_t timeout = 100000;
+    while(!(adc_instance->ISR & ADC_ISR_EOC)) {
+        timeout--;
+        if(timeout == 0) {
+            adc_instance->CR |= ADC_CR_ADSTP;  // Stop conversion
+            return 0;
+        }
+    }
+
+    // Read and return value
+    return (uint16_t)adc_instance->DR;
+}
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
 {
