@@ -257,7 +257,7 @@ char uart_receive(char *sporocilo);
 void process_message(char message);
 
 void uart_process_command(const char* command);
-void uart_send_motor_status(void);
+void motor_status(void);
 
 void test_tipke_na_roke(void);
 void receive_target_point(int *x_coordinate, int *y_coordinate, int* z_coordinate, int *phi);
@@ -563,7 +563,7 @@ int main(void) {
 	    .encoder_Z_port = GPIOE
 	};
 	motors[3] = (motor_struct_t){ //max 50000 freq
-		.max_speed = 10000,
+		.max_speed = 10000, //pomembno za max pretok
 		.current_speed = 0,
 		.direction = 1,
 		.direction_plus = 1,
@@ -675,8 +675,16 @@ int main(void) {
 		//test_tipke_na_roke();
 
 		//serijc BAUD=115200
-		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.2,3))HAL_Delay(300);;
-		serial_print_string("URAVNOVEŠENO!\r\n");
+		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.2,3))
+		{
+			motor_status();
+			HAL_Delay(300);
+		}
+
+		//serial_print_string("URAVNOVEŠENO!\r\n");
+		motor_status();
+		HAL_Delay(300);
+
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
@@ -2261,14 +2269,14 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 float izmeri_pritisk()
 {
 	uint8_t analog_pin_za_merjenje=0;//0 do 5
-	float max_bari_senzor=5.0;
+	float max_bari_senzor=10.0;
 	return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_senzor);//adc 0-4096, pritisk 0-5?
 }
 
 float nastavi_pritisk()
 {
 	uint8_t analog_pin_za_merjenje=1;//0 do 5
-	float max_bari_nastavljeni=5.0;
+	float max_bari_nastavljeni=4.0; //pumpa max nekje 3.4
 	return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_nastavljeni);//adc 0-4096, pritisk 0-5?
 }
 
@@ -2293,36 +2301,48 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
         return true;  // Tlak je ustaljen
     }
 
-    serial_print_string("izmerjeno: ");
+    serial_print_string("\r\nizmerjeno: ");
     serial_print_float(izmerjen_tlak);
     serial_print_string("\r\n");
     serial_print_string("nastavljeno: ");
     serial_print_float(zeljen_tlak);
-    serial_print_string("\r\n");
-    serial_print_string("napaka: ");
-    serial_print_float(napaka);
-    serial_print_string("\r\n");
-    serial_print_string("----------------------\r\n");
+    serial_print_string("\r\n\n");
+    //serial_print_string("napaka: ");
+    //serial_print_float(napaka);
+    //serial_print_string("\r\n");
+    //serial_print_string("----------------------\r\n\n");
 
     // Tlak je previsok - potrebno ga je znižati
     if(napaka > 0) {
         direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
-        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka * 100);  // Hitrost sorazmerna napaki
+        int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
+        motors[stevilka_motorja].current_speed = (uint32_t)vrednost;  // Hitrost sorazmerna napaki;
         //rabis ref hitrost pri znani frekvenci
 
         // Omeji hitrost na 0-100%
         if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
+
+        //speed maping:
+        motors[stevilka_motorja].frequency=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency; 200 je pr kp 0.5 max speed
+
+        run_motor(stevilka_motorja);
 
         return false;  // Regulacija poteka
     }
     // Tlak je prenizek - potrebno ga je zvišati
     else if(napaka < 0) {
         direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
-        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka * 100);  // Hitrost sorazmerna napaki
+        int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
+        motors[stevilka_motorja].current_speed = (uint32_t)vrednost;  // Hitrost sorazmerna napaki
         //rabis ref hitrost pri znani frekvenci
 
         // Omeji hitrost na 0-100%
         if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
+
+        //speed maping:
+        motors[stevilka_motorja].frequency=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency
+
+        run_motor(stevilka_motorja);
 
         return false;  // Regulacija poteka
     }
@@ -2706,7 +2726,7 @@ void run_motor(uint8_t motor_number)
 			timer_clock = HAL_RCC_GetPCLK2Freq();
 		}
 
-		uint32_t prescaler = (timer_clock / (frequency_hz * 1000)) - 1;
+		uint32_t prescaler = (timer_clock / ((frequency_hz+1) * 1000)) - 1;
 		uint32_t period = 999;
 
 		// Configure timer registers
@@ -3366,7 +3386,7 @@ void uart_process_command(const char* command) {
     char response[128];
 
     if (strncmp(command, "STATUS", 6) == 0) {
-    	uart_send_motor_status();
+    	motor_status();
     }
     else if (strncmp(command, "STOP", 4) == 0) {
         stop_all_motors();
@@ -3401,21 +3421,22 @@ void uart_process_command(const char* command) {
         uart_transmit(response);
     }
 }
+//konc ne rabim
 
-//ne rabim:
-void uart_send_motor_status(void) {
+void motor_status(void) {
     char status[256];
     snprintf(status, sizeof(status),
              "Motor Status:\r\n"
-             "M0: Pos=%lu, Running=%d, Dir=%d\r\n"
-             "M1: Pos=%lu, Running=%d, Dir=%d\r\n"
-             "M2: Pos=%lu, Running=%d, Dir=%d\r\n"
-             "M3: Pos=%lu, Running=%d, Dir=%d\r\n",
-             motors[0].position, motors[0].running, motors[0].direction,
-             motors[1].position, motors[1].running, motors[1].direction,
-             motors[2].position, motors[2].running, motors[2].direction,
-             motors[3].position, motors[3].running, motors[3].direction);
-    uart_transmit(status);
+             "M0: Pos=%lu, Running=%d, Dir=%d, Speed=%lu, Frequency=%lu\r\n"
+             "M1: Pos=%lu, Running=%d, Dir=%d, Speed=%lu, Frequency=%lu\r\n"
+             "M2: Pos=%lu, Running=%d, Dir=%d, Speed=%lu, Frequency=%lu\r\n"
+             "M3: Pos=%lu, Running=%d, Dir=%d, Speed=%lu, Frequency=%lu\r\n"
+    		 "--------------------------------------------------\r\n\n",
+             motors[0].position, motors[0].running, motors[0].direction, motors[0].current_speed, motors[0].frequency,
+             motors[1].position, motors[1].running, motors[1].direction, motors[1].current_speed, motors[1].frequency,
+             motors[2].position, motors[2].running, motors[2].direction, motors[2].current_speed, motors[2].frequency,
+             motors[3].position, motors[3].running, motors[3].direction, motors[3].current_speed, motors[3].frequency);
+    HAL_UART_Transmit(&huart3, (uint8_t*)status, strlen(status), 100);
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
@@ -3429,6 +3450,7 @@ void izpis_v_serijc(char *sporocilo)
 	sprintf(sporocilo,sporocilo,X);
 	HAL_UART_Transmit(&huart3, sporocilo, sizeof(sporocilo), 100);
 }
+//konc ne rabim
 
 //dela:
 void serial_print_string(const char* text)
