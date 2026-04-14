@@ -281,6 +281,16 @@ void MX_ADC_Init_AnalogPins(void);
 void configure_analog_pins(void);
 uint16_t read_analog_pin(uint8_t pin_index);
 
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max);
+float izmeri_pritisk();
+float nastavi_pritisk();
+_Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,float toleranca, uint8_t stevilka_motorja);
+
+void serial_print_string(const char* text);
+void serial_print_uint16(uint16_t number);
+void serial_print_float(float number);
+void serial_print_empty_screen(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -603,9 +613,7 @@ int main(void) {
 	// Initialize analog pins A0-A5
 	configure_analog_pins();
 
-	// Optional: Test analog readings
-	uint16_t test_value = read_analog_pin(5);
-	
+
 	//usable IO: I2
 	configure_end_switch_interrupts();
 
@@ -664,8 +672,11 @@ int main(void) {
 		//test_all_motors();
 
 		//demo_za_predstavitev();
-		test_tipke_na_roke();
+		//test_tipke_na_roke();
 
+		//serijc BAUD=115200
+		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.2,3))HAL_Delay(300);;
+		serial_print_string("URAVNOVEŠENO!\r\n");
 		/* USER CODE BEGIN 3 */
 	}
 	/* USER CODE END 3 */
@@ -680,6 +691,7 @@ static void CPU_CACHE_Enable(void)
   /* Enable D-Cache */
   SCB_EnableDCache();
 }
+
 
 void StartDefaultTask(void *argument)
 {
@@ -2098,6 +2110,10 @@ void MX_ADC_Init_AnalogPins(void)
  */
 void configure_analog_pins(void)
 {
+	MX_ADC1_Init();
+	MX_ADC2_Init();
+	MX_ADC3_Init();
+
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
     // Enable GPIO clocks
@@ -2213,67 +2229,105 @@ uint16_t read_analog_pin(uint8_t pin_index)
 {
     if(pin_index >= 6) return 0;
 
-    ADC_TypeDef* adc_instance;
-    uint32_t channel;
+    ADC_HandleTypeDef* hadc = analog_pins[pin_index].hadc;
+    uint32_t channel = analog_pins[pin_index].adc_channel;
 
-    // Get ADC instance and channel based on pin
-    switch(pin_index) {
-        case 0: // A0 - PC0, ADC123_IN10
-            adc_instance = ADC1;
-            channel = 10;
-            break;
-        case 1: // A1 - PF8, ADC3_IN7
-            adc_instance = ADC3;
-            channel = 7;
-            break;
-        case 2: // A2 - PA0_C, ADC12_IN0
-            adc_instance = ADC1;
-            channel = 0;
-            break;
-        case 3: // A3 - PA1_C, ADC12_IN1
-            adc_instance = ADC1;
-            channel = 1;
-            break;
-        case 4: // A4 - PC2_C, ADC3_IN0
-            adc_instance = ADC3;
-            channel = 0;
-            break;
-        case 5: // A5 - PC3_C, ADC3_IN1
-            adc_instance = ADC3;
-            channel = 1;
-            break;
-        default:
-            return 0;
+    ADC_ChannelConfTypeDef sConfig = {0};
+    sConfig.Channel = channel;
+    sConfig.Rank = ADC_REGULAR_RANK_1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_810CYCLES_5;
+    sConfig.SingleDiff = ADC_SINGLE_ENDED;
+
+    if(HAL_ADC_ConfigChannel(hadc, &sConfig) != HAL_OK) {
+        return 0;
     }
 
-    // Configure channel in SQR register (regular sequence)
-    adc_instance->SQR1 = (channel << 6);  // Set first conversion in sequence
+    HAL_ADC_Start(hadc);
 
-    // Set sampling time (810.5 cycles for stability)
-    if(channel < 10) {
-        adc_instance->SMPR1 |= (7 << (3 * channel));
-    } else {
-        adc_instance->SMPR2 |= (7 << (3 * (channel - 10)));
+    if(HAL_ADC_PollForConversion(hadc, 100) != HAL_OK) {
+        return 0;
     }
 
-    // Clear EOC flag
-    adc_instance->ISR |= ADC_ISR_EOC;
+    uint32_t value = HAL_ADC_GetValue(hadc);
+    HAL_ADC_Stop(hadc);
 
-    // Start conversion
-    adc_instance->CR |= ADC_CR_ADSTART;
+    return (uint16_t)value;  // HAL automatically handles resolution
+}
 
-    // Wait for conversion complete with timeout
-    uint32_t timeout = 100000;
-    while(!(adc_instance->ISR & ADC_ISR_EOC)) {
-        timeout--;
-        if(timeout == 0) {
-            adc_instance->CR |= ADC_CR_ADSTP;  // Stop conversion
-            return 0;
-        }
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+float izmeri_pritisk()
+{
+	uint8_t analog_pin_za_merjenje=0;//0 do 5
+	float max_bari_senzor=5.0;
+	return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_senzor);//adc 0-4096, pritisk 0-5?
+}
+
+float nastavi_pritisk()
+{
+	uint8_t analog_pin_za_merjenje=1;//0 do 5
+	float max_bari_nastavljeni=5.0;
+	return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_nastavljeni);//adc 0-4096, pritisk 0-5?
+}
+
+/**
+ * @brief Enostaven P regulator za uravnavanje tlaka
+ * @param izmerjen_tlak: Trenutna izmerjena vrednost tlaka (float, v barih)
+ * @param zeljen_tlak: Željena vrednost tlaka (uint16_t, celo število v barih)
+ * @param smer_motorja: Kazalec na spremenljivko smeri motorja (1 = naprej, 0 = nazaj)
+ * @param hitrost_motorja: Kazalec na spremenljivko hitrosti motorja (0-100%)
+ * @param toleranca: Dovoljeno odstopanje od željene vrednosti (npr. 0.5 bara)
+ * @return _Bool: true če je tlak ustaljen, false če regulacija še poteka
+ */
+_Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
+                        float toleranca, uint8_t stevilka_motorja)
+{
+    float napaka = izmerjen_tlak - zeljen_tlak;
+    float kp = 0.5;  // Proporcionalni koeficient (po potrebi prilagodi)
+
+    // Preveri ali smo že v toleranci (ustaljen tlak)
+    if((napaka > -toleranca) && (napaka < toleranca)) {
+        stop_motor(stevilka_motorja);  // Ustavi motor
+        return true;  // Tlak je ustaljen
     }
 
-    // Read and return value
-    return (uint16_t)adc_instance->DR;
+    serial_print_string("izmerjeno: ");
+    serial_print_float(izmerjen_tlak);
+    serial_print_string("\r\n");
+    serial_print_string("nastavljeno: ");
+    serial_print_float(zeljen_tlak);
+    serial_print_string("\r\n");
+    serial_print_string("napaka: ");
+    serial_print_float(napaka);
+    serial_print_string("\r\n");
+    serial_print_string("----------------------\r\n");
+
+    // Tlak je previsok - potrebno ga je znižati
+    if(napaka > 0) {
+        direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
+        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka * 100);  // Hitrost sorazmerna napaki
+        //rabis ref hitrost pri znani frekvenci
+
+        // Omeji hitrost na 0-100%
+        if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
+
+        return false;  // Regulacija poteka
+    }
+    // Tlak je prenizek - potrebno ga je zvišati
+    else if(napaka < 0) {
+        direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka * 100);  // Hitrost sorazmerna napaki
+        //rabis ref hitrost pri znani frekvenci
+
+        // Omeji hitrost na 0-100%
+        if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
+
+        return false;  // Regulacija poteka
+    }
+
+    return false;
 }
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
@@ -2876,6 +2930,8 @@ void demo_za_predstavitev()
 	stop_motor(0);
 }
 
+//funkcija ki upravlja motor s pomočjo 4ih tipk
+// speed up, slow down, CW, CCW
 void test_tipke_na_roke()
 {
 	const uint8_t stevilka_tipka_zelena_1=0; //E3, D8 (zgoraj)
@@ -3374,6 +3430,32 @@ void izpis_v_serijc(char *sporocilo)
 	HAL_UART_Transmit(&huart3, sporocilo, sizeof(sporocilo), 100);
 }
 
+//dela:
+void serial_print_string(const char* text)
+{
+    char buffer[64];  // Buffer large enough for string + number
+    sprintf(buffer, "%s", text);
+    HAL_UART_Transmit(&huart3, (uint8_t*)buffer, strlen(buffer), 100);
+}
+void serial_print_uint16(uint16_t number)
+{
+    char buffer[64];  // Buffer large enough for string + number
+    sprintf(buffer, "%u", number);
+    HAL_UART_Transmit(&huart3, (uint8_t*)buffer, strlen(buffer), 100);
+}
+void serial_print_float(float number)
+{
+    char buffer[64];  // Buffer large enough for string + number
+    sprintf(buffer, "%f", number);
+    HAL_UART_Transmit(&huart3, (uint8_t*)buffer, strlen(buffer), 100);
+}
+void serial_print_empty_screen()
+{
+    char buffer[64];  // Buffer large enough for string + number
+    sprintf(buffer, "\n");
+    for(uint8_t i=0;i<250;i++)HAL_UART_Transmit(&huart3, (uint8_t*)buffer, strlen(buffer), 100);
+}
+
 void uart_transmit(char *sporocilo)
 {
 	//za preset sporocil:
@@ -3778,6 +3860,5 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
 
