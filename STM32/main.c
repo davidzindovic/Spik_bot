@@ -2291,14 +2291,18 @@ float nastavi_pritisk()
  */
 _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
                         float toleranca, uint8_t stevilka_motorja)
-{
+{	static float napaka_old=0;
+	static uint32_t frequency2Bset=0;
+
     float napaka = izmerjen_tlak - zeljen_tlak;
     float kp = 0.5;  // Proporcionalni koeficient (po potrebi prilagodi)
 
     // Preveri ali smo že v toleranci (ustaljen tlak)
     if((napaka > -toleranca) && (napaka < toleranca)) {
-        stop_motor(stevilka_motorja);  // Ustavi motor
-        return true;  // Tlak je ustaljen
+
+    	if (motors[stevilka_motorja].running)stop_motor(stevilka_motorja);  // Ustavi motor
+
+    	return true;  // Tlak je ustaljen
     }
 
     serial_print_string("\r\nizmerjeno: ");
@@ -2313,8 +2317,10 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     //serial_print_string("----------------------\r\n\n");
 
     // Tlak je previsok - potrebno ga je znižati
-    if(napaka > 0) {
-        direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
+    if((napaka > 0)) {//&& ((napaka-napaka_old)>0.15)//
+
+    	if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_plus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
+
         int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
         motors[stevilka_motorja].current_speed = (uint32_t)vrednost;  // Hitrost sorazmerna napaki;
         //rabis ref hitrost pri znani frekvenci
@@ -2323,15 +2329,23 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
         if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
 
         //speed maping:
-        motors[stevilka_motorja].frequency=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency; 200 je pr kp 0.5 max speed
+        frequency2Bset=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency; 200 je pr kp 0.5 max speed
 
-        run_motor(stevilka_motorja);
+        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>4000)
+		{
+        	stop_motor(stevilka_motorja);
+        	motors[stevilka_motorja].frequency=frequency2Bset;
+        	run_motor(stevilka_motorja);
+		}
 
+        napaka_old=napaka;
         return false;  // Regulacija poteka
     }
     // Tlak je prenizek - potrebno ga je zvišati
-    else if(napaka < 0) {
-        direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+    else if((napaka < 0)) {
+
+    	if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_minus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+
         int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
         motors[stevilka_motorja].current_speed = (uint32_t)vrednost;  // Hitrost sorazmerna napaki
         //rabis ref hitrost pri znani frekvenci
@@ -2340,10 +2354,16 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
         if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
 
         //speed maping:
-        motors[stevilka_motorja].frequency=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency
+        frequency2Bset=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency
 
-        run_motor(stevilka_motorja);
+        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>4000)
+		{
+        	stop_motor(stevilka_motorja);
+        	motors[stevilka_motorja].frequency=frequency2Bset;
+        	run_motor(stevilka_motorja);
+		}
 
+        napaka_old=napaka;
         return false;  // Regulacija poteka
     }
 
@@ -3882,5 +3902,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
 
