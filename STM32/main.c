@@ -675,7 +675,9 @@ int main(void) {
 		//test_tipke_na_roke();
 
 		//serijc BAUD=115200
-		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.2,3))
+		//trenutno povezan motor 2
+		//6 rpm = freq 4000
+		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.2,2))
 		{
 			motor_status();
 			HAL_Delay(300);
@@ -2268,16 +2270,29 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 
 float izmeri_pritisk()
 {
-	uint8_t analog_pin_za_merjenje=0;//0 do 5
+	uint8_t analog_pin_za_merjenje=4;//0 do 5
 	float max_bari_senzor=10.0;
-	return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_senzor);//adc 0-4096, pritisk 0-5?
+	uint32_t analog_average=0;
+
+	for(uint8_t a=0;a<10;a++)analog_average+=read_analog_pin(analog_pin_za_merjenje);
+	analog_average/=10;
+
+	return mapFloat(analog_average,0,4095,0.0,max_bari_senzor);
+	//return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_senzor);//adc 0-4096, pritisk 0-5?
 }
 
 float nastavi_pritisk()
 {
-	uint8_t analog_pin_za_merjenje=1;//0 do 5
+	uint8_t analog_pin_za_merjenje=5;//0 do 5
 	float max_bari_nastavljeni=4.0; //pumpa max nekje 3.4
-	return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_nastavljeni);//adc 0-4096, pritisk 0-5?
+
+	uint32_t analog_average=0;
+
+	for(uint8_t a=0;a<10;a++)analog_average+=read_analog_pin(analog_pin_za_merjenje);
+	analog_average/=10;
+
+	return mapFloat(analog_average,0,4095,0.0,max_bari_nastavljeni);
+	//return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_nastavljeni);//adc 0-4096, pritisk 0-5?
 }
 
 /**
@@ -2293,6 +2308,9 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
                         float toleranca, uint8_t stevilka_motorja)
 {	static float napaka_old=0;
 	static uint32_t frequency2Bset=0;
+
+	uint16_t pumpa_max_frequency=40000;
+	//6 rpm je 4000 frequency
 
     float napaka = izmerjen_tlak - zeljen_tlak;
     float kp = 0.5;  // Proporcionalni koeficient (po potrebi prilagodi)
@@ -2321,17 +2339,18 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
 
     	if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_plus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
 
-        int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
-        motors[stevilka_motorja].current_speed = (uint32_t)vrednost;  // Hitrost sorazmerna napaki;
+        //int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
+        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka *(1-2*(napaka<0)) * 100);;  // Hitrost sorazmerna napaki;
         //rabis ref hitrost pri znani frekvenci
 
         // Omeji hitrost na 0-100%
         if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
 
         //speed maping:
-        frequency2Bset=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency; 200 je pr kp 0.5 max speed
+        frequency2Bset=motors[stevilka_motorja].current_speed*pumpa_max_frequency/500;//50000 je max frequency; 200 je pr kp 0.5 max speed
+        if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
 
-        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>4000)
+        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>500)
 		{
         	stop_motor(stevilka_motorja);
         	motors[stevilka_motorja].frequency=frequency2Bset;
@@ -2346,17 +2365,18 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
 
     	if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_minus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
 
-        int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
-        motors[stevilka_motorja].current_speed = (uint32_t)vrednost;  // Hitrost sorazmerna napaki
+        //int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
+        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka *(1-2*(napaka<0)) * 100);;  // Hitrost sorazmerna napaki
         //rabis ref hitrost pri znani frekvenci
 
         // Omeji hitrost na 0-100%
         if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
 
         //speed maping:
-        frequency2Bset=motors[stevilka_motorja].current_speed*50000/200;//50000 je max frequency
+        frequency2Bset=motors[stevilka_motorja].current_speed*pumpa_max_frequency/500;//50000 je max frequency
+        if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
 
-        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>4000)
+        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>500)
 		{
         	stop_motor(stevilka_motorja);
         	motors[stevilka_motorja].frequency=frequency2Bset;
