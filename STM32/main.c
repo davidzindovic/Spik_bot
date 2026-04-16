@@ -677,14 +677,14 @@ int main(void) {
 		//serijc BAUD=115200
 		//trenutno povezan motor 2
 		//6 rpm = freq 4000
-		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.2,2))
+		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.05,2))
 		{
-			motor_status();
+			//motor_status();
 			HAL_Delay(300);
 		}
 
 		//serial_print_string("URAVNOVEŠENO!\r\n");
-		motor_status();
+		//motor_status();
 		HAL_Delay(300);
 
 		/* USER CODE BEGIN 3 */
@@ -2313,7 +2313,7 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
 	//6 rpm je 4000 frequency
 
     float napaka = izmerjen_tlak - zeljen_tlak;
-    float kp = 0.5;  // Proporcionalni koeficient (po potrebi prilagodi)
+    float kp = 2.0;  // Proporcionalni koeficient (po potrebi prilagodi)
 
     // Preveri ali smo že v toleranci (ustaljen tlak)
     if((napaka > -toleranca) && (napaka < toleranca)) {
@@ -2337,6 +2337,10 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     // Tlak je previsok - potrebno ga je znižati
     if((napaka > 0)) {//&& ((napaka-napaka_old)>0.15)//
 
+    	stop_motor(stevilka_motorja); //neprovratni ventil
+
+    	/*
+
     	if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_plus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
 
         //int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
@@ -2358,6 +2362,9 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
 		}
 
         napaka_old=napaka;
+
+        */
+
         return false;  // Regulacija poteka
     }
     // Tlak je prenizek - potrebno ga je zvišati
