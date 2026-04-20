@@ -178,6 +178,12 @@ const osThreadAttr_t defaultTask_attributes = {
 /* USER CODE BEGIN PV */
 __IO uint32_t ButtonState = 0;
 
+volatile float target_pressure = 0.0f;     // Ciljni tlak iz UART3
+volatile uint8_t uart3_rx_buffer[32];      // Buffer za sprejem
+volatile uint8_t uart3_rx_index = 0;       // Indeks v bufferju
+volatile uint8_t uart3_command_ready = 0;  // Flag, da je ukaz prejet
+volatile uint8_t uart3_new_data = 0;       // Flag za novo sporočilo
+
 uint16_t timer_val_start, timer_val_end;
 uint16_t elapsed_1st, elapsed_2nd, elapsed_3rd;
 
@@ -290,6 +296,9 @@ void serial_print_string(const char* text);
 void serial_print_uint16(uint16_t number);
 void serial_print_float(float number);
 void serial_print_empty_screen(void);
+
+void USART3_IRQHandler(void);
+float parse_float_from_string(const char* str);
 
 /* USER CODE END PFP */
 
@@ -648,6 +657,15 @@ int main(void) {
 	//run_motor(2);
 
 
+    // Počisti UART3 buffer
+    memset((void*)uart3_rx_buffer, 0, 32);
+    uart3_rx_index = 0;
+    uart3_command_ready = 0;
+
+    // Pošlji začetno sporočilo
+    char startup_msg[] = "System ready. Enter target pressure (0-4 bar):\r\n";
+    HAL_UART_Transmit(&huart3, (uint8_t*)startup_msg, strlen(startup_msg), 100);
+
 
 	//uart_transmit(text);
 
@@ -677,15 +695,26 @@ int main(void) {
 		//serijc BAUD=115200
 		//trenutno povezan motor 2
 		//6 rpm = freq 4000
-		while(!reguliraj_pritisk(izmeri_pritisk(), nastavi_pritisk(),0.05,2))
-		{
-			//motor_status();
-			HAL_Delay(300);
-		}
+		//motor_status();
 
 		//serial_print_string("URAVNOVEŠENO!\r\n");
-		//motor_status();
-		HAL_Delay(300);
+
+
+        if(uart3_new_data)
+        {
+            uart3_new_data = 0;  // Počisti flag
+
+            // Izhod za debug
+            char msg[64];
+            snprintf(msg, sizeof(msg), "Using pressure: %.2f bar\r\n", target_pressure);
+            HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+        }
+
+        while(!reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2))
+        {
+            HAL_Delay(300);
+            //motor_status();
+        }
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -3653,78 +3682,181 @@ void receive_target_point(int* x_coordinate, int* y_coordinate, int* z_coordinat
  */
 static void MX_USART3_UART_Init(void) {
 
-	/* USER CODE BEGIN USART3_Init 0 */
-	  __HAL_RCC_GPIOB_CLK_ENABLE();
-	  __HAL_RCC_GPIOD_CLK_ENABLE();
+    /* USER CODE BEGIN USART3_Init 0 */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOD_CLK_ENABLE();
 
-	  // Enable USART3 clock
-	  __HAL_RCC_USART3_CLK_ENABLE();
-	/* USER CODE END USART3_Init 0 */
+    // Enable USART3 clock
+    __HAL_RCC_USART3_CLK_ENABLE();
+    /* USER CODE END USART3_Init 0 */
 
-	/* USER CODE BEGIN USART3_Init 1 */
+    /* USER CODE BEGIN USART3_Init 1 */
+    // Inicializacija bufferja
+    for(uint8_t i = 0; i < 32; i++) {
+        uart3_rx_buffer[i] = '\0';
+    }
+    uart3_rx_index = 0;
+    uart3_command_ready = 0;
+    /* USER CODE END USART3_Init 1 */
 
-	/* USER CODE END USART3_Init 1 */
-	/*
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    // TX pin (PB10)
+    GPIO_InitStruct.Pin = GPIO_PIN_10;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    // RX pin (PD9)
+    GPIO_InitStruct.Pin = GPIO_PIN_9;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
     huart3.Instance = USART3;
-	huart3.Init.BaudRate = 115200;
-	huart3.Init.WordLength = UART_WORDLENGTH_8B;
-	huart3.Init.StopBits = UART_STOPBITS_1;
-	huart3.Init.Parity = UART_PARITY_NONE;
-	huart3.Init.Mode = UART_MODE_TX_RX;
-	huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-	huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-	huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-	huart3.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-	huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-	if (HAL_UART_Init(&huart3) != HAL_OK) {
-		Error_Handler();
-	}
-	if (HAL_UARTEx_SetTxFifoThreshold(&huart3, UART_TXFIFO_THRESHOLD_1_8)
-			!= HAL_OK) {
-		Error_Handler();
-	}
-	if (HAL_UARTEx_SetRxFifoThreshold(&huart3, UART_RXFIFO_THRESHOLD_1_8)
-			!= HAL_OK) {
-		Error_Handler();
-	}
-	if (HAL_UARTEx_DisableFifoMode(&huart3) != HAL_OK) {
-		Error_Handler();
-	}
+    huart3.Init.BaudRate = 115200;
+    huart3.Init.WordLength = UART_WORDLENGTH_8B;
+    huart3.Init.StopBits = UART_STOPBITS_1;
+    huart3.Init.Parity = UART_PARITY_NONE;
+    huart3.Init.Mode = UART_MODE_TX_RX;
+    huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart3.Init.OverSampling = UART_OVERSAMPLING_16;
 
-	*/
-	  GPIO_InitTypeDef GPIO_InitStruct = {0};
+    if (HAL_UART_Init(&huart3) != HAL_OK) {
+        Error_Handler();
+    }
 
-	  GPIO_InitStruct.Pin = GPIO_PIN_10;
-	  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-	  GPIO_InitStruct.Pull = GPIO_NOPULL;
-	  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-	  GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
-	  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    /* USER CODE BEGIN USART3_Init 2 */
+    // Omogoči RX interrupt
+    __HAL_UART_ENABLE_IT(&huart3, UART_IT_RXNE);
 
-	  GPIO_InitStruct.Pin = GPIO_PIN_9;
-	  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-	  GPIO_InitStruct.Pull = GPIO_NOPULL;
-	  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-	  GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
-	  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    // Nastavi prioriteto interrupta (nižja številka = višja prioriteta)
+    HAL_NVIC_SetPriority(USART3_IRQn, 3, 0);
+    HAL_NVIC_EnableIRQ(USART3_IRQn);
 
-	  huart3.Instance = USART3;
-	  huart3.Init.BaudRate = 115200;
-	  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-	  huart3.Init.StopBits = UART_STOPBITS_1;
-	  huart3.Init.Parity = UART_PARITY_NONE;
-	  huart3.Init.Mode = UART_MODE_TX_RX;
-	  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-	  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+    // Začni sprejem z interruptom
+    HAL_UART_Receive_IT(&huart3, (uint8_t*)uart3_rx_buffer, 1);
+    /* USER CODE END USART3_Init 2 */
+}
 
-	  if (HAL_UART_Init(&huart3) != HAL_OK)
-	  {
-	    Error_Handler();
-	  }
-	/* USER CODE BEGIN USART3_Init 2 */
 
-	/* USER CODE END USART3_Init 2 */
+/**
+ * @brief USART3 interrupt handler - prejema znake in sestavlja sporočilo
+ */
+void USART3_IRQHandler(void)
+{
+    // Preveri, ali je interrupt od RXNE (prejet znak)
+    if((__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) != RESET) &&
+       (__HAL_UART_GET_IT_SOURCE(&huart3, UART_IT_RXNE) != RESET))
+    {
+        uint8_t received_char = (uint8_t)(huart3.Instance->RDR & 0xFF);
 
+        // Preveri, ali je prejet konec vrstice (newline ali carriage return)
+        if(received_char == '\n' || received_char == '\r')
+        {
+            if(uart3_rx_index > 0)
+            {
+                // Zaključi string z null terminatorjem
+                uart3_rx_buffer[uart3_rx_index] = '\0';
+                uart3_command_ready = 1;
+                uart3_new_data = 1;
+
+                // Pretvori string v float in shrani v globalno spremenljivko
+                target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
+
+                // Opojdi, da je bil prejet nov tlak
+                char response[50];
+                snprintf(response, sizeof(response), "Pressure set to: %.2f bar\r\n", target_pressure);
+                HAL_UART_Transmit(&huart3, (uint8_t*)response, strlen(response), 100);
+
+                // Reset bufferja za naslednje sporočilo
+                uart3_rx_index = 0;
+                memset((void*)uart3_rx_buffer, 0, 32);
+            }
+        }
+        else if(received_char >= '0' && received_char <= '9' || received_char == '.' || received_char == '-')
+        {
+            // Dodaj znak v buffer, če je številka, decimalna pika ali minus
+            if(uart3_rx_index < 31)
+            {
+                uart3_rx_buffer[uart3_rx_index++] = received_char;
+            }
+        }
+        // Ignoriraj ostale znake
+
+        // Počisti flag
+        __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE);
+
+        // Ponovno aktiviraj sprejem
+        HAL_UART_Receive_IT(&huart3, (uint8_t*)uart3_rx_buffer, 1);
+    }
+}
+
+
+/**
+ * @brief Pretvori string v float vrednost
+ * @param str: string za pretvorbo
+ * @retval float vrednost
+ */
+float parse_float_from_string(const char* str)
+{
+    float result = 0.0f;
+    float decimal = 0.0f;
+    int sign = 1;
+    uint8_t i = 0;
+    uint8_t decimal_places = 0;
+    uint8_t is_decimal = 0;
+
+    // Preveri predznak
+    if(str[0] == '-')
+    {
+        sign = -1;
+        i = 1;
+    }
+
+    // Pretvori string v float
+    while(str[i] != '\0')
+    {
+        if(str[i] == '.')
+        {
+            is_decimal = 1;
+            i++;
+            continue;
+        }
+
+        if(str[i] >= '0' && str[i] <= '9')
+        {
+            if(is_decimal)
+            {
+                decimal = decimal * 10 + (str[i] - '0');
+                decimal_places++;
+            }
+            else
+            {
+                result = result * 10 + (str[i] - '0');
+            }
+        }
+        i++;
+    }
+
+    // Upoštevaj decimalna mesta
+    while(decimal_places > 0)
+    {
+        decimal /= 10.0f;
+        decimal_places--;
+    }
+
+    result = (result + decimal) * sign;
+
+    // Omeji vrednost na realen obseg (0-4 bare)
+    if(result < 0.0f) result = 0.0f;
+    if(result > 4.0f) result = 4.0f;
+
+    return result;
 }
 
 void configure_end_switch_interrupts(void)
@@ -3929,4 +4061,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
