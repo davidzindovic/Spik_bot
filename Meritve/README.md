@@ -21,5 +21,10 @@ Zaženemo datoteko ```meritve_pritisk_stm32.py``` in spremljamo serijski monitor
 
 Ko želimo nehati z meritvijo pritisnemo CTRL+C, kar konča izvajanje Python skripte, shrani .csv datoteko meritev in izriše graf meritve.
 
-## Opombe
+## POMEMBNO
 Na ta velikem laptopu v LR je desni USB vhod bližje uporabniku na COM6.
+
+Če v serijskem oknu ne vidite izpisa v obliki:
+```Izmerjeno: xxxxx.yyyyy
+Nastavljeno: aaaaaa.bbbbb```
+Pritisnite črno tipko na modri ST razvojni plošči z ekranom.
