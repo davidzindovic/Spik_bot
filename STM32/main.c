@@ -2299,28 +2299,28 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 
 float izmeri_pritisk()
 {
-	uint8_t analog_pin_za_merjenje=4;//0 do 5
-	float max_bari_senzor=10.0;
+	uint8_t analog_pin_za_merjenje=5;//0 do 5
+	float max_bari_senzor=8.2943; //vrednost pri 3.3V
 	uint32_t analog_average=0;
 
 	for(uint8_t a=0;a<10;a++)analog_average+=read_analog_pin(analog_pin_za_merjenje);
 	analog_average/=10;
 
-	return mapFloat(analog_average,0,4095,0.0,max_bari_senzor);
+	return mapFloat(analog_average,973,4095,0.0,max_bari_senzor);
 	//return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_senzor);//adc 0-4096, pritisk 0-5?
 }
 
 float nastavi_pritisk()
 {
-	uint8_t analog_pin_za_merjenje=5;//0 do 5
-	float max_bari_nastavljeni=4.0; //pumpa max nekje 3.4
+	uint8_t analog_pin_za_merjenje=4;//0 do 5
+	float max_bari_nastavljeni=8.2943;
 
 	uint32_t analog_average=0;
 
 	for(uint8_t a=0;a<10;a++)analog_average+=read_analog_pin(analog_pin_za_merjenje);
 	analog_average/=10;
 
-	return mapFloat(analog_average,0,4095,0.0,max_bari_nastavljeni);
+	return mapFloat(analog_average,973,4095,0.0,max_bari_nastavljeni);
 	//return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_nastavljeni);//adc 0-4096, pritisk 0-5?
 }
 
