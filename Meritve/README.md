@@ -20,3 +20,6 @@ Ne pozabite tudi poskrbeti za primerno vmestitev dovodne cevi za tekočino (ozna
 Zaženemo datoteko ```meritve_pritisk_stm32.py``` in spremljamo serijski monitor. Za vnos zaželjenega pritiska z levim klikom miške izberemo serijsko okno in nato le vpišemo zaželjeno številko (lahko z decimalno vrednostjo ali brez, npr. 5 ali 5.23) in nato potrdimo vnos s tipko Enter. Sprememnjena nastavitev za pritisk bo vidna v izpisu.
 
 Ko želimo nehati z meritvijo pritisnemo CTRL+C, kar konča izvajanje Python skripte, shrani .csv datoteko meritev in izriše graf meritve.
+
+## Opombe
+Na ta velikem laptopu v LR je desni USB vhod bližje uporabniku na COM6.
