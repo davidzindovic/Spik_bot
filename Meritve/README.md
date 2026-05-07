@@ -5,8 +5,8 @@ Program beleži izmerjene podatke v .csv datoteko. Meritve opravlja STM32 razvoj
 pyserial, matplotlib
 
 ## Sprememiti je potrebno:
-```COM port (preverimo v Upravitelj naprav ali Device manager)```
-```Pot do mape, v katero želimo shranjevati meritve```
+- ```COM port (preverimo v Upravitelj naprav ali Device manager)```
+- ```Pot do mape, v katero želimo shranjevati meritve```
 
 # Potek meritve
 Motor za vbod v deblo krmili bela ST razvojna plošča, pri čemer s pritiskom na modro tipko menjavamo smer potiska, s potenciometrom pa hitrost potiska.
