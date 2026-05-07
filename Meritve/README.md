@@ -25,7 +25,7 @@ Ko želimo nehati z meritvijo pritisnemo CTRL+C, kar konča izvajanje Python skr
 Na ta velikem laptopu v LR je desni USB vhod bližje uporabniku na COM6.
 
 Če v serijskem oknu ne vidite izpisa v obliki:
-```Izmerjeno: xxxxx.yyyyy
-Nastavljeno: aaaaaa.bbbbb```
+```Izmerjeno: xxxxx.yyyyy```
+```Nastavljeno: aaaaaa.bbbbb```
 
 Pritisnite črno tipko na modri ST razvojni plošči z ekranom.
