@@ -161,6 +161,7 @@ TIM_HandleTypeDef htim1;  // Example timer handles - adjust based on which timer
 TIM_HandleTypeDef htim15;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim12;
+TIM_HandleTypeDef htim6;
 
 MMC_HandleTypeDef hmmc1;
 
@@ -201,6 +202,7 @@ extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim12;
+//extern TIM_HandleTypeDef htim6;
 
 motor_struct_t motors[4]; // Declaration only
 
@@ -311,7 +313,13 @@ static void MX_I2C4_Init(void);
 void VL53L0X_Init(void);
 uint16_t VL53L0X_ReadDistance(void);
 void VL53L0X_LoadTuningSettings(void);
-
+static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val);
+static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *val);
+static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *val);
+static void VL53L0X_PerformSPADCalibration(uint8_t stop_variable);
+static void MX_TIM6_Init(void);
+void TIM6_DAC_IRQHandler(void);
+void VL53L0X_Diagnose(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -363,6 +371,11 @@ uint32_t J4_volume_per_turn=0;
 
 uint32_t encoder_maximum=4096; //popravi!!!
 
+/* ---- global: last valid distance, updated in TIM callback ---- */
+volatile uint16_t vl53_distance_mm = 0;
+volatile uint8_t  vl53_data_ready  = 0;
+uint8_t vl53_stop_variable = 0;   /* used in Init and referenced via extern */
+
 //_Bool end_switch0_triggered=0;
 //_Bool end_switch1_triggered=0;
 //_Bool end_switch2_triggered=0;
@@ -379,6 +392,10 @@ int main(void) {
 	for(uint8_t i=0;i<30;i++)uart_rx_buffer[i]='\0';
 
 	/* USER CODE BEGIN 1 */
+	/* Disable write buffer to make bus faults precise (debug only) */
+	//SCnSCB->ACTLR |= (1UL << 1);
+    __DSB();
+    __ISB();
 	 CPU_CACHE_Enable();
 	/* USER CODE END 1 */
 
@@ -386,6 +403,8 @@ int main(void) {
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 	HAL_Init();
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);  /* highest priority */
+	HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 8, 0);  /* lower than SysTick */
 
 	/*
 	// TESTNI BLOK: Prisilni preklop na 0V
@@ -440,7 +459,16 @@ int main(void) {
 
 
 
-
+	// Add these after your clock configuration
+	__HAL_RCC_TIM1_CLK_ENABLE();
+	__HAL_RCC_TIM3_CLK_ENABLE();
+	__HAL_RCC_TIM15_CLK_ENABLE();
+	__HAL_RCC_TIM12_CLK_ENABLE();
+	__HAL_RCC_USART1_CLK_ENABLE();
+	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
+	__HAL_RCC_ADC3_CLK_ENABLE();    // For ADC3
+	__DSB();
+	__ISB();
 
 
 	//GPIO initialization
@@ -450,43 +478,43 @@ int main(void) {
 
 
 	I2C4_BusRecovery();
-	    HAL_Delay(10);
+	HAL_Delay(10);
 
 
-	    MX_I2C4_Init();      /* Ta funkcija nastavi PD12/PD13 v Alternate Function način */
+	MX_I2C4_Init();      /* Ta funkcija nastavi PD12/PD13 v Alternate Function način */
 
-	    // Prisili QSPI Flash v stanje visoke impedance (onemogoči ga)
-
-
-	    HAL_Delay(50);
-	    HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_RESET); // Poskusi za trenutek sprostiti CS
-	    serial_print_string("Skeniram naslove na I2C4 (8-bit format)...\r\n");
-	    char msg[32];
-	    for(uint16_t i = 1; i < 255; i++) {
-	        // STM32 HAL skener preverja sode (pisanje) naslove
-	        if(HAL_I2C_IsDeviceReady(&hi2c4, i, 1, 10) == HAL_OK) {
-	            serial_print_string("Najdena naprava na 8-bit naslovu: 0x");
-	            sprintf(msg, "%02X", i);
-	            serial_print_string(msg);
-	            serial_print_string("\r\n");
-	        }
-	    }
-	    serial_print_string("Skeniranje koncano.\r\n");
-
-	    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 5, 100) == HAL_OK) {
-	        serial_print_string("Senzor zaznan, inicializiram...\r\n");
-	        VL53L0X_Init();
-	    } else {
-	        serial_print_string("Senzorja na 0x52 ni. Preskakujem init, da preprecim HardFault.\r\n");
-	    }
-
-/*
-
-*/
+	// Prisili QSPI Flash v stanje visoke impedance (onemogoči ga)
 
 
-	    /* 5. Inicializacija senzorja */
-	   // VL53L0X_Init();
+	HAL_Delay(50);
+	HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_RESET); // Poskusi za trenutek sprostiti CS
+
+
+	serial_print_string("Skeniram naslove na I2C4 (8-bit format)...\r\n");
+	char msg[32];
+	for(uint16_t i = 1; i < 255; i++) {
+		// STM32 HAL skener preverja sode (pisanje) naslove
+		if(HAL_I2C_IsDeviceReady(&hi2c4, i, 1, 10) == HAL_OK) {
+			serial_print_string("Najdena naprava na 8-bit naslovu: 0x");
+			sprintf(msg, "%02X", i);
+			serial_print_string(msg);
+			serial_print_string("\r\n");
+		}
+	}
+	serial_print_string("Skeniranje koncano.\r\n");
+
+	if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 5, 100) == HAL_OK) {
+		serial_print_string("Senzor zaznan, inicializiram...\r\n");
+		VL53L0X_Init();
+		HAL_Delay(100);
+		VL53L0X_Diagnose();
+		MX_TIM6_Init();
+	} else {
+		serial_print_string("Senzorja na 0x52 ni. Preskakujem init, da preprecim HardFault.\r\n");
+	}
+
+	/* 5. Inicializacija senzorja */
+   // VL53L0X_Init();
 
 
 	//HAL_UART_Receive_IT(&huart3, rx_buff_usb, 10);
@@ -807,20 +835,12 @@ int main(void) {
 
 
 
-		uint16_t d = VL53L0X_ReadDistance();
-		    uint32_t i2c_err = HAL_I2C_GetError(&hi2c4);
-
-		    if (i2c_err == 32) {
-		        // Če dobimo Address Fail, pomeni da senzor ni odgovoril.
-		        // Ni treba resetirati celega I2C, samo senzor je morda ugasnjen.
-		        // serial_print_string("Senzor ne odgovarja (ACK fail)...\r\n");
-		    } else if (d > 0) {
-		        serial_print_string("Razdalja: ");
-		        serial_print_uint16(d);
-		        serial_print_string(" mm\r\n");
-		    }
-
-		    HAL_Delay(200);
+		if (vl53_data_ready) {
+		    vl53_data_ready = 0;
+		    char buf[40];
+		    sprintf(buf, "Distance: %u mm\r\n", (unsigned)vl53_distance_mm);
+		    serial_print_string(buf);
+		}
 
 
 
@@ -876,17 +896,20 @@ void SystemClock_Config(void) {
 
 	while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {
 	}
+	/*
 	// Add these after your clock configuration
 	__HAL_RCC_TIM1_CLK_ENABLE();
 	__HAL_RCC_TIM3_CLK_ENABLE();
 	__HAL_RCC_TIM15_CLK_ENABLE();
 	__HAL_RCC_TIM12_CLK_ENABLE();
 	__HAL_RCC_USART1_CLK_ENABLE();
+	//__DSB();
+	//__ISB();
 
 	//__HAL_RCC_ADC123_CLK_ENABLE();
 	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
 	__HAL_RCC_ADC3_CLK_ENABLE();    // For ADC3
-	HAL_Delay(1);
+	HAL_Delay(1);*/
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
 	 */
@@ -2966,24 +2989,13 @@ void I2C4_BusRecovery(void) {
 }
 
 static void MX_I2C4_Init(void) {
-    hi2c4.Instance = I2C4;
-    // Standard timing za H7 @ 400MHz (100kHz I2C)
-    hi2c4.Init.Timing = 0x10300D11;
-    hi2c4.Init.OwnAddress1 = 0;
-    hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-    hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-    hi2c4.Init.OwnAddress2 = 0;
-    hi2c4.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-    hi2c4.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE; // Omogoči clock stretching
+    // 1. Enable clocks FIRST
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+    __HAL_RCC_I2C4_CLK_ENABLE();
+    __DSB();  /* <-- add after the clock enables */
+    __ISB();
 
-    // Najprej de-inicializacija, če je perifernik v Busy stanju
-    HAL_I2C_DeInit(&hi2c4);
-
-    if (HAL_I2C_Init(&hi2c4) != HAL_OK) {
-        Error_Handler();
-    }
-
-    /* Prisili I2C4 pise v AF4 način še enkrat, za vsak primer */
+    // 2. Configure GPIO pins
     GPIO_InitTypeDef GPIO_InitStruct = {0};
     GPIO_InitStruct.Pin = GPIO_PIN_12 | GPIO_PIN_13;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
@@ -2992,56 +3004,367 @@ static void MX_I2C4_Init(void) {
     GPIO_InitStruct.Alternate = GPIO_AF4_I2C4;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-    HAL_I2CEx_ConfigDigitalFilter(&hi2c4, 0x0F); // Filtrira kratke šume na SCL/SDA
-    __HAL_RCC_GPIOD_CLK_ENABLE(); // Omogočimo Port D (kjer so pini)
-	__HAL_RCC_I2C4_CLK_ENABLE();  // Omogočimo I2C4 logiko (v domeni D3)
+    // 3. Then init the peripheral
+    hi2c4.Instance = I2C4;
+    hi2c4.Init.Timing = 0x00601B27 ;
+    hi2c4.Init.OwnAddress1 = 0;
+    hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c4.Init.OwnAddress2 = 0;
+    hi2c4.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c4.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
 
+    HAL_I2C_DeInit(&hi2c4);
+    if (HAL_I2C_Init(&hi2c4) != HAL_OK) {
+        Error_Handler();
+    }
 
+    // 4. Optional noise filter
+    HAL_I2CEx_ConfigDigitalFilter(&hi2c4, 0x0F);
+}
+/* ================================================================
+ * VL53L0X minimal correct driver + periodic TIM interrupt
+ * Target: STM32H750B-DK, I2C4, PD12=SDA, PD13=SCL
+ * ================================================================ */
+
+/* ---- register helpers (keep these as before) ---- */
+static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val) {
+    /* val is passed by value (register/stack), no cache issue on write */
+    return HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg, 1, &val, 1, 10);
 }
 
-void VL53L0X_Init(void) {
+static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *out) {
+    /* Align buffer to 32-byte cache line */
+    __attribute__((aligned(32))) uint8_t buf[32] = {0};
+
+    /* Invalidate cache for this buffer before DMA writes into it */
+    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
+
+    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, 1, buf, 1, 10);
+
+    /* Invalidate again after transfer so CPU reads fresh data */
+    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
+
+    *out = buf[0];
+    return s;
+}
+
+static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *out) {
+    __attribute__((aligned(32))) uint8_t buf[32] = {0};
+
+    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
+
+    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, 1, buf, 2, 10);
+
+    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
+
+    *out = ((uint16_t)buf[0] << 8) | buf[1];
+    return s;
+}
+
+void VL53L0X_Diagnose(void) {
     uint8_t val;
-    // 1. Preveri, če je hi2c4 sploh pripravljen
-    if (hi2c4.State != HAL_I2C_STATE_READY) {
-        serial_print_string("I2C4 ni v READY stanju!\r\n");
+    uint16_t val16;
+    char buf[60];
+
+    // 1. Is the sensor still alive?
+    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
+        serial_print_string("DIAG: sensor not responding on I2C\r\n");
         return;
     }
+    serial_print_string("DIAG: sensor alive on I2C\r\n");
 
-    // 2. Samo če je naprava zaznana, nadaljuj
-    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 2, 50) != HAL_OK) {
-        return;
-    }
+    // 2. Check model ID - must be 0xEE
+    vl_read(0xC0, &val);
+    sprintf(buf, "DIAG: model ID = 0x%02X (expect 0xEE)\r\n", val);
+    serial_print_string(buf);
 
-    // 3. Namesto velike tabele v funkciji LoadTuningSettings,
-    // piši registre posamično ali uporabi static const.
-    VL53L0X_LoadTuningSettings();
+    // 3. Check if ranging is actually running (SYSRANGE_START reg)
+    vl_read(0x00, &val);
+    sprintf(buf, "DIAG: SYSRANGE_START = 0x%02X (expect 0x02 or 0x03 for continuous)\r\n", val);
+    serial_print_string(buf);
 
-    // 4. Začetni zagon
-    val = 0x02;
-    HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0x00, 1, &val, 1, 100);
+    // 4. Raw interrupt status
+    vl_read(0x13, &val);
+    sprintf(buf, "DIAG: interrupt status reg 0x13 = 0x%02X\r\n", val);
+    serial_print_string(buf);
+
+    // 5. Range status byte
+    vl_read(0x14, &val);
+    uint8_t range_status = (val >> 3) & 0x1F;
+    sprintf(buf, "DIAG: range status nibble = %u (0=ok, 4=phase, 5=sigma, 7=wraparound)\r\n", range_status);
+    serial_print_string(buf);
+
+    // 6. Raw range registers
+    vl_read16(0x1E, &val16);
+    sprintf(buf, "DIAG: raw range 0x1E:0x1F = %u mm\r\n", val16);
+    serial_print_string(buf);
+
+    // 7. Wait 200ms then re-read interrupt status - did it change?
+    HAL_Delay(200);
+    vl_read(0x13, &val);
+    sprintf(buf, "DIAG: interrupt status after 200ms = 0x%02X\r\n", val);
+    serial_print_string(buf);
+
+    vl_read16(0x1E, &val16);
+    sprintf(buf, "DIAG: range after 200ms = %u mm\r\n", val16);
+    serial_print_string(buf);
 }
 
-uint16_t VL53L0X_ReadDistance(void) {
-    uint8_t status;
-    uint8_t buffer[12];
+/* ================================================================
+ * SPAD calibration – must run once before ranging
+ * Reads the factory-programmed SPAD count/type from NVM and
+ * applies them so the analog front-end has correct sensitivity.
+ * ================================================================ */
+static void VL53L0X_PerformSPADCalibration(uint8_t stop_variable) {
+    uint8_t spad_count, spad_type_is_aperture, ref_spad_map[6];
+    uint8_t val;
 
-    // Preveri, če je podatek pripravljen (Ready bit)
-    HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0x13, 1, &status, 1, 100);
+    /* enter SPAD management mode */
+    vl_write(0x80, 0x01);
+    vl_write(0xFF, 0x01);
+    vl_write(0x00, 0x00);
+    vl_write(0xFF, 0x06);
+    vl_read(0x83, &val);
+    vl_write(0x83, val | 0x04);
+    vl_write(0xFF, 0x07);
+    vl_write(0x81, 0x01);
+    vl_write(0x80, 0x01);
+    vl_write(0x94, 0x6B);
+    vl_write(0x83, 0x00);
 
-    if (status & 0x01) {
-        // Branje podatkov (Distance je v registru 0x1E in 0x1F)
-        if (HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0x14, 1, buffer, 12, 100) == HAL_OK) {
-            uint16_t distance = (uint16_t)((buffer[10] << 8) | buffer[11]);
+    /* wait for NVM read */
+    uint32_t t0 = HAL_GetTick();
+    do { vl_read(0x83, &val); } while (val == 0x00 && (HAL_GetTick()-t0) < 100);
+    vl_write(0x83, 0x01);
 
-            // Počisti interrupt register 0x0B (nujno po ST API-ju)
-            uint8_t clear = 0x01;
-            HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0x0B, 1, &clear, 1, 100);
+    /* read NVM SPAD data */
+    vl_read(0x92, &val);
+    spad_count            = val & 0x7F;
+    spad_type_is_aperture = (val >> 7) & 0x01;
 
-            return distance;
+    /* exit SPAD management mode */
+    vl_write(0x81, 0x00);
+    vl_write(0xFF, 0x06);
+    vl_read(0x83, &val);
+    vl_write(0x83, val & ~0x04);
+    vl_write(0xFF, 0x01);
+    vl_write(0x00, 0x01);
+    vl_write(0xFF, 0x00);
+    vl_write(0x80, 0x00);
+
+    /* read current ref SPAD map (6 bytes at 0xB0) */
+    HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0xB0, 1, ref_spad_map, 6, 20);
+
+    /* the first 12 SPADs are non-aperture; if we need aperture
+       type, skip the first 12 bits in the map */
+    uint8_t first_spad = spad_type_is_aperture ? 12 : 0;
+    uint8_t enabled = 0;
+
+    for (uint8_t i = 0; i < 48; i++) {
+        if (i < first_spad || enabled == spad_count) {
+            /* clear this SPAD */
+            ref_spad_map[i / 8] &= ~(1 << (i % 8));
+        } else if (ref_spad_map[i / 8] & (1 << (i % 8))) {
+            enabled++;
         }
     }
-    return 0;
+
+    /* write corrected map back */
+    HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0xB0, 1, ref_spad_map, 6, 20);
 }
+
+static HAL_StatusTypeDef VL53L0X_PerformRefCalibration(uint8_t stop_variable) {
+    uint8_t val;
+
+    /* --- VHV calibration --- */
+    vl_write(0x01, 0x01);          /* sequence: VHV only */
+    vl_write(0x80, 0x01);
+    vl_write(0xFF, 0x01);
+    vl_write(0x00, 0x00);
+    vl_write(0x91, stop_variable);
+    vl_write(0x00, 0x01);
+    vl_write(0xFF, 0x00);
+    vl_write(0x80, 0x00);
+    vl_write(0x00, 0x01);          /* SYSRANGE_START: single shot */
+
+    uint32_t t0 = HAL_GetTick();
+    do {
+        vl_read(0x13, &val);
+        if ((HAL_GetTick() - t0) > 500) return HAL_TIMEOUT;
+    } while ((val & 0x07) == 0);
+    vl_write(0x0B, 0x01);          /* clear interrupt */
+    vl_write(0x00, 0x00);          /* stop */
+
+    /* --- Phase calibration --- */
+    vl_write(0x01, 0x02);          /* sequence: phase cal only */
+    vl_write(0x00, 0x01);          /* single shot */
+
+    t0 = HAL_GetTick();
+    do {
+        vl_read(0x13, &val);
+        if ((HAL_GetTick() - t0) > 500) return HAL_TIMEOUT;
+    } while ((val & 0x07) == 0);
+    vl_write(0x0B, 0x01);          /* clear interrupt */
+    vl_write(0x00, 0x00);          /* stop */
+
+    /* restore normal sequence (all steps) */
+    vl_write(0x01, 0xE8);
+
+    return HAL_OK;
+}
+
+/* ================================================================
+ * VL53L0X_Init
+ * ================================================================ */
+void VL53L0X_Init(void) {
+    uint8_t val;
+
+    if (hi2c4.State != HAL_I2C_STATE_READY) {
+        serial_print_string("I2C4 not READY\r\n");
+        return;
+    }
+    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
+        serial_print_string("VL53L0X not found\r\n");
+        return;
+    }
+
+    /* Step 1: wake-up handshake + save stop_variable */
+    vl_write(0x88, 0x00);
+    vl_write(0x80, 0x01);
+    vl_write(0xFF, 0x01);
+    vl_write(0x00, 0x00);
+    vl_read(0x91, &val);
+    uint8_t stop_variable = val;
+    vl_write(0x00, 0x01);
+    vl_write(0xFF, 0x00);
+    vl_write(0x80, 0x00);
+
+    /* Step 2: disable MSRC and pre-range SNR limit checks */
+    vl_write(0x60, 0x00);
+
+    /* Step 3: set signal rate limit 0.25 MCPS (9.7 fixed point = 32) */
+    vl_write(0x44, 0x00);
+    vl_write(0x45, 0x20);
+
+    /* Step 4: sequence config – enable all steps */
+    vl_write(0x01, 0xFF);
+
+    /* Step 5: ST tuning settings */
+    VL53L0X_LoadTuningSettings();
+
+    /* Step 6: SPAD calibration from NVM */
+    VL53L0X_PerformSPADCalibration(stop_variable);
+
+    /* Step 7: set timing budget to 66 ms for better accuracy
+     *         (pre-range VCSEL period = 14, final VCSEL period = 10) */
+    vl_write(0xFF, 0x01);
+    vl_write(0x70, 0x09);   /* pre-range: VCSEL period pclks = 14 (value = (14/2)-1 = 6... */
+    vl_write(0xFF, 0x00);
+    /* Use sequence steps from ST API default:
+       TCC + DSS + MSRC + PRE-RANGE + FINAL-RANGE enabled */
+    vl_write(0x01, 0xE8);
+
+    /* Step 8: set GPIO for new-sample-ready interrupt (active low) */
+    vl_write(0x0A, 0x04);
+    vl_read(0x84, &val);
+    vl_write(0x84, val & ~0x10);
+    vl_write(0x0B, 0x01);   /* clear any pending interrupt */
+
+    /* Step 9: store stop_variable in a global so ReadDistance can use it */
+    /* (declare: static uint8_t vl53_stop_variable at file scope) */
+    extern uint8_t vl53_stop_variable;
+    vl53_stop_variable = stop_variable;
+
+    /* Step 9a: mandatory VHV + phase reference calibration */
+    if (VL53L0X_PerformRefCalibration(stop_variable) != HAL_OK) {
+        serial_print_string("VL53L0X ref calibration FAILED\r\n");
+        return;
+    }
+    serial_print_string("VL53L0X ref cal OK\r\n");
+
+    /* Step 10: start continuous back-to-back ranging */
+    vl_write(0x80, 0x01);
+    vl_write(0xFF, 0x01);
+    vl_write(0x00, 0x00);
+    vl_write(0x91, stop_variable);
+    vl_write(0x00, 0x01);
+    vl_write(0xFF, 0x00);
+    vl_write(0x80, 0x00);
+    vl_write(0x00, 0x02);   /* SYSRANGE_START: continuous */
+
+    serial_print_string("VL53L0X init OK, continuous ranging started\r\n");
+}
+
+/* ================================================================
+ * VL53L0X_ReadDistance
+ * Returns distance in mm, or 0xFFFF if result is invalid/timeout.
+ * Call this from your TIM interrupt (or poll it in main).
+ * ================================================================ */
+/* Non-blocking version - safe to call from a TIM interrupt */
+uint16_t VL53L0X_ReadDistance(void) {
+    uint8_t status;
+    uint16_t distance;
+
+    /* check if measurement is ready - do NOT block */
+    if (vl_read(0x13, &status) != HAL_OK) return 0xFFFF;
+    if ((status & 0x07) == 0) return 0xFFFF;  /* not ready yet, try next time */
+
+    /* check range status */
+    uint8_t range_status;
+    vl_read(0x14, &range_status);
+    range_status = (range_status >> 3) & 0x1F;
+
+    /* read result */
+    vl_read16(0x1E, &distance);
+
+    /* clear interrupt so sensor queues next measurement */
+    vl_write(0x0B, 0x01);
+
+    if (range_status != 0) return 0xFFFF;
+
+    return distance;
+}
+
+/* ================================================================
+ * Periodic TIM interrupt – configure ONE free timer (e.g. TIM6)
+ *
+ * TIM6 is a basic timer, perfect for this – no PWM pins needed.
+ * Period = (PSC+1)*(ARR+1) / TIM_CLK
+ * With TIM_CLK = 200 MHz (D2 domain after PLL1):
+ *   PSC = 9999  → 20 kHz tick
+ *   ARR = 1999  → interrupt every 100 ms  (10 Hz)
+ * Adjust ARR to taste.
+ * ================================================================ */
+
+static void MX_TIM6_Init(void) {
+    __HAL_RCC_TIM6_CLK_ENABLE();
+
+    /* Force the RCC write to complete before touching TIM6 registers.
+       Without this, the AHB write buffer can still be pending when
+       HAL_TIM_Base_Init writes TIM6->CR1, causing an imprecise bus fault. */
+    __DSB();
+    __ISB();
+
+    htim6.Instance               = TIM6;
+    htim6.Init.Prescaler         = 9999;   /* 200 MHz / 10000 = 20 kHz */
+    htim6.Init.CounterMode       = TIM_COUNTERMODE_UP;
+    htim6.Init.Period             = 1999;   /* 20 kHz / 2000 = 10 Hz = 100 ms */
+    htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+
+    if (HAL_TIM_Base_Init(&htim6) != HAL_OK) Error_Handler();
+
+    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 8, 0);
+    HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+
+    HAL_TIM_Base_Start_IT(&htim6);   /* start immediately */
+}
+
+/* IRQ handler – put this with your other IRQ handlers */
+void TIM6_DAC_IRQHandler(void) {
+    HAL_TIM_IRQHandler(&htim6);
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -3393,6 +3716,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			motors[3].position -= 1;
 		}
+    }
+    if (htim->Instance == TIM6) {
+        uint16_t d = VL53L0X_ReadDistance();
+        if (d != 0xFFFF) {
+            vl53_distance_mm = d;
+            vl53_data_ready  = 1;
+        }
     }
 }
 
