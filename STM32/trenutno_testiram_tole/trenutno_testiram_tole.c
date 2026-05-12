@@ -326,15 +326,13 @@ void VL53L0X_Diagnose(void);
 /* USER CODE BEGIN 0 */
 TS_Init_t *hTSs;
 
-#define BUFFER_SIZE 30
-
-char rx_buff[BUFFER_SIZE];
+__attribute__((aligned(32))) char rx_buff[32];        // padded to cache line size
+__attribute__((aligned(32))) uint8_t uart_rx_buffer[32];
 //char rcv_buff[30];
 
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
 
-uint8_t uart_rx_buffer[BUFFER_SIZE];
 uint8_t uart_rx_index = 0;
 
 uint8_t podatki;
@@ -387,24 +385,24 @@ uint8_t vl53_stop_variable = 0;   /* used in Init and referenced via extern */
  * @retval int
  */
 int main(void) {
-	uint32_t RNG_PTR[2];
-	for(uint8_t i=0;i<30;i++)rx_buff[i]='\0';
-	for(uint8_t i=0;i<30;i++)uart_rx_buffer[i]='\0';
+	CPU_CACHE_Enable();
+	HAL_Init();
 
-	/* USER CODE BEGIN 1 */
-	/* Disable write buffer to make bus faults precise (debug only) */
-	//SCnSCB->ACTLR |= (1UL << 1);
+    SCB->CPACR |= ((3UL << 10*2) | (3UL << 11*2));
     __DSB();
     __ISB();
-	 CPU_CACHE_Enable();
-	/* USER CODE END 1 */
 
-	/* MCU Configuration--------------------------------------------------------*/
+    SCnSCB->ACTLR |= (1UL << 1);
+    __DSB();
+    __ISB();
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-	HAL_Init();
+
 	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);  /* highest priority */
 	HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 8, 0);  /* lower than SysTick */
+
+    uint32_t RNG_PTR[2];
+    for(uint8_t i=0;i<30;i++)rx_buff[i]='\0';
 
 	/*
 	// TESTNI BLOK: Prisilni preklop na 0V
@@ -530,7 +528,8 @@ int main(void) {
 	//__HAL_UART_ENABLE_IT(&huart1, UART_IT_RXNE);
 
 	// Start receiving - THIS IS CRITICAL!
-	HAL_UART_Receive_IT(&huart1, rx_buff, 30);  // Receive 1 byte at a time
+	SCB_InvalidateDCache_by_Addr((uint32_t*)rx_buff, 32);
+	HAL_UART_Receive_IT(&huart1, (uint8_t*)rx_buff, 30);  // Receive 1 byte at a time
     //Debug_USART1_Config();
 
 	//Timer initialization
@@ -837,9 +836,13 @@ int main(void) {
 
 		if (vl53_data_ready) {
 		    vl53_data_ready = 0;
-		    char buf[40];
-		    sprintf(buf, "Distance: %u mm\r\n", (unsigned)vl53_distance_mm);
-		    serial_print_string(buf);
+		    uint16_t d = VL53L0X_ReadDistance();   // I2C called from main context, safe
+		    if (d != 0xFFFF) {
+		        vl53_distance_mm = d;
+		        char buf[40];
+		        sprintf(buf, "Distance: %u mm\r\n", (unsigned)vl53_distance_mm);
+		        serial_print_string(buf);
+		    }
 		}
 
 
@@ -2070,7 +2073,8 @@ void MX_ADC_Init_AnalogPins(void)
 
     // ADC3 Configuration (for channels 0,1,7)
     __HAL_RCC_ADC3_CLK_ENABLE();
-
+    __DSB();
+    __ISB();
     HAL_Delay(10);
 
     // Power up ADC1
@@ -3006,7 +3010,7 @@ static void MX_I2C4_Init(void) {
 
     // 3. Then init the peripheral
     hi2c4.Instance = I2C4;
-    hi2c4.Init.Timing = 0x00601B27 ;
+    hi2c4.Init.Timing = 0x10808DD3 ;//0x00F0EDFF
     hi2c4.Init.OwnAddress1 = 0;
     hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
     hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -3029,35 +3033,19 @@ static void MX_I2C4_Init(void) {
 
 /* ---- register helpers (keep these as before) ---- */
 static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val) {
-    /* val is passed by value (register/stack), no cache issue on write */
-    return HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg, 1, &val, 1, 10);
+    return HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg, I2C_MEMADD_SIZE_8BIT, &val, 1, 50);
 }
 
 static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *out) {
-    /* Align buffer to 32-byte cache line */
-    __attribute__((aligned(32))) uint8_t buf[32] = {0};
-
-    /* Invalidate cache for this buffer before DMA writes into it */
-    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
-
-    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, 1, buf, 1, 10);
-
-    /* Invalidate again after transfer so CPU reads fresh data */
-    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
-
-    *out = buf[0];
+    uint8_t buf = 0;
+    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, I2C_MEMADD_SIZE_8BIT, &buf, 1, 50);
+    *out = buf;
     return s;
 }
 
 static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *out) {
-    __attribute__((aligned(32))) uint8_t buf[32] = {0};
-
-    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
-
-    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, 1, buf, 2, 10);
-
-    SCB_InvalidateDCache_by_Addr((uint32_t*)buf, 32);
-
+    uint8_t buf[2] = {0, 0};
+    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, I2C_MEMADD_SIZE_8BIT, buf, 2, 50);
     *out = ((uint16_t)buf[0] << 8) | buf[1];
     return s;
 }
@@ -3117,7 +3105,8 @@ void VL53L0X_Diagnose(void) {
  * applies them so the analog front-end has correct sensitivity.
  * ================================================================ */
 static void VL53L0X_PerformSPADCalibration(uint8_t stop_variable) {
-    uint8_t spad_count, spad_type_is_aperture, ref_spad_map[6];
+	uint8_t spad_count, spad_type_is_aperture;
+	__attribute__((aligned(32))) uint8_t ref_spad_map[32];  // oversized but cache-safe
     uint8_t val;
 
     /* enter SPAD management mode */
@@ -3153,8 +3142,9 @@ static void VL53L0X_PerformSPADCalibration(uint8_t stop_variable) {
     vl_write(0xFF, 0x00);
     vl_write(0x80, 0x00);
 
-    /* read current ref SPAD map (6 bytes at 0xB0) */
+    SCB_InvalidateDCache_by_Addr((uint32_t*)ref_spad_map, 32);
     HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0xB0, 1, ref_spad_map, 6, 20);
+    SCB_InvalidateDCache_by_Addr((uint32_t*)ref_spad_map, 32);
 
     /* the first 12 SPADs are non-aperture; if we need aperture
        type, skip the first 12 bits in the map */
@@ -3170,7 +3160,7 @@ static void VL53L0X_PerformSPADCalibration(uint8_t stop_variable) {
         }
     }
 
-    /* write corrected map back */
+    SCB_CleanDCache_by_Addr((uint32_t*)ref_spad_map, 32);
     HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0xB0, 1, ref_spad_map, 6, 20);
 }
 
@@ -3273,7 +3263,7 @@ void VL53L0X_Init(void) {
 
     /* Step 9: store stop_variable in a global so ReadDistance can use it */
     /* (declare: static uint8_t vl53_stop_variable at file scope) */
-    extern uint8_t vl53_stop_variable;
+    //extern uint8_t vl53_stop_variable;
     vl53_stop_variable = stop_variable;
 
     /* Step 9a: mandatory VHV + phase reference calibration */
@@ -3718,11 +3708,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		}
     }
     if (htim->Instance == TIM6) {
-        uint16_t d = VL53L0X_ReadDistance();
-        if (d != 0xFFFF) {
-            vl53_distance_mm = d;
             vl53_data_ready  = 1;
-        }
     }
 }
 
