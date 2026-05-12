@@ -127,7 +127,8 @@ void HardFault_Handler_C(uint32_t *fault_stack) {
     SCB->CFSR;  /* read to latch */
     /* Enable precise bus faults temporarily to catch the real address */
     //SCB->CCR |= SCB_CCR_BFHFNMIGN_Msk;  /* not helpful here, skip */
-
+    __DSB();
+    __ISB();
     /* Instead: check if this is a write-buffer fault by reading ACTLR */
     uint32_t actlr = SCnSCB->ACTLR;
 
@@ -156,6 +157,9 @@ void HardFault_Handler_C(uint32_t *fault_stack) {
     if (cfsr & 0x100000) fault_print_str("-> UNALIGNED: unaligned memory access\r\n");
     if (cfsr & 0x200000) fault_print_str("-> DIVBYZERO: divide by zero\r\n");
     if (hfsr & 0x40000000) fault_print_str("-> FORCED: escalated from configurable fault\r\n");
+    if (cfsr & 0x00080000) fault_print_str("-> NOCP: FPU not enabled (CP10/CP11)\r\n");
+    if (cfsr & 0x00040000) fault_print_str("-> INVPC: bad EXC_RETURN value\r\n");
+    if (cfsr & 0x00010000) fault_print_str("-> UNDEFINSTR: undefined instruction\r\n");
 
     fault_print_str("=================\r\n");
     __disable_irq();
