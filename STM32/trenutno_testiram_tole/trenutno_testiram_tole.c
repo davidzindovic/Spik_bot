@@ -109,6 +109,23 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_SEQUENCE_CONFIG 0x01
 #define VL53L0X_REG_RESULT_RANGE_STATUS 0x14
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
+
+/* ---- DC motor PWM controller (distance-regulated) ---- */
+#define DC_DIST_MIN_MM      50U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MAX_MM      200U    /* above this: stop (unless forwarding back) */
+
+/* D13 = PA5  → TIM2_CH1  PWM output to H-bridge                  */
+/* A1  = PF8  → button input, EXTI line 8, active LOW + pull-up   */
+/* D0  = PB6  → H-bridge direction signal                         */
+#define DC_PWM_PORT         GPIOA
+#define DC_PWM_PIN          GPIO_PIN_5
+#define DC_BTN_PORT         GPIOF
+#define DC_BTN_PIN          GPIO_PIN_8
+#define DC_DIR_PORT         GPIOB
+#define DC_DIR_PIN          GPIO_PIN_6
+
+#define DC_TIM_PERIOD       999U    /* ARR  → 1000 steps resolution              */
+#define DC_TIM_PRESCALER    199U    /* 200 MHz / 200 / 1000 = 1 kHz PWM freq     */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -208,6 +225,12 @@ motor_struct_t motors[4]; // Declaration only
 
 analog_pin_config_t analog_pins[6];
 
+typedef enum { DC_DIR_FORWARD = 0, DC_DIR_REVERSE = 1 } dc_direction_t;
+
+static TIM_HandleTypeDef       htim2;
+volatile dc_direction_t        dc_direction    = DC_DIR_FORWARD;
+volatile uint8_t               dc_dir_changed  = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -285,6 +308,7 @@ void configure_end_switch_interrupts(void);
 void EXTI3_IRQHandler(void);
 void EXTI4_IRQHandler(void);
 void EXTI15_10_IRQHandler(void);
+void EXTI9_5_IRQHandler(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 //void USART_write(int ch);
 
@@ -316,10 +340,12 @@ void VL53L0X_LoadTuningSettings(void);
 static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val);
 static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *val);
 static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *val);
-static void VL53L0X_PerformSPADCalibration(uint8_t stop_variable);
+static void VL53L0X_PerformSPADCalibration(void);
 static void MX_TIM6_Init(void);
 void TIM6_DAC_IRQHandler(void);
 void VL53L0X_Diagnose(void);
+void DC_Motor_Init(void);
+void DC_Motor_Update(uint16_t distance_mm);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -507,6 +533,7 @@ int main(void) {
 		HAL_Delay(100);
 		VL53L0X_Diagnose();
 		MX_TIM6_Init();
+		DC_Motor_Init();
 	} else {
 		serial_print_string("Senzorja na 0x52 ni. Preskakujem init, da preprecim HardFault.\r\n");
 	}
@@ -814,6 +841,7 @@ int main(void) {
 
 
 
+		//za pumpo: vmesti tako da ko se motor parkira potem se zažene pumpa
 		/*
         if(uart3_new_data)
         {
@@ -836,13 +864,14 @@ int main(void) {
 
 		if (vl53_data_ready) {
 		    vl53_data_ready = 0;
-		    uint16_t d = VL53L0X_ReadDistance();   // I2C called from main context, safe
+		    uint16_t d = VL53L0X_ReadDistance();
 		    if (d != 0xFFFF) {
 		        vl53_distance_mm = d;
 		        char buf[40];
-		        sprintf(buf, "Distance: %u mm\r\n", (unsigned)vl53_distance_mm);
+		        snprintf(buf, sizeof(buf), "Distance: %u mm\r\n", (unsigned)vl53_distance_mm);
 		        serial_print_string(buf);
 		    }
+		    DC_Motor_Update(vl53_distance_mm);
 		}
 
 
@@ -2955,7 +2984,7 @@ void VL53L0X_LoadTuningSettings(void) {
         {0x8E, 0x01}, {0x00, 0x01}, {0xFF, 0x00}, {0x80, 0x00}
     };
 
-    for(uint32_t i = 0; i < (sizeof(settings)/2); i++) {
+    for(uint32_t i = 0; i < (sizeof(settings)/sizeof(settings[0])); i++) {
             uint8_t reg = settings[i][0];
             uint8_t data = settings[i][1];
             if (HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg, 1, &data, 1, 10) != HAL_OK) {
@@ -3028,75 +3057,68 @@ static void MX_I2C4_Init(void) {
 }
 /* ================================================================
  * VL53L0X minimal correct driver + periodic TIM interrupt
- * Target: STM32H750B-DK, I2C4, PD12=SDA, PD13=SCL
+ * Target: STM32H750B-DK, I2C4, PD12=SCL, PD13=SDA
  * ================================================================ */
 
 /* ---- register helpers (keep these as before) ---- */
 static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val) {
-    return HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg, I2C_MEMADD_SIZE_8BIT, &val, 1, 50);
+    return HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg,
+                             I2C_MEMADD_SIZE_8BIT, &val, 1, 50);
 }
-
 static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *out) {
-    uint8_t buf = 0;
-    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, I2C_MEMADD_SIZE_8BIT, &buf, 1, 50);
-    *out = buf;
-    return s;
+    return HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg,
+                            I2C_MEMADD_SIZE_8BIT, out, 1, 50);
 }
-
 static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *out) {
-    uint8_t buf[2] = {0, 0};
-    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg, I2C_MEMADD_SIZE_8BIT, buf, 2, 50);
-    *out = ((uint16_t)buf[0] << 8) | buf[1];
+    uint8_t b[2];
+    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg,
+                                            I2C_MEMADD_SIZE_8BIT, b, 2, 50);
+    *out = ((uint16_t)b[0] << 8) | b[1];
     return s;
 }
 
 void VL53L0X_Diagnose(void) {
     uint8_t val;
     uint16_t val16;
-    char buf[60];
+    char buf[96];   // was 60 — must be at least 80, use 96 for safety
 
-    // 1. Is the sensor still alive?
     if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
         serial_print_string("DIAG: sensor not responding on I2C\r\n");
         return;
     }
     serial_print_string("DIAG: sensor alive on I2C\r\n");
 
-    // 2. Check model ID - must be 0xEE
     vl_read(0xC0, &val);
-    sprintf(buf, "DIAG: model ID = 0x%02X (expect 0xEE)\r\n", val);
+    snprintf(buf, sizeof(buf), "DIAG: model ID = 0x%02X (expect 0xEE)\r\n", val);
     serial_print_string(buf);
 
-    // 3. Check if ranging is actually running (SYSRANGE_START reg)
     vl_read(0x00, &val);
-    sprintf(buf, "DIAG: SYSRANGE_START = 0x%02X (expect 0x02 or 0x03 for continuous)\r\n", val);
+    snprintf(buf, sizeof(buf), "DIAG: SYSRANGE_START = 0x%02X\r\n", val);
     serial_print_string(buf);
 
-    // 4. Raw interrupt status
     vl_read(0x13, &val);
-    sprintf(buf, "DIAG: interrupt status reg 0x13 = 0x%02X\r\n", val);
+    snprintf(buf, sizeof(buf), "DIAG: interrupt status reg 0x13 = 0x%02X\r\n", val);
     serial_print_string(buf);
 
-    // 5. Range status byte
     vl_read(0x14, &val);
     uint8_t range_status = (val >> 3) & 0x1F;
-    sprintf(buf, "DIAG: range status nibble = %u (0=ok, 4=phase, 5=sigma, 7=wraparound)\r\n", range_status);
+    snprintf(buf, sizeof(buf), "DIAG: range status nibble = %u\r\n", range_status);
     serial_print_string(buf);
 
-    // 6. Raw range registers
     vl_read16(0x1E, &val16);
-    sprintf(buf, "DIAG: raw range 0x1E:0x1F = %u mm\r\n", val16);
+    snprintf(buf, sizeof(buf), "DIAG: raw range 0x1E:0x1F = %u mm\r\n", val16);
     serial_print_string(buf);
 
-    // 7. Wait 200ms then re-read interrupt status - did it change?
     HAL_Delay(200);
     vl_read(0x13, &val);
-    sprintf(buf, "DIAG: interrupt status after 200ms = 0x%02X\r\n", val);
+    snprintf(buf, sizeof(buf), "DIAG: interrupt status after 200ms = 0x%02X\r\n", val);
     serial_print_string(buf);
 
     vl_read16(0x1E, &val16);
-    sprintf(buf, "DIAG: range after 200ms = %u mm\r\n", val16);
+    snprintf(buf, sizeof(buf), "DIAG: range after 200ms = %u mm\r\n", val16);
     serial_print_string(buf);
+
+    vl_write(0x0B, 0x01);   // clear interrupt → sensor queues next measurement
 }
 
 /* ================================================================
@@ -3104,103 +3126,72 @@ void VL53L0X_Diagnose(void) {
  * Reads the factory-programmed SPAD count/type from NVM and
  * applies them so the analog front-end has correct sensitivity.
  * ================================================================ */
-static void VL53L0X_PerformSPADCalibration(uint8_t stop_variable) {
-	uint8_t spad_count, spad_type_is_aperture;
-	__attribute__((aligned(32))) uint8_t ref_spad_map[32];  // oversized but cache-safe
-    uint8_t val;
+static void VL53L0X_PerformSPADCalibration(void) {
+    uint8_t val, spad_count, spad_type_is_aperture;
+    uint8_t ref_spad_map[6];
 
-    /* enter SPAD management mode */
-    vl_write(0x80, 0x01);
-    vl_write(0xFF, 0x01);
-    vl_write(0x00, 0x00);
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
     vl_write(0xFF, 0x06);
-    vl_read(0x83, &val);
-    vl_write(0x83, val | 0x04);
-    vl_write(0xFF, 0x07);
-    vl_write(0x81, 0x01);
-    vl_write(0x80, 0x01);
-    vl_write(0x94, 0x6B);
-    vl_write(0x83, 0x00);
+    vl_read(0x83, &val); vl_write(0x83, val | 0x04);
+    vl_write(0xFF, 0x07); vl_write(0x81, 0x01);
+    vl_write(0x80, 0x01); vl_write(0x94, 0x6B); vl_write(0x83, 0x00);
 
-    /* wait for NVM read */
     uint32_t t0 = HAL_GetTick();
-    do { vl_read(0x83, &val); } while (val == 0x00 && (HAL_GetTick()-t0) < 100);
+    do { vl_read(0x83, &val); } while (val == 0 && (HAL_GetTick()-t0) < 100);
     vl_write(0x83, 0x01);
 
-    /* read NVM SPAD data */
     vl_read(0x92, &val);
     spad_count            = val & 0x7F;
     spad_type_is_aperture = (val >> 7) & 0x01;
 
-    /* exit SPAD management mode */
-    vl_write(0x81, 0x00);
-    vl_write(0xFF, 0x06);
-    vl_read(0x83, &val);
-    vl_write(0x83, val & ~0x04);
-    vl_write(0xFF, 0x01);
-    vl_write(0x00, 0x01);
-    vl_write(0xFF, 0x00);
-    vl_write(0x80, 0x00);
+    vl_write(0x81, 0x00); vl_write(0xFF, 0x06);
+    vl_read(0x83, &val); vl_write(0x83, val & ~0x04);
+    vl_write(0xFF, 0x01); vl_write(0x00, 0x01);
+    vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
 
-    SCB_InvalidateDCache_by_Addr((uint32_t*)ref_spad_map, 32);
-    HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0xB0, 1, ref_spad_map, 6, 20);
-    SCB_InvalidateDCache_by_Addr((uint32_t*)ref_spad_map, 32);
+    /* read the 6-byte SPAD map — plain polling, no cache ops needed */
+    HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0xB0,
+                     I2C_MEMADD_SIZE_8BIT, ref_spad_map, 6, 50);
 
-    /* the first 12 SPADs are non-aperture; if we need aperture
-       type, skip the first 12 bits in the map */
     uint8_t first_spad = spad_type_is_aperture ? 12 : 0;
     uint8_t enabled = 0;
-
     for (uint8_t i = 0; i < 48; i++) {
-        if (i < first_spad || enabled == spad_count) {
-            /* clear this SPAD */
-            ref_spad_map[i / 8] &= ~(1 << (i % 8));
-        } else if (ref_spad_map[i / 8] & (1 << (i % 8))) {
+        if (i < first_spad || enabled == spad_count)
+            ref_spad_map[i/8] &= ~(1 << (i%8));
+        else if (ref_spad_map[i/8] & (1 << (i%8)))
             enabled++;
-        }
     }
-
-    SCB_CleanDCache_by_Addr((uint32_t*)ref_spad_map, 32);
-    HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0xB0, 1, ref_spad_map, 6, 20);
+    HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0xB0,
+                      I2C_MEMADD_SIZE_8BIT, ref_spad_map, 6, 50);
 }
 
-static HAL_StatusTypeDef VL53L0X_PerformRefCalibration(uint8_t stop_variable) {
+static HAL_StatusTypeDef VL53L0X_PerformRefCalibration(void) {
     uint8_t val;
 
-    /* --- VHV calibration --- */
-    vl_write(0x01, 0x01);          /* sequence: VHV only */
-    vl_write(0x80, 0x01);
-    vl_write(0xFF, 0x01);
-    vl_write(0x00, 0x00);
-    vl_write(0x91, stop_variable);
-    vl_write(0x00, 0x01);
-    vl_write(0xFF, 0x00);
-    vl_write(0x80, 0x00);
-    vl_write(0x00, 0x01);          /* SYSRANGE_START: single shot */
-
+    /* VHV */
+    vl_write(0x01, 0x01);
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
+    vl_write(0x91, vl53_stop_variable);
+    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
+    vl_write(0x00, 0x01);                        /* single shot */
     uint32_t t0 = HAL_GetTick();
     do {
         vl_read(0x13, &val);
-        if ((HAL_GetTick() - t0) > 500) return HAL_TIMEOUT;
+        if ((HAL_GetTick()-t0) > 500) return HAL_TIMEOUT;
     } while ((val & 0x07) == 0);
-    vl_write(0x0B, 0x01);          /* clear interrupt */
-    vl_write(0x00, 0x00);          /* stop */
+    vl_write(0x0B, 0x01); vl_write(0x00, 0x00); /* clear + stop */
 
-    /* --- Phase calibration --- */
-    vl_write(0x01, 0x02);          /* sequence: phase cal only */
-    vl_write(0x00, 0x01);          /* single shot */
-
+    /* phase */
+    vl_write(0x01, 0x02);
+    vl_write(0x00, 0x01);
     t0 = HAL_GetTick();
     do {
         vl_read(0x13, &val);
-        if ((HAL_GetTick() - t0) > 500) return HAL_TIMEOUT;
+        if ((HAL_GetTick()-t0) > 500) return HAL_TIMEOUT;
     } while ((val & 0x07) == 0);
-    vl_write(0x0B, 0x01);          /* clear interrupt */
-    vl_write(0x00, 0x00);          /* stop */
+    vl_write(0x0B, 0x01); vl_write(0x00, 0x00);
 
-    /* restore normal sequence (all steps) */
-    vl_write(0x01, 0xE8);
-
+    vl_write(0x01, 0xE8);                        /* restore all sequence steps */
     return HAL_OK;
 }
 
@@ -3210,81 +3201,53 @@ static HAL_StatusTypeDef VL53L0X_PerformRefCalibration(uint8_t stop_variable) {
 void VL53L0X_Init(void) {
     uint8_t val;
 
-    if (hi2c4.State != HAL_I2C_STATE_READY) {
-        serial_print_string("I2C4 not READY\r\n");
-        return;
-    }
     if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
         serial_print_string("VL53L0X not found\r\n");
         return;
     }
 
-    /* Step 1: wake-up handshake + save stop_variable */
+    /* wake-up handshake */
     vl_write(0x88, 0x00);
-    vl_write(0x80, 0x01);
-    vl_write(0xFF, 0x01);
-    vl_write(0x00, 0x00);
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
     vl_read(0x91, &val);
-    uint8_t stop_variable = val;
-    vl_write(0x00, 0x01);
-    vl_write(0xFF, 0x00);
-    vl_write(0x80, 0x00);
+    vl53_stop_variable = val;
+    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
 
-    /* Step 2: disable MSRC and pre-range SNR limit checks */
+    /* disable MSRC + TCC limit checks */
     vl_write(0x60, 0x00);
 
-    /* Step 3: set signal rate limit 0.25 MCPS (9.7 fixed point = 32) */
-    vl_write(0x44, 0x00);
-    vl_write(0x45, 0x20);
+    /* signal rate limit 0.25 MCPS */
+    vl_write(0x44, 0x00); vl_write(0x45, 0x20);
 
-    /* Step 4: sequence config – enable all steps */
-    vl_write(0x01, 0xFF);
-
-    /* Step 5: ST tuning settings */
+    /* load tuning settings */
     VL53L0X_LoadTuningSettings();
 
-    /* Step 6: SPAD calibration from NVM */
-    VL53L0X_PerformSPADCalibration(stop_variable);
+    /* SPAD calibration */
+    VL53L0X_PerformSPADCalibration();
 
-    /* Step 7: set timing budget to 66 ms for better accuracy
-     *         (pre-range VCSEL period = 14, final VCSEL period = 10) */
-    vl_write(0xFF, 0x01);
-    vl_write(0x70, 0x09);   /* pre-range: VCSEL period pclks = 14 (value = (14/2)-1 = 6... */
-    vl_write(0xFF, 0x00);
-    /* Use sequence steps from ST API default:
-       TCC + DSS + MSRC + PRE-RANGE + FINAL-RANGE enabled */
-    vl_write(0x01, 0xE8);
-
-    /* Step 8: set GPIO for new-sample-ready interrupt (active low) */
+    /* GPIO: interrupt on new sample ready, active low; clear any pending */
     vl_write(0x0A, 0x04);
-    vl_read(0x84, &val);
-    vl_write(0x84, val & ~0x10);
-    vl_write(0x0B, 0x01);   /* clear any pending interrupt */
+    vl_read(0x84, &val); vl_write(0x84, val & ~0x10);
+    vl_write(0x0B, 0x01);
 
-    /* Step 9: store stop_variable in a global so ReadDistance can use it */
-    /* (declare: static uint8_t vl53_stop_variable at file scope) */
-    //extern uint8_t vl53_stop_variable;
-    vl53_stop_variable = stop_variable;
-
-    /* Step 9a: mandatory VHV + phase reference calibration */
-    if (VL53L0X_PerformRefCalibration(stop_variable) != HAL_OK) {
-        serial_print_string("VL53L0X ref calibration FAILED\r\n");
+    /* reference calibration */
+    if (VL53L0X_PerformRefCalibration() != HAL_OK) {
+        serial_print_string("VL53L0X ref cal FAILED\r\n");
         return;
     }
-    serial_print_string("VL53L0X ref cal OK\r\n");
 
-    /* Step 10: start continuous back-to-back ranging */
-    vl_write(0x80, 0x01);
-    vl_write(0xFF, 0x01);
-    vl_write(0x00, 0x00);
-    vl_write(0x91, stop_variable);
-    vl_write(0x00, 0x01);
-    vl_write(0xFF, 0x00);
-    vl_write(0x80, 0x00);
-    vl_write(0x00, 0x02);   /* SYSRANGE_START: continuous */
+    /* start continuous ranging */
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
+    vl_write(0x91, vl53_stop_variable);
+    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
+    vl_write(0x00, 0x02);   /* SYSRANGE_START = continuous back-to-back */
 
-    serial_print_string("VL53L0X init OK, continuous ranging started\r\n");
+    HAL_Delay(100);         /* wait for first measurement to complete */
+    vl_write(0x0B, 0x01);  /* clear that first interrupt so pipeline is clean */
+
+    serial_print_string("VL53L0X init OK\r\n");
 }
+
 
 /* ================================================================
  * VL53L0X_ReadDistance
@@ -3293,25 +3256,22 @@ void VL53L0X_Init(void) {
  * ================================================================ */
 /* Non-blocking version - safe to call from a TIM interrupt */
 uint16_t VL53L0X_ReadDistance(void) {
-    uint8_t status;
+    uint8_t status, range_status;
     uint16_t distance;
 
-    /* check if measurement is ready - do NOT block */
     if (vl_read(0x13, &status) != HAL_OK) return 0xFFFF;
-    if ((status & 0x07) == 0) return 0xFFFF;  /* not ready yet, try next time */
+    if ((status & 0x07) == 0) return 0xFFFF;   /* not ready */
 
-    /* check range status */
-    uint8_t range_status;
     vl_read(0x14, &range_status);
     range_status = (range_status >> 3) & 0x1F;
 
-    /* read result */
     vl_read16(0x1E, &distance);
+    vl_write(0x0B, 0x01);   /* clear → triggers next measurement */
 
-    /* clear interrupt so sensor queues next measurement */
-    vl_write(0x0B, 0x01);
-
-    if (range_status != 0) return 0xFFFF;
+    /* status 0  = valid
+       status 11 = VCSEL continuity test — also valid for this sensor/SPAD config
+       everything else = real error */
+    if (range_status != 0 && range_status != 11) return 0xFFFF;
 
     return distance;
 }
@@ -4354,6 +4314,14 @@ void EXTI15_10_IRQHandler(void)
     }
 }
 
+void EXTI9_5_IRQHandler(void)
+{
+    if (__HAL_GPIO_EXTI_GET_IT(DC_BTN_PIN) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(DC_BTN_PIN);
+        HAL_GPIO_EXTI_Callback(DC_BTN_PIN);
+    }
+}
+
 // Enhanced callback with proper shared line handling
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -4428,6 +4396,17 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             	}
                 break;
 
+            case GPIO_PIN_8:   /* A1 = PF8 — DC motor direction button */
+                dc_direction   = (dc_direction == DC_DIR_FORWARD)
+                                 ? DC_DIR_REVERSE : DC_DIR_FORWARD;
+                HAL_GPIO_WritePin(DC_DIR_PORT, DC_DIR_PIN,
+                                  (dc_direction == DC_DIR_FORWARD)
+                                  ? GPIO_PIN_RESET : GPIO_PIN_SET);
+                dc_dir_changed = 1;   /* let DC_Motor_Update know direction just flipped */
+                serial_print_string(dc_direction == DC_DIR_FORWARD
+                                    ? "DC: FORWARD\r\n" : "DC: REVERSE\r\n");
+                break;
+
             default:
                 // Unknown pin - this shouldn't happen
                 //char msg[50];
@@ -4436,6 +4415,86 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 break;
         }
     }
+}
+
+void DC_Motor_Update(uint16_t distance_mm)
+{
+    uint32_t pulse = 0;
+
+    if (distance_mm < DC_DIST_MIN_MM) {
+        /* too close — only allow movement if reversing away */
+        pulse = (dc_direction == DC_DIR_REVERSE) ? DC_TIM_PERIOD : 0;
+        serial_print_string("DC motor stopped, minimum reached\r\n");
+    }
+    else if (distance_mm > DC_DIST_MAX_MM) {
+        /* too far — only allow movement if forwarding back in */
+        pulse = (dc_direction == DC_DIR_FORWARD) ? DC_TIM_PERIOD : 0;
+        serial_print_string("DC motor stopped, maximum reached\r\n");
+    }
+    else {
+        /* in range → linear 0–100 % */
+        uint32_t rel  = distance_mm - DC_DIST_MIN_MM;
+        uint32_t span = DC_DIST_MAX_MM - DC_DIST_MIN_MM;
+        pulse = (rel * DC_TIM_PERIOD) / span;
+        serial_print_string("DC motor running\r\n");
+    }
+
+    dc_dir_changed = 0;
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse);
+}
+
+void DC_Motor_Init(void)
+{
+    /* --- PA5: TIM2_CH1 PWM output --- */
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    GPIO_InitTypeDef g = {0};
+    g.Pin       = DC_PWM_PIN;
+    g.Mode      = GPIO_MODE_AF_PP;
+    g.Pull      = GPIO_NOPULL;
+    g.Speed     = GPIO_SPEED_FREQ_LOW;
+    g.Alternate = GPIO_AF1_TIM2;
+    HAL_GPIO_Init(DC_PWM_PORT, &g);
+
+    /* --- PB6: H-bridge direction output --- */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    g.Pin       = DC_DIR_PIN;
+    g.Mode      = GPIO_MODE_OUTPUT_PP;
+    g.Pull      = GPIO_NOPULL;
+    g.Alternate = 0;
+    HAL_GPIO_Init(DC_DIR_PORT, &g);
+    HAL_GPIO_WritePin(DC_DIR_PORT, DC_DIR_PIN, GPIO_PIN_RESET);
+
+    /* --- PF8: button, falling edge EXTI --- */
+    __HAL_RCC_GPIOF_CLK_ENABLE();
+    g.Pin       = DC_BTN_PIN;
+    g.Mode      = GPIO_MODE_IT_FALLING;   /* interrupt on button press (active LOW) */
+    g.Pull      = GPIO_PULLUP;
+    g.Alternate = 0;
+    HAL_GPIO_Init(DC_BTN_PORT, &g);
+
+    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);   /* same priority group as end switches */
+    HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+    /* --- TIM2 PWM --- */
+    __HAL_RCC_TIM2_CLK_ENABLE();
+    htim2.Instance               = TIM2;
+    htim2.Init.Prescaler         = DC_TIM_PRESCALER;
+    htim2.Init.CounterMode       = TIM_COUNTERMODE_UP;
+    htim2.Init.Period             = DC_TIM_PERIOD;
+    htim2.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
+    htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    if (HAL_TIM_PWM_Init(&htim2) != HAL_OK) Error_Handler();
+
+    TIM_OC_InitTypeDef oc = {0};
+    oc.OCMode     = TIM_OCMODE_PWM1;
+    oc.Pulse      = 0;
+    oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+    oc.OCFastMode = TIM_OCFAST_DISABLE;
+    if (HAL_TIM_PWM_ConfigChannel(&htim2, &oc, TIM_CHANNEL_1) != HAL_OK)
+        Error_Handler();
+
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+    serial_print_string("DC motor PWM init OK\r\n");
 }
 
 /* USER CODE END 4 */
