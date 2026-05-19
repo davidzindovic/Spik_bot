@@ -114,15 +114,25 @@ typedef struct {
 #define DC_DIST_MIN_MM      50U     /* below this: stop (unless reversing out) */
 #define DC_DIST_MAX_MM      200U    /* above this: stop (unless forwarding back) */
 
-/* D13 = PA5  → TIM2_CH1  PWM output to H-bridge                  */
-/* A1  = PF8  → button input, EXTI line 8, active LOW + pull-up   */
-/* D0  = PB6  → H-bridge direction signal                         */
-#define DC_PWM_PORT         GPIOA
-#define DC_PWM_PIN          GPIO_PIN_5
-#define DC_BTN_PORT         GPIOF
-#define DC_BTN_PIN          GPIO_PIN_8
-#define DC_DIR_PORT         GPIOB
-#define DC_DIR_PIN          GPIO_PIN_6
+/* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
+ *
+ *  A1 = PF8  → IN1: TIM13_CH1 (AF9)  – H-bridge input 1  (PWM)
+ *  A6 = PA6  → IN2: GPIO output       – H-bridge input 2  (direction)
+ *       Forward  : IN1 = PWM,  IN2 = LOW
+ *       Reverse  : IN1 = 0,    IN2 = HIGH
+ *
+ *  A3 = PA1  → direction-change button, EXTI1, active LOW + pull-up
+ *
+ *  Note: PA6 is shared with motors[0] stepper step pin (TIM3_CH1).
+ *        DC motor IN2 uses PA6 as plain GPIO output only.
+ */
+#define DC_IN1_PORT         GPIOF
+#define DC_IN1_PIN          GPIO_PIN_8          /* A1 – TIM13_CH1 AF9 */
+#define DC_IN2_PORT         GPIOA
+#define DC_IN2_PIN          GPIO_PIN_6          /* A6 – GPIO output, direction control */
+
+#define DC_BTN_PORT         GPIOA
+#define DC_BTN_PIN          GPIO_PIN_1          /* A3 – EXTI1, active LOW */
 
 #define DC_TIM_PERIOD       999U    /* ARR  → 1000 steps resolution              */
 #define DC_TIM_PRESCALER    199U    /* 200 MHz / 200 / 1000 = 1 kHz PWM freq     */
@@ -227,9 +237,22 @@ analog_pin_config_t analog_pins[6];
 
 typedef enum { DC_DIR_FORWARD = 0, DC_DIR_REVERSE = 1 } dc_direction_t;
 
-static TIM_HandleTypeDef       htim2;
+static TIM_HandleTypeDef       htim2;   /* unused – kept to avoid linker errors */
+static TIM_HandleTypeDef       htim13;  /* TIM13_CH1 → IN1 on PF8 (A1) */
 volatile dc_direction_t        dc_direction    = DC_DIR_FORWARD;
 volatile uint8_t               dc_dir_changed  = 0;
+
+/* Nastavitve za avtomatski časovni premor in logiko odmika */
+uint32_t dc_wait_time_ms = 5000;         /* Čas čakanja na točki obrata (5 sekund) */
+uint32_t dc_stop_timestamp = 0;         /* Časovna značka, kdaj se je motor ustavil */
+
+typedef enum {
+    DC_STATE_REGULATED = 0,             /* Normalno delovanje: senzor regulira hitrost */
+    DC_STATE_WAITING,                   /* Motor je dosegel min razdaljo in čaka 5 sekund */
+    DC_STATE_RETRACTING                 /* Motor se umika nazaj do maks razdalje */
+} dc_state_t;
+
+volatile dc_state_t dc_current_state = DC_STATE_REGULATED;
 
 /* USER CODE END PV */
 
@@ -308,7 +331,7 @@ void configure_end_switch_interrupts(void);
 void EXTI3_IRQHandler(void);
 void EXTI4_IRQHandler(void);
 void EXTI15_10_IRQHandler(void);
-void EXTI9_5_IRQHandler(void);
+void EXTI1_IRQHandler(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 //void USART_write(int ch);
 
@@ -817,7 +840,16 @@ int main(void) {
             VL53L0X_Init();
             */
 
+    // 1. Zaženemo samo časovnik 13, ki bo skrbel za hitrost na PF8
+    HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1);
 
+    // 2. Prisilno prekonfiguriramo PA6 iz časovnika TIM3 v navaden digitalni izhod (GPIO)
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_6;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP; // Push-Pull način
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -868,7 +900,7 @@ int main(void) {
 		    if (d != 0xFFFF) {
 		        vl53_distance_mm = d;
 		        char buf[40];
-		        snprintf(buf, sizeof(buf), "Distance: %u mm\r\n", (unsigned)vl53_distance_mm);
+		        snprintf(buf, sizeof(buf), "Razdalja: %u mm\r\n", (unsigned)vl53_distance_mm);
 		        serial_print_string(buf);
 		    }
 		    DC_Motor_Update(vl53_distance_mm);
@@ -876,7 +908,37 @@ int main(void) {
 
 
 
+		/*
 
+
+		    // Smerni pin PA6 postavimo na LOW (0V)
+		    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+		    // Na PF8 pošljemo PWM signal (polovična moč - Duty Cycle 500 od 999)
+		    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 500);
+
+		    HAL_Delay(3000); // Vrti se 3 sekunde
+
+
+		    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+		    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+		    HAL_Delay(500);
+
+
+		    // Smerni pin PA6 postavimo na HIGH (3.3V)
+		    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
+		    // Na PF8 pošljemo OBRAČEN PWM signal.
+		    // Pri H-mostičkih je obratna hitrost enaka: (Perioda - željen Duty Cycle)
+		    // Če želimo 50% moči: 999 - 500 = 499
+		    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 499);
+
+		    HAL_Delay(3000); // Vrti se 3 sekunde v obratno smer
+
+
+
+		    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+		    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+		    HAL_Delay(500);
+*/
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1998,7 +2060,7 @@ static void MX_GPIO_Init(void) {
 
 	/*Configure GPIO pin : LCD_INT_Pin */
 	GPIO_InitStruct.Pin = LCD_INT_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;//GPIO_MODE_IT_RISING
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(LCD_INT_GPIO_Port, &GPIO_InitStruct);
 
@@ -2017,12 +2079,12 @@ static void MX_GPIO_Init(void) {
 	//timers:
 
 	/*Configure GPIO pin : PA6 */
-	GPIO_InitStruct.Pin = GPIO_PIN_6;
+	/*GPIO_InitStruct.Pin = GPIO_PIN_6;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	GPIO_InitStruct.Alternate = GPIO_AF9_TIM13;//tim13
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);*/
 
 	/*Configure GPIO pin : PA8 */
 	GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -2168,6 +2230,7 @@ void configure_analog_pins(void)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
+    /*
     // Configure PF8 as analog (A1)
     GPIO_InitStruct.Pin = GPIO_PIN_8;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
@@ -2189,6 +2252,7 @@ void configure_analog_pins(void)
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     // Enable PA1_C special function
     SYSCFG->PMCR |= SYSCFG_PMCR_PA1SO;
+    */
 
     // Configure PC2_C as analog (A4)
     GPIO_InitStruct.Pin = GPIO_PIN_2;
@@ -4314,9 +4378,9 @@ void EXTI15_10_IRQHandler(void)
     }
 }
 
-void EXTI9_5_IRQHandler(void)
+void EXTI1_IRQHandler(void)
 {
-    if (__HAL_GPIO_EXTI_GET_IT(DC_BTN_PIN) != RESET) {
+    if(__HAL_GPIO_EXTI_GET_IT(DC_BTN_PIN) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(DC_BTN_PIN);
         HAL_GPIO_EXTI_Callback(DC_BTN_PIN);
     }
@@ -4396,15 +4460,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             	}
                 break;
 
-            case GPIO_PIN_8:   /* A1 = PF8 — DC motor direction button */
-                dc_direction   = (dc_direction == DC_DIR_FORWARD)
-                                 ? DC_DIR_REVERSE : DC_DIR_FORWARD;
-                HAL_GPIO_WritePin(DC_DIR_PORT, DC_DIR_PIN,
-                                  (dc_direction == DC_DIR_FORWARD)
-                                  ? GPIO_PIN_RESET : GPIO_PIN_SET);
-                dc_dir_changed = 1;   /* let DC_Motor_Update know direction just flipped */
-                serial_print_string(dc_direction == DC_DIR_FORWARD
-                                    ? "DC: FORWARD\r\n" : "DC: REVERSE\r\n");
+            case GPIO_PIN_1:
+                if (htim13.Instance != NULL) {
+                    dc_direction = (dc_direction == DC_DIR_FORWARD)
+                                   ? DC_DIR_REVERSE : DC_DIR_FORWARD;
+                    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+                    HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_RESET); /* coast */
+                    dc_dir_changed = 1;
+                }
                 break;
 
             default:
@@ -4417,84 +4480,171 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 }
 
-void DC_Motor_Update(uint16_t distance_mm)
-{
+void DC_Motor_Update(uint16_t distance_mm) {
     uint32_t pulse = 0;
+    uint32_t current_time = HAL_GetTick();
 
-    if (distance_mm < DC_DIST_MIN_MM) {
-        /* too close — only allow movement if reversing away */
-        pulse = (dc_direction == DC_DIR_REVERSE) ? DC_TIM_PERIOD : 0;
-        serial_print_string("DC motor stopped, minimum reached\r\n");
-    }
-    else if (distance_mm > DC_DIST_MAX_MM) {
-        /* too far — only allow movement if forwarding back in */
-        pulse = (dc_direction == DC_DIR_FORWARD) ? DC_TIM_PERIOD : 0;
-        serial_print_string("DC motor stopped, maximum reached\r\n");
-    }
-    else {
-        /* in range → linear 0–100 % */
-        uint32_t rel  = distance_mm - DC_DIST_MIN_MM;
-        uint32_t span = DC_DIST_MAX_MM - DC_DIST_MIN_MM;
-        pulse = (rel * DC_TIM_PERIOD) / span;
-        serial_print_string("DC motor running\r\n");
-    }
+    switch (dc_current_state) {
 
-    dc_dir_changed = 0;
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse);
+        case DC_STATE_REGULATED:
+            /* ---- 1. STANJE: Normalna regulacija (Smer NAPREJ) ---- */
+
+            if (distance_mm <= DC_DIST_MIN_MM) {
+                /* Takoj ustavimo motor */
+                __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+                // Prisilno postavimo PA6 na LOW (maso)
+                HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+
+                dc_stop_timestamp = current_time;
+                dc_current_state = DC_STATE_WAITING;
+                serial_print_string("Dosezena min razdalja. Cakam 5 sekund...\r\n");
+                return;
+            }
+
+            if (distance_mm <= DC_DIST_MAX_MM) {
+                float razpon_razdalje = (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
+                float odmik_od_minimuma = (float)(distance_mm - DC_DIST_MIN_MM);
+                float faktor_hitrosti = 1.0f - (odmik_od_minimuma / razpon_razdalje);
+
+                pulse = (uint32_t)(faktor_hitrosti * (float)DC_TIM_PERIOD);
+                if (pulse > DC_TIM_PERIOD) pulse = DC_TIM_PERIOD;
+
+                /* Varno delovanje NAPREJ: PA6 je fiksna masa (0V), PF8 pulzira */
+                HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+                __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, pulse);
+            } else {
+                __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+                HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+            }
+            break;
+
+        case DC_STATE_WAITING:
+            /* ---- 2. STANJE: Čakanje 5 sekund ---- */
+            if (current_time - dc_stop_timestamp >= dc_wait_time_ms) {
+                dc_current_state = DC_STATE_RETRACTING;
+                serial_print_string("Cas iztekel. Umikam motor nazaj...\r\n");
+            }
+            /* Motor med čakanjem stoji */
+            __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+            break;
+
+        case DC_STATE_RETRACTING:
+            /* ---- 3. STANJE: Prisilni pomik NAZAJ ---- */
+
+            if (distance_mm >= DC_DIST_MAX_MM) {
+                /* Dosegli smo cilj, ustavimo motor */
+                __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+                HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+
+                dc_current_state = DC_STATE_REGULATED;
+                serial_print_string("Dosezena max razdalja. Ponastavljam na regulacijo.\r\n");
+                return;
+            }
+
+            /* --- KLJUČNI POPRAVEK ZA SMER NAZAJ --- */
+            /* Pin PA6 postavimo na fiksni HIGH (3.3V) */
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
+
+            /* Pin PF8 (TIM13) pa krmilimo z obratnim PWM signalom.
+               Za 50% hitrosti nazaj uporabimo: 999 - 500 = 499.
+               S tem ko bo PF8 na LOW, bo razlika napetosti povzročila vrtenje nazaj. */
+            __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 499);
+            break;
+    }
 }
 
 void DC_Motor_Init(void)
 {
-    /* --- PA5: TIM2_CH1 PWM output --- */
-    __HAL_RCC_GPIOA_CLK_ENABLE();
     GPIO_InitTypeDef g = {0};
-    g.Pin       = DC_PWM_PIN;
+
+    // Force reset both pins to known state
+    __HAL_RCC_GPIOF_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    // Deinit IN1 pin first
+    HAL_GPIO_DeInit(GPIOF, GPIO_PIN_8);
+
+    /* ---------------------------------------------------------------
+     * IN1 : PF8 (A1) → TIM13_CH1, AF9
+     * --------------------------------------------------------------- */
+    __HAL_RCC_GPIOF_CLK_ENABLE();
+    g.Pin       = DC_IN1_PIN;
     g.Mode      = GPIO_MODE_AF_PP;
     g.Pull      = GPIO_NOPULL;
     g.Speed     = GPIO_SPEED_FREQ_LOW;
-    g.Alternate = GPIO_AF1_TIM2;
-    HAL_GPIO_Init(DC_PWM_PORT, &g);
+    g.Alternate = GPIO_AF9_TIM13;
+    HAL_GPIO_Init(DC_IN1_PORT, &g);
 
-    /* --- PB6: H-bridge direction output --- */
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    g.Pin       = DC_DIR_PIN;
+    /* ---------------------------------------------------------------
+     * IN2 : PA6 (A6) → plain GPIO output (direction control only)
+     * PA6 is also used by motors[0] stepper (TIM3_CH1 AF2).
+     * We configure it as GPIO output here; the stepper init will
+     * reconfigure it to AF2 when the stepper is used. Keep DC motor
+     * usage and stepper usage mutually exclusive in your application.
+     * --------------------------------------------------------------- */
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    g.Pin       = DC_IN2_PIN;        /* GPIO_PIN_6 */
     g.Mode      = GPIO_MODE_OUTPUT_PP;
     g.Pull      = GPIO_NOPULL;
+    g.Speed     = GPIO_SPEED_FREQ_LOW;
     g.Alternate = 0;
-    HAL_GPIO_Init(DC_DIR_PORT, &g);
-    HAL_GPIO_WritePin(DC_DIR_PORT, DC_DIR_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_Init(DC_IN2_PORT, &g);
 
-    /* --- PF8: button, falling edge EXTI --- */
-    __HAL_RCC_GPIOF_CLK_ENABLE();
+    /* Drive IN2 LOW initially (coast / forward ready) */
+    HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_RESET);
+
+    /* ---------------------------------------------------------------
+     * Button : PA1 (A3) → EXTI1, falling edge, internal pull-up
+     * --------------------------------------------------------------- */
+    __HAL_RCC_GPIOA_CLK_ENABLE();
     g.Pin       = DC_BTN_PIN;
-    g.Mode      = GPIO_MODE_IT_FALLING;   /* interrupt on button press (active LOW) */
+    g.Mode      = GPIO_MODE_IT_FALLING;
     g.Pull      = GPIO_PULLUP;
     g.Alternate = 0;
     HAL_GPIO_Init(DC_BTN_PORT, &g);
 
-    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);   /* same priority group as end switches */
-    HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+    /* Wait for pull-up to charge the line (PA1 must be HIGH = not pressed) */
+   // HAL_Delay(10);
 
-    /* --- TIM2 PWM --- */
-    __HAL_RCC_TIM2_CLK_ENABLE();
-    htim2.Instance               = TIM2;
-    htim2.Init.Prescaler         = DC_TIM_PRESCALER;
-    htim2.Init.CounterMode       = TIM_COUNTERMODE_UP;
-    htim2.Init.Period             = DC_TIM_PERIOD;
-    htim2.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
-    htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-    if (HAL_TIM_PWM_Init(&htim2) != HAL_OK) Error_Handler();
+    /* Explicitly clear EXTI1 pending in both EXTI and NVIC */
+    EXTI->PR1  = (1U << 1);               /* write 1 to clear, H7 uses PR1 */
+    HAL_NVIC_ClearPendingIRQ(EXTI1_IRQn);
+
+    HAL_Delay(10);                         /* let pull-up charge PA1 HIGH */
+
+    EXTI->PR1  = (1U << 1);               /* clear again after settling */
+    HAL_NVIC_ClearPendingIRQ(EXTI1_IRQn);
+
+    HAL_NVIC_SetPriority(EXTI1_IRQn, 5, 0);
+    //HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+    /* ---------------------------------------------------------------
+     * TIM13 – IN1 PWM (PF8, A1)
+     * TIM13 clock source: APB1 × 2 = 200 MHz on H7
+     * Prescaler 199 → 1 MHz tick; Period 999 → 1 kHz PWM
+     * --------------------------------------------------------------- */
+    __HAL_RCC_TIM13_CLK_ENABLE();
+    htim13.Instance               = TIM13;
+    htim13.Init.Prescaler         = DC_TIM_PRESCALER;
+    htim13.Init.CounterMode       = TIM_COUNTERMODE_UP;
+    htim13.Init.Period             = DC_TIM_PERIOD;
+    htim13.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
+    htim13.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    if (HAL_TIM_PWM_Init(&htim13) != HAL_OK) Error_Handler();
 
     TIM_OC_InitTypeDef oc = {0};
     oc.OCMode     = TIM_OCMODE_PWM1;
     oc.Pulse      = 0;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
-    if (HAL_TIM_PWM_ConfigChannel(&htim2, &oc, TIM_CHANNEL_1) != HAL_OK)
+    if (HAL_TIM_PWM_ConfigChannel(&htim13, &oc, TIM_CHANNEL_1) != HAL_OK)
         Error_Handler();
 
-    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-    serial_print_string("DC motor PWM init OK\r\n");
+	HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1); // Zažene PF8 (TIM13)
+	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);  // Zažene PA6 (TIM3)
+
+        serial_print_string("DC motor init OK\r\n");
 }
 
 /* USER CODE END 4 */
