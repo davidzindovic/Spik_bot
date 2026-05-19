@@ -871,7 +871,7 @@ int main(void) {
 		 */
 
 
-
+		/*
 		if (vl53_data_ready) {
 		    vl53_data_ready = 0;
 		    uint16_t d = VL53L0X_ReadDistance();
@@ -881,12 +881,30 @@ int main(void) {
 		        snprintf(buf, sizeof(buf), "Distance: %u mm\r\n", (unsigned)vl53_distance_mm);
 		        serial_print_string(buf);
 		    }
-		    DC_Motor_Update(vl53_distance_mm);
+		    //DC_Motor_Update(vl53_distance_mm);
 		}
+		*/
 
 
 
+		// Test 1: IN1 high, IN2 low
+		__HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 999); // full duty
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0); // full duty
+		HAL_Delay(3000);
 
+		// Test 2: IN1 low, IN2 high
+		__HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 999); // full duty
+		HAL_Delay(3000);
+
+
+/*
+		// Put this in main, BEFORE the while(1), after DC_Motor_Init()
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);
+		HAL_Delay(5000); // measure PA0 here — should be 3.3V
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);
+		HAL_Delay(5000);
+		*/
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -2027,12 +2045,12 @@ static void MX_GPIO_Init(void) {
 	//timers:
 
 	/*Configure GPIO pin : PA6 */
-	GPIO_InitStruct.Pin = GPIO_PIN_6;
+	/*GPIO_InitStruct.Pin = GPIO_PIN_6;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	GPIO_InitStruct.Alternate = GPIO_AF9_TIM13;//tim13
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);*/
 
 	/*Configure GPIO pin : PA8 */
 	GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -4457,18 +4475,38 @@ void DC_Motor_Update(uint16_t distance_mm)
      * Reverse : IN1 = 0,   IN2 = PWM
      * Coast   : IN1 = 0,   IN2 = 0  (pulse == 0 in both directions) */
     pulse=500;
+    /*
     if (dc_direction == DC_DIR_FORWARD) {
-        __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, pulse); /* IN1 (PF8, A1) */
-        __HAL_TIM_SET_COMPARE(&htim2,  TIM_CHANNEL_1, 0);     /* IN2 (PA0, A2) */
+        __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, pulse);
+        __HAL_TIM_SET_COMPARE(&htim2,  TIM_CHANNEL_1, 0);
     } else {
-        __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);     /* IN1 (PF8, A1) */
-        __HAL_TIM_SET_COMPARE(&htim2,  TIM_CHANNEL_1, pulse); /* IN2 (PA0, A2) */
+        __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+        __HAL_TIM_SET_COMPARE(&htim2,  TIM_CHANNEL_1, pulse);
     }
+    */
+	if (dc_direction == DC_DIR_FORWARD) {
+	    HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_RESET); // IN2 = 0
+	    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, pulse);        // IN1 = PWM
+	} else {
+	    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);            // IN1 = 0
+	    HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_SET);    // IN2 = 1
+	}
 }
 
 void DC_Motor_Init(void)
 {
     GPIO_InitTypeDef g = {0};
+
+    // Force reset both pins to known state
+    __HAL_RCC_GPIOF_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    // Deinit both pins first
+    HAL_GPIO_DeInit(GPIOF, GPIO_PIN_8);
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_0);
+
+    // Set PA0 low explicitly
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);
 
     /* ---------------------------------------------------------------
      * IN1 : PF8 (A1) → TIM13_CH1, AF9
@@ -4491,6 +4529,15 @@ void DC_Motor_Init(void)
     g.Speed     = GPIO_SPEED_FREQ_LOW;
     g.Alternate = GPIO_AF1_TIM2;
     HAL_GPIO_Init(DC_IN2_PORT, &g);
+    // IN2 (PA0) → GPIO output, direction control only
+    /*
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    g.Pin       = DC_IN2_PIN;
+    g.Mode      = GPIO_MODE_OUTPUT_PP;  // plain output, no AF
+    g.Pull      = GPIO_NOPULL;
+    g.Speed     = GPIO_SPEED_FREQ_LOW;
+    g.Alternate = 0;
+    HAL_GPIO_Init(DC_IN2_PORT, &g);*/
 
     /* ---------------------------------------------------------------
      * Button : PA1 (A3) → EXTI1, falling edge, internal pull-up
