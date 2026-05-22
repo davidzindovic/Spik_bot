@@ -254,6 +254,9 @@ typedef enum {
 
 volatile dc_state_t dc_current_state = DC_STATE_REGULATED;
 
+volatile uint8_t uart_blocks_disabled = 1;  /* 1 = IGNORIRAJ UART BLOKADE (samostojno delovanje), 0 = ČAKAJ NA UART */
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -521,7 +524,9 @@ int main(void) {
 
 	//GPIO initialization
 	MX_GPIO_Init();
-	MX_USART3_UART_Init();
+
+	if (!uart_blocks_disabled) {MX_USART3_UART_Init();}
+
 
 
 
@@ -4017,12 +4022,22 @@ void uart_transmit(char *sporocilo)
 	//char buffer[40]={'0'};
 	//sprintf(buffer,"my variable is %s \r\n",sporocilo);
 
+	if (!uart_blocks_disabled) {
 	HAL_UART_Transmit_IT(&huart1, sporocilo,strlen(sporocilo)-1);
 	HAL_Delay(1);
+	}
 }
 
 char uart_receive(char *beseda)
 {
+
+	if (uart_blocks_disabled) {
+	        if (beseda != NULL) {
+	        	beseda[0] = '\0';
+	        }
+	        return '\0';
+	    }
+
 	static char znak='\0'; 					//aktiven prebran znak
 	static char znak_temp;
 
