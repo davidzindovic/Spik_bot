@@ -111,7 +111,7 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      30U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MIN_MM      35U     /* below this: stop (unless reversing out) */
 #define DC_DIST_MAX_MM      105U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
@@ -256,6 +256,7 @@ volatile dc_state_t dc_current_state = DC_STATE_REGULATED;
 
 volatile uint8_t uart_blocks_disabled = 1;  /* 1 = IGNORIRAJ UART BLOKADE (samostojno delovanje), 0 = ČAKAJ NA UART */
 
+_Bool zagon_izvedbe = false;
 
 /* USER CODE END PV */
 
@@ -778,7 +779,7 @@ int main(void) {
 
 
 	//usable IO: I2
-	configure_end_switch_interrupts();
+	//configure_end_switch_interrupts();
 
 	/* Configure LED1 */
 	//BSP_LED_Init(LED1);
@@ -848,11 +849,14 @@ int main(void) {
     HAL_Delay(10);
         DC_Motor_Init();  // Pokličemo tu, da povozi TIM3 nastavitve na PA6
 
-        // Zaženemo testno vrtenje neposredno pred zanko, da vidimo če takoj dela
-        DC_Motor_Set_Speed(600);
+       // if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET)HAL_Delay(1000);
+
+	//while(HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET){}
+
 	while (1) {
 		/* USER CODE END WHILE */
 
+		//---------------------------------stepperji-------------------------------------
 		//test_motor(0);
 		//test_motor(1);
 		//test_motor(2);
@@ -868,10 +872,10 @@ int main(void) {
 		//motor_status();
 
 		//serial_print_string("URAVNOVEŠENO!\r\n");
+		//------------------------------------------------------------------------------
 
 
-
-
+		//---------------------------------------pritisk--------------------------------
 		//za pumpo: vmesti tako da ko se motor parkira potem se zažene pumpa
 		/*
         if(uart3_new_data)
@@ -890,24 +894,45 @@ int main(void) {
             //motor_status();
         }
 		 */
+		//---------------------------------------------------------------------
 
 
-		if (vl53_data_ready) {
-		            vl53_data_ready = 0; // Ponastavimo zastavico
-
-		            /* Preberemo dejansko razdaljo v mm */
-		            uint16_t trenutna_razdalja = VL53L0X_ReadDistance();
-
-		            /* Osvežimo avtomat stanja motorja z novo razdaljo */
-		            DC_Motor_Update(trenutna_razdalja);
-
-		            /* Izpis za debug v serijski terminal, da lažje spremljaš dogajanje */
-		            char debug_msg[64];
-		            snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm | Stanje avtomata: %d\r\n",
-		                     trenutna_razdalja, dc_current_state);
-		            serial_print_string(debug_msg);
+		//--------------------------------za ptuj dc motor-------------------------------
+		// 1. Če zastavica NI postavljena, beremo tipko
+		        if (zagon_izvedbe == false) {
+		            // Ker je vezano na Pull-up, je pritisnjena tipka enaka GPIO_PIN_RESET (0V)
+		            if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
+		                // Preprosto preprečevanje odboja kontaktov (Debounce)
+		                HAL_Delay(50);
+		                if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
+		                    zagon_izvedbe = true; // Postavimo zastavico na true
+		                    dc_current_state = DC_STATE_REGULATED;
+		                }
+		            }
 		        }
 
+		        // 2. Če je zastavica true, izvedemo kodo, medtem se tipka NE bere
+		        while (zagon_izvedbe == true) {
+
+		            if (vl53_data_ready) {
+		                vl53_data_ready = 0;
+		                uint16_t trenutna_razdalja = VL53L0X_ReadDistance();
+
+						DC_Motor_Update(trenutna_razdalja);
+
+		                char debug_msg[64];
+		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm | Stanje avtomata: %d\r\n", trenutna_razdalja, dc_current_state);
+		                serial_print_string(debug_msg);
+
+		            }
+
+		        }
+
+			//---------------------------------------------------------
+
+
+
+		//-----------------------------dc motor test---------------------------------
 /*
 		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
 		    serial_print_string("Test: Motor naprej...\r\n");
@@ -928,6 +953,7 @@ int main(void) {
 		    DC_Motor_Set_Speed(0);
 		    HAL_Delay(1000);
 */
+		//----------------------------------------------------------------------------
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1998,6 +2024,13 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(LCD_DISPD7_GPIO_Port, &GPIO_InitStruct);
+
+	// Konfiguracija pina PE3 za tipko
+	GPIO_InitStruct.Pin = GPIO_PIN_3;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;     // Vhodni način
+	GPIO_InitStruct.Pull = GPIO_PULLUP;          // Izberemo Pull-up, ker vežemo na GND
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : PE5 PE4 */
 	GPIO_InitStruct.Pin = GPIO_PIN_5 | GPIO_PIN_4;
@@ -4563,6 +4596,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
             /* Nastavimo hitrost za vožnjo naprej (pozitivna vrednost) */
             DC_Motor_Set_Speed(calculated_speed);
+            //serial_print_string("Priblizujem se oviri.\r\n");
             break;
         }
 
@@ -4579,8 +4613,9 @@ void DC_Motor_Update(uint16_t distance_mm) {
             /* 1. Pogoj za konec umikanja: ko dosežemo želeno varnostno razdaljo (maksimum) */
             if (distance_mm >= DC_DIST_MAX_MM) {
                 DC_Motor_Set_Speed(0);
-                dc_current_state = DC_STATE_REGULATED;
-                serial_print_string("Umaknjen na varno razdaljo. Ponovni zagon regulacije naprej.\r\n");
+                //dc_current_state = DC_STATE_REGULATED;
+                zagon_izvedbe = false;
+                serial_print_string("Umaknjen na varno razdaljo.\r\n");
                 break;
             }
 
@@ -4590,7 +4625,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
         }
 
         default:
-            dc_current_state = DC_STATE_REGULATED;
+            //dc_current_state = DC_STATE_REGULATED;
             break;
     }
 }
