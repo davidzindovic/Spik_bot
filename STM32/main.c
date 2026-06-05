@@ -243,6 +243,7 @@ void test_motor(uint8_t motor_number);
 void test_all_motors();
 void demo_za_predstavitev();
 void move_motor_2_end_switch(uint8_t motor_number, _Bool direction);
+void calibrate_all_motors(void);
 
 void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z);
 
@@ -274,7 +275,7 @@ void USART3_Pin_Init(void);
 void configure_end_switch_interrupts(void);
 //void EXTI2_IRQHandler(void);
 void EXTI3_IRQHandler(void);
-void EXTI4_IRQHandler(void);
+void EXTI2_IRQHandler(void);
 void EXTI15_10_IRQHandler(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 //void USART_write(int ch);
@@ -456,10 +457,10 @@ int main(void) {
 	    .direction_port = GPIOG,//D2
 	    .timer = &htim3,
 	    .timer_channel = TIM_CHANNEL_1,
-		.frequency = 50000,
+		.frequency = 30000,
 	    .motor_pin = GPIO_PIN_6,//D3
 	    .motor_port = GPIOA,
-	    .max_position = 100000,
+	    .max_position = 10000000,
 		.starting_position = 5000,
 	    .position = 0,
 		.offset=30,//odmik od osi vrtenja v mm? popravi
@@ -497,18 +498,18 @@ int main(void) {
 		.direction_port = GPIOK,//D4
 		.timer = &htim1,
 		.timer_channel = TIM_CHANNEL_1,
-		.frequency = 50000,
+		.frequency = 30000,
 		.motor_pin = GPIO_PIN_8,//D5
 		.motor_port = GPIOA,
-		.max_position = 100000,
+		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
 		.offset=0,//tukaj offset v deg?
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch_pin = GPIO_PIN_15,//D9
-		.end_switch_port = GPIOH,
+		.end_switch_pin = GPIO_PIN_2,//bilo 15
+		.end_switch_port = GPIOI,//bilo H
 		.end_switch_triggered = 0,
 		//.end_switch1_pin = GPIO_PIN_4,//D10
 		//.end_switch1_port = GPIOB,
@@ -540,10 +541,10 @@ int main(void) {
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 50000,
+		.frequency = 30000,
 		.motor_pin = GPIO_PIN_6,//D6
 		.motor_port = GPIOE,
-		.max_position = 100000,
+		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
 		.offset=50,//odmik od osi vrtenja v mm? popravi
@@ -663,7 +664,7 @@ int main(void) {
     uart3_command_ready = 0;
 
     // Pošlji začetno sporočilo
-    char startup_msg[] = "System ready. Enter target pressure (0-4 bar):\r\n";
+    char startup_msg[] = "SpikBot je pripravljen.\r\n";
     HAL_UART_Transmit(&huart3, (uint8_t*)startup_msg, strlen(startup_msg), 100);
 
 
@@ -679,6 +680,20 @@ int main(void) {
 
 	//hitrost motorjev lahko štelamo tudi s stikali (pulz/rev)
 	//jermen gre samo eno stopnjo hitreje, pri več pa ruži
+/*
+    if(uart3_new_data)
+    {
+        uart3_new_data = 0;  // Počisti flag
+
+        // Izhod za debug
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Using pressure: %.2f bar\r\n", target_pressure);
+        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+    }
+    reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2);
+    */
+
+    calibrate_all_motors();
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -700,21 +715,18 @@ int main(void) {
 		//serial_print_string("URAVNOVEŠENO!\r\n");
 
 
-        if(uart3_new_data)
-        {
-            uart3_new_data = 0;  // Počisti flag
 
-            // Izhod za debug
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Using pressure: %.2f bar\r\n", target_pressure);
-            HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
-        }
-
+		/*
         while(!reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2))
         {
             HAL_Delay(300);
             //motor_status();
         }
+        */
+		//test_all_motors();
+
+
+
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -2817,9 +2829,22 @@ void run_motor(uint8_t motor_number)
 		//htim15.Instance->DIER |= TIM_DIER_UIE;
 		//motors[motor_number].timer->Instance->CR1 |= TIM_CR1_CEN;
 
+		/*
+        IRQn_Type irqn;
+        if      (motors[motor_number].timer->Instance == TIM1)  irqn = TIM1_UP_IRQn;
+        else if (motors[motor_number].timer->Instance == TIM3)  irqn = TIM3_IRQn;
+        else if (motors[motor_number].timer->Instance == TIM15) irqn = TIM15_IRQn;
+        else if (motors[motor_number].timer->Instance == TIM12) irqn = TIM8_BRK_TIM12_IRQn;
+        else goto skip_nvic;
+        HAL_NVIC_SetPriority(irqn, 5, 0);
+        HAL_NVIC_EnableIRQ(irqn);
+        skip_nvic:;
+        */
+
 		HAL_TIM_Base_Start(motors[motor_number].timer);
-		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
 		HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
+		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
+		motors[motor_number].timer->Instance->DIER |= TIM_DIER_UIE; // force it
 
 		motors[motor_number].running = true;
 	}
@@ -2934,7 +2959,7 @@ void test_all_motors()
 	run_motor(0);
 	run_motor(1);
 	run_motor(2);
-	HAL_Delay(3000);
+	HAL_Delay(1000);
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
@@ -2946,7 +2971,7 @@ void test_all_motors()
 	run_motor(0);
 	run_motor(1);
 	run_motor(2);
-	HAL_Delay(3000);
+	HAL_Delay(1000);
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
@@ -3113,62 +3138,143 @@ void move_motor_2_end_switch(uint8_t motor_number, _Bool direction)
 }
 
 /**
-  * @brief  Function for calibrating the chosen motor by reaching the end switches.
-  			Once calibrated the segment should move to the center.
-			Calibration result is the change of the motors parameters:
-			max_position, unit_conversion
-  * @param  motor_number: number of the motor that should be calibrated
+  * @brief  Function for calibrating the chosen motor by reaching both end switches.
+  *         Both switches are wired to the same input pin per motor.
+  *         Procedure:
+  *           1. Move in direction_minus until switch triggers (switch 1 hit).
+  *           2. Reverse to direction_plus, run for at least 1 second blind
+  *              (do not read switch) to clear the switch mechanically.
+  *           3. Count steps while moving until the switch triggers again (switch 2 hit).
+  *           4. The step count between the two switch events = max_position.
+  *           5. Update unit_conversion and move to centre.
+  *
+  *         WARNING: If the mechanism starts already pressing a switch, it cannot
+  *         determine which end it is at. Move it away from the switch manually
+  *         before calling this function.
+  *
+  * @param  motor_number: number of the motor to calibrate (0, 1 or 2 — motor 3 unused)
   * @retval None
   */
 void calibrate_motor(uint8_t motor_number)
-{	//WARNING: If the robot is shutdown in one of two end positions (pressing the switch)
-	//			the user should move the unit away from the switch manually.
-	//			The robot does not move if the segment's switch is pressed. Freezes the software.
+{
+	char msg[80];
 
-	// In case of contact with the switch at the start the software disables the motors.
-	// The reason is that we cannot know which switch s pressed due to lack of IO pins.
-	if(read_switch(motor_number))
+	/* --- Safety check: switch already pressed at startup --- */
+	if (read_switch(motor_number))
 	{
+		snprintf(msg, sizeof(msg), "CAL M%d: ERR - switch pressed at start, move away manually\r\n", motor_number);
+		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 		stop_motor(motor_number);
-		while(1){};
+		return; /* Do not freeze — return so caller can handle it */
 	}
 
-	direction_change(motor_number,motors[motor_number].direction_minus);
+	snprintf(msg, sizeof(msg), "CAL M%d: moving to switch 1 (dir_minus)...\r\n", motor_number);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* --- Phase 1: drive in direction_minus until switch 1 triggers --- */
+	motors[motor_number].position = 0;
+	motors[motor_number].end_switch_triggered = 0;
+	motors[motor_number].allowed_direction = 2; /* allow both directions during calibration */
+
+	direction_change(motor_number, motors[motor_number].direction_minus);
+	HAL_Delay(100);
 	run_motor(motor_number);
 
-	while(!read_switch(motor_number)){}
-	motors[motor_number].starting_position=0;
-	motors[motor_number].position=0;
+	while (!read_switch(motor_number)) { /* spin until switch fires */ }
 
 	stop_motor(motor_number);
-	direction_change(motor_number,motors[motor_number].direction_plus);
+
+	snprintf(msg, sizeof(msg), "CAL M%d: switch 1 hit. Reversing...\r\n", motor_number);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* --- Phase 2: reverse direction and move BLIND for at least 1 second --- */
+	direction_change(motor_number, motors[motor_number].direction_plus);
 	HAL_Delay(100);
 
-	uint32_t tickstart = HAL_GetTick();
+	motors[motor_number].position = 0; /* reset step counter at switch-1 position */
+	motors[motor_number].end_switch_triggered = 0;
+
 	run_motor(motor_number);
 
-	// run until switch encounter; the number of steps for switch release is taken into account
-	while(!(read_switch(motor_number)&&(motors[motor_number].position>motors[motor_number].num_steps_for_switch_release))){}
+	/* Mandatory blind travel: do NOT read the switch for the first 1000 ms.
+	   This ensures the mechanism has physically cleared the switch actuator. */
+	HAL_Delay(1000);
+
+	snprintf(msg, sizeof(msg), "CAL M%d: blind phase done, counting steps to switch 2...\r\n", motor_number);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* --- Phase 3: continue until switch 2 triggers, counting steps --- */
+	/* position is incremented by the TIM IRQ callback while running */
+	while (!read_switch(motor_number)) { /* spin until switch fires */ }
 
 	stop_motor(motor_number);
 
-	// abort if switch is pressed to early (less than 0.5s) or if there is an error in step counting
-	if ((HAL_GetTick()-tickstart)<500)
+	uint32_t measured_steps = motors[motor_number].position;
+
+	snprintf(msg, sizeof(msg), "CAL M%d: switch 2 hit. Steps between switches: %lu\r\n",
+	         motor_number, measured_steps);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* Sanity check: if we measured almost nothing the count is wrong */
+	if (measured_steps < 100)
 	{
-		while(1){};
+		snprintf(msg, sizeof(msg), "CAL M%d: ERR - step count too low (%lu), aborting\r\n",
+		         motor_number, measured_steps);
+		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+		return;
 	}
 
-	motors[motor_number].max_position=motors[motor_number].position;
-	motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
+	/* --- Phase 4: update motor parameters --- */
+	motors[motor_number].max_position    = measured_steps;
+	motors[motor_number].unit_conversion = measured_steps / motors[motor_number].travel_length;
+	motors[motor_number].end_switch_triggered = 0;
+	motors[motor_number].allowed_direction    = 2;
 
-	direction_change(motor_number,motors[motor_number].direction_minus);
+	snprintf(msg, sizeof(msg), "CAL M%d: max_pos=%lu, unit_conv=%lu. Moving to centre...\r\n",
+	         motor_number,
+	         motors[motor_number].max_position,
+	         motors[motor_number].unit_conversion);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* --- Phase 5: drive back to the centre of the travel range --- */
+	direction_change(motor_number, motors[motor_number].direction_minus);
 	HAL_Delay(100);
-
 	run_motor(motor_number);
 
-	while(motors[motor_number].position>(motors[motor_number].max_position/2)){}
+	while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
 
 	stop_motor(motor_number);
+
+	motors[motor_number].starting_position = motors[motor_number].position;
+
+	snprintf(msg, sizeof(msg), "CAL M%d: done. Centre pos=%lu\r\n",
+	         motor_number, motors[motor_number].position);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+}
+
+/**
+  * @brief  Calibrates motors 0, 1 and 2 sequentially.
+  *         Motor 3 (pump) is intentionally skipped — it has no end switches.
+  *         Each motor is driven to its first end switch, then in reverse for
+  *         at least 1 second (blind phase) before the second switch is detected
+  *         and the full travel range is measured in steps.
+  *         Results stored in motors[n].max_position and motors[n].unit_conversion.
+  * @retval None
+  */
+void calibrate_all_motors(void)
+{
+	serial_print_string("CALIBRATION: starting motors 0, 1, 2...\r\n");
+
+	for (uint8_t m = 0; m <= 2; m++)
+	{
+		motors[m].reset_requested=1;
+		serial_print_string("-----------------------\r\n");
+		calibrate_motor(m);
+		motors[m].reset_requested=0;
+		HAL_Delay(500); /* short pause between motors */
+	}
+
+	serial_print_string("CALIBRATION: complete.\r\n");
 }
 
 /**
@@ -3184,20 +3290,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
     if (htim->Instance == TIM3)
     {
-    	//if (false)
-		if ((((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true)
+		if (!motors[0].reset_requested&&(((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true)
 		{
 			stop_motor(0);
 			motors[0].running=false;
 		}
-		else if (motors[0].running=true && motors[0].direction==motors[0].direction_plus && (motors[0].reset_completed || motors[0].position<motors[0].max_position))
+		else if (motors[0].running==true && motors[0].direction==motors[0].direction_plus)
 		{
 			motors[0].position += 1;
 			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
-		else if (motors[0].running=true && motors[0].direction==motors[0].direction_minus && (motors[0].reset_completed || motors[0].position>0))
+		else if (motors[0].running==true && motors[0].direction==motors[0].direction_minus)
 		{
-			motors[0].position -= 1;
+			if (motors[0].position > 0) motors[0].position -= 1;
 			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
 
@@ -3221,19 +3326,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	}
     else if (htim->Instance == TIM1)
     {
-		if ((((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true)
+		if (!motors[1].reset_requested&&(((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true)
 		{
 			stop_motor(1);
 			motors[1].running=false;
 		}
-		else if (motors[1].running=true && motors[1].direction==motors[1].direction_plus && (motors[1].reset_completed || motors[1].position<motors[1].max_position))
+		else if (motors[1].running==true && motors[1].direction==motors[1].direction_plus)
 		{
 			motors[1].position += 1;
 			//J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
-		else if (motors[1].running=true && motors[1].direction==motors[1].direction_minus && (motors[1].reset_completed || motors[1].position>0))
+		else if (motors[1].running==true && motors[1].direction==motors[1].direction_minus)
 		{
-			motors[1].position -= 1;
+			if (motors[1].position > 0) motors[1].position -= 1;
 			J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
 
@@ -3256,19 +3361,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
     else if (htim->Instance == TIM15)
     {
-		if ((((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true)
+		if (!motors[2].reset_requested&&(((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true)
 		{
 			stop_motor(2);
 			motors[2].running=false;
 		}
-		else if (motors[2].running=true && motors[2].direction==motors[2].direction_plus && (motors[2].reset_completed || motors[2].position<motors[2].max_position))
+		else if (motors[2].running==true && motors[2].direction==motors[2].direction_plus)
 		{
 			motors[2].position += 1;
 			J3_offset_mm=J3_offset_base+motors[2].position*motors[2].unit_conversion/motors[2].num_steps_per_turn;
 		}
-		else if (motors[2].running=true && motors[2].direction==motors[2].direction_minus && (motors[2].reset_completed || motors[2].position>0))
+		else if (motors[2].running==true && motors[2].direction==motors[2].direction_minus)
 		{
-			motors[2].position -= 1;
+			if (motors[2].position > 0) motors[2].position -= 1;
 			J3_offset_mm=J3_offset_base+motors[2].position*motors[2].unit_conversion/motors[2].num_steps_per_turn;
 		}
 
@@ -3292,14 +3397,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     else if (htim->Instance == TIM12)
     {
 
-		if (motors[3].running=true && motors[3].direction==motors[3].direction_plus)
+		if (motors[3].running==true && motors[3].direction==motors[3].direction_plus)
 		{
 			motors[3].position += 1;
 			J4_ammount_of_liquid=J4_volume_per_turn*motors[3].position/motors[3].num_steps_per_turn;
 		}
-		else if (motors[3].running=true && motors[3].direction==motors[3].direction_minus)
+		else if (motors[3].running==true && motors[3].direction==motors[3].direction_minus)
 		{
-			motors[3].position -= 1;
+			if (motors[3].position > 0) motors[3].position -= 1;
 		}
     }
 }
@@ -3930,11 +4035,11 @@ void EXTI3_IRQHandler(void)
     }
 }
 
-void EXTI4_IRQHandler(void)
+void EXTI2_IRQHandler(void)
 {
-    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_4) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
-        HAL_GPIO_EXTI_Callback(GPIO_PIN_4);
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_2) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_2);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_2);
     }
 }
 
@@ -3959,7 +4064,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         switch(GPIO_Pin) {
             case GPIO_PIN_3://motors[0].end_switch_pin:
 				// Motor 0 Switch 1 (PE3)
-            	if(!motors[0].end_switch_triggered)
+            	if(motors[0].end_switch_triggered)
             	{
 					stop_motor(0);
 					if (motors[0].direction=motors[0].direction_plus)
@@ -3974,13 +4079,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[0].running = false;
 					//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
-					motors[0].end_switch_triggered=1;
+					motors[0].end_switch_triggered=0;
             	}
                 break;
 
-            case GPIO_PIN_15://motors[1].end_switch_pin:
+            case GPIO_PIN_2://motors[1].end_switch_pin:
                 // Motor 0 (PH15)
-            	if(!motors[1].end_switch_triggered)
+            	if(motors[1].end_switch_triggered)
             	{
 					stop_motor(1);
 					if (motors[1].direction=motors[1].direction_plus)
@@ -3995,13 +4100,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[1].running = false;
 					//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
-					motors[1].end_switch_triggered=1;
+					motors[1].end_switch_triggered=0;
             	}
                 break;
 
             case GPIO_PIN_4://motors[2].end_switch_pin:
                 // Motor 1 (PB4)
-            	if(!motors[2].end_switch_triggered)
+            	if(motors[2].end_switch_triggered)
             	{
 					stop_motor(2);
 					if (motors[2].direction=motors[2].direction_plus)
@@ -4016,7 +4121,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[2].running = false;
 					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
-					motors[2].end_switch_triggered=1;
+					motors[2].end_switch_triggered=0;
             	}
                 break;
 
