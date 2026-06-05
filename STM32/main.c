@@ -486,7 +486,7 @@ int main(void) {
 		.encoder_Z_pin = GPIO_PIN_3,
 	    .encoder_Z_port = GPIOE
 	};
-	motors[1] = (motor_struct_t){
+	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 1,
@@ -508,8 +508,8 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch_pin = GPIO_PIN_2,//bilo 15
-		.end_switch_port = GPIOI,//bilo H
+		.end_switch_pin = GPIO_PIN_3,//bilo 15
+		.end_switch_port = GPIOD,//bilo H
 		.end_switch_triggered = 0,
 		//.end_switch1_pin = GPIO_PIN_4,//D10
 		//.end_switch1_port = GPIOB,
@@ -529,7 +529,7 @@ int main(void) {
 		.encoder_Z_pin = GPIO_PIN_3,
 	    .encoder_Z_port = GPIOE
 	};
-	motors[2] = (motor_struct_t){
+	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 1,
@@ -551,8 +551,8 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch_pin = GPIO_PIN_3,//D10
-		.end_switch_port = GPIOD,//prej PB4
+		.end_switch_pin = GPIO_PIN_2,//D10
+		.end_switch_port = GPIOI,//prej PB4
 		.end_switch_triggered = 0,
 		//.end_switch1_pin = GPIO_PIN_13,//D14
 		//.end_switch1_port = GPIOD,
@@ -3324,7 +3324,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		}
 
 	}
-    else if (htim->Instance == TIM1)
+    else if (htim->Instance == TIM15)
     {
 		if (!motors[1].reset_requested&&(((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true)
 		{
@@ -3359,7 +3359,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			}
 		}
     }
-    else if (htim->Instance == TIM15)
+    else if (htim->Instance == TIM1)
     {
 		if (!motors[2].reset_requested&&(((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true)
 		{
@@ -4064,7 +4064,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         switch(GPIO_Pin) {
             case GPIO_PIN_3://motors[0].end_switch_pin:
 				// Motor 0 Switch 1 (PE3)
-            	if(motors[0].end_switch_triggered)
+            	if(read_switch(0))
             	{
 					stop_motor(0);
 					if (motors[0].direction=motors[0].direction_plus)
@@ -4081,11 +4081,28 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
 					motors[0].end_switch_triggered=0;
             	}
+            	else if (read_switch(2))
+				{
+					stop_motor(2);
+					if (motors[2].direction=motors[2].direction_plus)
+					{
+						motors[2].position = motors[2].max_position;
+						motors[2].allowed_direction=motors[2].direction_minus;
+					}
+					else if (motors[2].direction=motors[2].direction_minus)
+					{
+						motors[2].position = 0;
+						motors[2].allowed_direction=motors[2].direction_plus;
+					}
+					motors[2].running = false;
+					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
+					motors[2].end_switch_triggered=0;
+				}
                 break;
 
             case GPIO_PIN_2://motors[1].end_switch_pin:
                 // Motor 0 (PH15)
-            	if(motors[1].end_switch_triggered)
+            	if(read_switch(1))
             	{
 					stop_motor(1);
 					if (motors[1].direction=motors[1].direction_plus)
@@ -4103,28 +4120,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					motors[1].end_switch_triggered=0;
             	}
                 break;
-
+/*
             case GPIO_PIN_4://motors[2].end_switch_pin:
                 // Motor 1 (PB4)
-            	if(motors[2].end_switch_triggered)
-            	{
-					stop_motor(2);
-					if (motors[2].direction=motors[2].direction_plus)
-					{
-						motors[2].position = motors[2].max_position;
-						motors[2].allowed_direction=motors[2].direction_minus;
-					}
-					else if (motors[2].direction=motors[2].direction_minus)
-					{
-						motors[2].position = 0;
-						motors[2].allowed_direction=motors[2].direction_plus;
-					}
-					motors[2].running = false;
-					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
-					motors[2].end_switch_triggered=0;
-            	}
-                break;
 
+                break;
+*/
             default:
                 // Unknown pin - this shouldn't happen
                 //char msg[50];
