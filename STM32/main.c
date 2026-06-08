@@ -490,8 +490,8 @@ int main(void) {
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 1,
-		.direction_plus = 1,
-		.direction_minus = 0,
+		.direction_plus = 0,
+		.direction_minus = 1,
 		.allowed_direction=2,
 		.num_steps_for_switch_release=1000, //spremeni
 		.direction_pin = GPIO_PIN_1,
@@ -3236,12 +3236,20 @@ void calibrate_motor(uint8_t motor_number)
 	         motors[motor_number].unit_conversion);
 	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 
+
 	/* --- Phase 5: drive back to the centre of the travel range --- */
 	direction_change(motor_number, motors[motor_number].direction_minus);
 	HAL_Delay(100);
 	run_motor(motor_number);
 
-	while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
+	if(motor_number!=2)
+	{
+		while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
+	}
+	else
+	{
+		while (motors[motor_number].position > (motors[motor_number].max_position * 9 / 10)) { /* wait */ }
+	}
 
 	stop_motor(motor_number);
 
