@@ -61,6 +61,8 @@ typedef struct {
     uint32_t max_position; //in numbers of steps
 	uint32_t starting_position;
     uint32_t position;
+    uint32_t target_position;
+    uint32_t home_position;
     uint32_t offset;
 	_Bool running;
 
@@ -71,7 +73,7 @@ typedef struct {
     GPIO_TypeDef* end_switch_port;
 	_Bool end_switch_triggered;
 
-	uint32_t unit_conversion; //number of mm or deg per step
+	uint32_t unit_conversion; //number of step per mm or deg
 	uint32_t travel_length; //maximum travel length distance of segment
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
@@ -301,6 +303,8 @@ void serial_print_empty_screen(void);
 void USART3_IRQHandler(void);
 float parse_float_from_string(const char* str);
 
+void execute_robot_movement(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -315,8 +319,11 @@ char rx_buff[BUFFER_SIZE];
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
 
-uint8_t uart_rx_buffer[BUFFER_SIZE];
-uint8_t uart_rx_index = 0;
+#define UART_RX_BUFFER_SIZE 64
+char uart_rx_buffer[UART_RX_BUFFER_SIZE];
+uint16_t uart_rx_index = 0;
+uint8_t uart_single_byte; // Tukaj HAL shrani zadnji prejeti znak
+extern UART_HandleTypeDef huart3;
 
 uint8_t podatki;
 char vnos[100];
@@ -355,6 +362,62 @@ uint32_t encoder_maximum=4096; //popravi!!!
 //_Bool end_switch0_triggered=0;
 //_Bool end_switch1_triggered=0;
 //_Bool end_switch2_triggered=0;
+
+
+// Bounding Box definicija (v mm)
+typedef struct {
+    int32_t min_x;
+    int32_t max_x;
+    int32_t min_y;
+    int32_t max_y;
+} BoundingBox_t;
+
+// Nastavi poljubne meje varnega območja v mm
+// med stikali J1 60cm, voziček 10cm
+volatile BoundingBox_t robot_bbox = {
+    .min_x = -(600-100)/2,
+    .max_x = (600-100)/2,
+    .min_y = 0,     // Y je lahko samo pozitiven
+    .max_y = 100
+};
+
+// Željene ciljne koordinate (nastavljene preko UART)
+volatile int32_t target_x = 0;
+volatile int32_t target_y = 0;
+volatile int32_t target_o = 0; // Orientacija v stopinjah
+
+// Funkcija za izpis stanja spremenljivk nazaj na UART
+void uart_print_current_targets(void) {
+    char response[200];
+
+    // Eksplicitno pretvorimo obe vrednosti v int32_t pred odštevanjem!
+    int32_t pos_x = (int32_t)motors[0].position;
+    int32_t home_x = (int32_t)motors[0].home_position;
+
+    int32_t pos_y = (int32_t)motors[1].position;
+    int32_t home_y = (int32_t)motors[1].home_position;
+
+    int32_t pos_o = (int32_t)motors[2].position;
+    int32_t home_o = (int32_t)motors[2].home_position;
+
+    // Izračun relativnih korakov (sedaj so lahko zanesljivo negativni)
+    int32_t relative_steps_x = pos_x - home_x;
+    int32_t relative_steps_y = pos_y - home_y;
+    int32_t relative_steps_o = pos_o - home_o;
+
+    // Pretvorba v fizikalne enote
+    float current_x = (motors[0].unit_conversion > 0.001f) ? ((float)relative_steps_x / motors[0].unit_conversion) : 0.0f;
+    float current_y = (motors[1].unit_conversion > 0.001f) ? ((float)relative_steps_y / motors[1].unit_conversion) : 0.0f;
+    float current_o = (motors[2].unit_conversion > 0.001f) ? ((float)relative_steps_o / motors[2].unit_conversion) : 0.0f;
+
+    // Izpis v terminal
+    snprintf(response, sizeof(response),
+             "\r\n[STATUS] Cilj: X=%ld, Y=%ld, O=%ld |\r\n[STATUS] Trenutna lega: X=%.2f mm, Y=%.2f mm, O=%.2f st.\r\n",
+             target_x, target_y, target_o,
+             current_x, current_y, current_o);
+
+    HAL_UART_Transmit(&huart3, (uint8_t*)response, strlen(response), 100);
+}
 
 /* USER CODE END 0 */
 
@@ -433,6 +496,7 @@ int main(void) {
 
 	// Start receiving - THIS IS CRITICAL!
 	HAL_UART_Receive_IT(&huart1, rx_buff, 30);  // Receive 1 byte at a time
+	HAL_UART_Receive_IT(&huart3, &uart_single_byte, 1);
     //Debug_USART1_Config();
 
 	//Timer initialization
@@ -440,6 +504,11 @@ int main(void) {
 	MX_TIM15_Init();
 	MX_TIM3_Init();
 	MX_TIM12_Init();
+
+	// Nastavi časovnike na višjo prioriteto (npr. 3), da lahko prekinjajo UART
+	HAL_NVIC_SetPriority(USART3_IRQn, 6, 0);
+	HAL_NVIC_SetPriority(TIM3_IRQn, 3, 0);
+	//HAL_NVIC_SetPriority(TIM1_BRK_UP_TRG_COM_IRQn, 3, 0);
 
 	/* USER CODE BEGIN 2 */
 	// freq=100000 -> hitro
@@ -463,6 +532,7 @@ int main(void) {
 	    .max_position = 10000000,
 		.starting_position = 5000,
 	    .position = 0,
+		.target_position=0,
 		.offset=30,//odmik od osi vrtenja v mm? popravi
 		.running = false,
 	    .reset_requested = false,
@@ -504,6 +574,7 @@ int main(void) {
 		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
+		.target_position=0,
 		.offset=0,//tukaj offset v deg?
 		.running = false,
 		.reset_requested = false,
@@ -547,6 +618,7 @@ int main(void) {
 		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
+		.target_position=0,
 		.offset=50,//odmik od osi vrtenja v mm? popravi
 		.running = false,
 		.reset_requested = false,
@@ -590,6 +662,7 @@ int main(void) {
 		.max_position = 10000,
 		.starting_position=5000,
 		.position = 0,
+		.target_position=0,
 		.offset=0,//odmik od osi vrtenja v mm?
 		.running = false,
 
@@ -664,9 +737,8 @@ int main(void) {
     uart3_command_ready = 0;
 
     // Pošlji začetno sporočilo
-    char startup_msg[] = "SpikBot je pripravljen.\r\n";
+    char startup_msg[] = "\n\n\n\n\nSpikBot je pripravljen.\r\n";
     HAL_UART_Transmit(&huart3, (uint8_t*)startup_msg, strlen(startup_msg), 100);
-
 
 	//uart_transmit(text);
 
@@ -694,6 +766,20 @@ int main(void) {
     */
 
     calibrate_all_motors();
+
+    char menu[] =
+            "\r\n==================================================\r\n"
+            " KALIBRACIJA USPESNO ZAKLJUCENA! Robot je v (0,0,0)\r\n"
+            "==================================================\r\n"
+            " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
+            "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
+            "  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
+            "  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
+            "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
+            "--------------------------------------------------\r\n"
+            " Vnesi ukaz in pritisni ENTER:\r\n\r\n";
+
+	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -3254,6 +3340,7 @@ void calibrate_motor(uint8_t motor_number)
 	stop_motor(motor_number);
 
 	motors[motor_number].starting_position = motors[motor_number].position;
+	motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
 
 	snprintf(msg, sizeof(msg), "CAL M%d: done. Centre pos=%lu\r\n",
 	         motor_number, motors[motor_number].position);
@@ -3283,6 +3370,15 @@ void calibrate_all_motors(void)
 	}
 
 	serial_print_string("CALIBRATION: complete.\r\n");
+
+	for (uint8_t m = 0; m <= 2; m++) {
+	    // Sredinska pozicija v korakih postane referenčna ničla ("Home")
+	    motors[m].home_position = motors[m].position;
+	}
+
+	target_x = 0;
+	target_y = 0;
+	target_o = 0;
 }
 
 /**
@@ -3292,6 +3388,73 @@ void calibrate_all_motors(void)
   * @retval None
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    // ---------- MOTOR 0 (TIM3) ----------
+    if (htim->Instance == TIM3)
+    {
+        if (motors[0].running == true)
+        {
+            // Inkrement/Dekrement pozicije glede na trenutno smer
+            if (motors[0].direction == motors[0].direction_plus) {
+                motors[0].position += 1;
+            } else {
+                if (motors[0].position > 0) motors[0].position -= 1;
+            }
+
+            // Posodobitev globalnih koordinat za end-effector (opcijsko sproti)
+            effector_x = motors[0].position / motors[0].unit_conversion;
+
+            // DOSEŽEN CILJ: Če smo prispeli na target_position, ustavi motor!
+            if (!motors[0].reset_requested && (motors[0].position == motors[0].target_position))
+            {
+                stop_motor(0);
+            }
+        }
+    }
+
+    // ---------- MOTOR 1 (TIM15) ----------
+    else if (htim->Instance == TIM15)
+    {
+        if (motors[1].running == true)
+        {
+            if (motors[1].direction == motors[1].direction_plus) {
+                motors[1].position += 1;
+            } else {
+                if (motors[1].position > 0) motors[1].position -= 1;
+            }
+
+            effector_y = motors[1].position / motors[1].unit_conversion;
+
+            // DOSEŽEN CILJ
+            if (!motors[1].reset_requested && (motors[1].position == motors[1].target_position))
+            {
+                stop_motor(1);
+            }
+        }
+    }
+
+    // ---------- MOTOR 2 (TIM1) ----------
+    else if (htim->Instance == TIM1)
+    {
+        if (motors[2].running == true)
+        {
+            if (motors[2].direction == motors[2].direction_plus) {
+                motors[2].position += 1;
+            } else {
+                if (motors[2].position > 0) motors[2].position -= 1;
+            }
+
+            effector_orientation = motors[2].position / mapFloat(motors[2].unit_conversion, 0, 1, 0, 1); // oz. vaša pretvorba stopinj
+
+            // DOSEŽEN CILJ
+            if (!motors[2].reset_requested && (motors[2].position == motors[2].target_position))
+            {
+                stop_motor(2);
+            }
+        }
+    }
+}
+/*void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	static uint16_t end_switch_reset_cnt[]={0,0,0};//[M0,M1,M2]
 
@@ -3415,7 +3578,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			if (motors[3].position > 0) motors[3].position -= 1;
 		}
     }
-}
+}*/
 
 /**
   * @brief  Makes the timer IRQ handler readable for the specific timer.
@@ -3572,45 +3735,128 @@ void TestADCs() {
 
 //ne rabim:
 void uart_process_command(const char* command) {
-    char response[128];
+	if (strncmp(command, "x=", 2) == 0) {
+	        int32_t val = (int32_t)atoi(command + 2);
 
-    if (strncmp(command, "STATUS", 6) == 0) {
-    	motor_status();
-    }
-    else if (strncmp(command, "STOP", 4) == 0) {
-        stop_all_motors();
-        uart_transmit("OK:All motors stopped\r\n");
-    }
-    else if (strncmp(command, "START", 5) == 0) {
-        // Parse motor number: START 0, START 1, etc.
-        int motor_num = command[6] - '0';
-        if (motor_num >= 0 && motor_num < 4) {
-            run_motor(motor_num);
-            snprintf(response, sizeof(response), "OK:Motor %d started\r\n", motor_num);
-            uart_transmit(response);
+	        // Preverjanje Bounding Boxa za X
+	        if (val >= robot_bbox.min_x && val <= robot_bbox.max_x) {
+	            target_x = val;
+	            uart_print_current_targets();
+	        } else {
+	            uart_transmit("ERROR: X izven Bounding Boxa!\r\n");
+	        }
+	    }
+	    else if (strncmp(command, "y=", 2) == 0) {
+	        int32_t val = (int32_t)atoi(command + 2);
+
+	        // Y mora biti pozitiven in znotraj Bounding Boxa
+	        if (val < 0) {
+	            uart_transmit("ERROR: Y mora biti pozitiven!\r\n");
+	        } else if (val >= robot_bbox.min_y && val <= robot_bbox.max_y) {
+	            target_y = val;
+	            uart_print_current_targets();
+	        } else {
+	            uart_transmit("ERROR: Y izven Bounding Boxa!\r\n");
+	        }
+	    }
+	    else if (strncmp(command, "O=", 2) == 0) {
+	        int32_t val = (int32_t)atoi(command + 2);
+
+	        // Omejitev orientacije na +- 30 stopinj
+	        if (val >= -30 && val <= 30) {
+	            target_o = val;
+	            uart_print_current_targets();
+	        } else {
+	            uart_transmit("ERROR: Orientacija izven dovoljenega obmocja (+/- 30 st.)! Vnesi veljavne podatke.\r\n");
+	        }
+	    }
+	    else if (strcmp(command, "go") == 0) {
+	        uart_transmit("EXEC: Zacetek premika...\r\n");
+
+	        // Pokličemo izvedbo giba
+	        execute_robot_movement();
+	    }
+}
+//konc ne rabim
+
+void execute_robot_movement(void)
+{
+    // Pomožna spremenljivka za časovno osveževanje izpisa (v milisekundah)
+    uint32_t last_print_tick = 0;
+    const uint32_t print_interval = 200; // Osveževanje na 200 ms (5-krat na sekundo)
+
+    // 1. IZRAČUN CILJNIH KORAKOV GLEDE NA HOME POZICIJO
+    motors[0].target_position = (uint32_t)((int32_t)motors[0].home_position + (int32_t)(target_x * motors[0].unit_conversion));
+    motors[1].target_position = (uint32_t)((int32_t)motors[1].home_position + (int32_t)(target_y * motors[1].unit_conversion));
+    motors[2].target_position = (uint32_t)((int32_t)motors[2].home_position + (int32_t)(target_o * motors[2].unit_conversion));
+
+    // Varnostna omejitev (Saturation), da ne prebijemo kalibracijskih meja
+    for (uint8_t m = 0; m <= 2; m++) {
+        if ((int32_t)motors[m].target_position < 0) {
+            motors[m].target_position = 0;
+        }
+        if (motors[m].target_position > motors[m].max_position) {
+            motors[m].target_position = motors[m].max_position;
         }
     }
-    else if (strncmp(command, "MOVE", 4) == 0) {
-        // Example: MOVE 0 50000 - move motor 0 to position 50000
-        int motor_num, position;
-        if (sscanf(command, "MOVE %d %d", &motor_num, &position) == 2) {
-            if (motor_num >= 0 && motor_num < 4) {
-                // Add your move logic here
-                snprintf(response, sizeof(response), "OK:Moving motor %d to %d\r\n", motor_num, position);
-                uart_transmit(response);
+
+    // 2. NASTAVITEV SMERI
+    for (uint8_t m = 0; m <= 2; m++)
+    {
+        if (motors[m].target_position > motors[m].position) {
+            direction_change(m, motors[m].direction_plus);
+        } else if (motors[m].target_position < motors[m].position) {
+            direction_change(m, motors[m].direction_minus);
+        }
+    }
+
+    // 3. SOČASNI ZAGON: Motor 0 in Motor 1 (X in Y)
+    if (motors[0].position != motors[0].target_position) run_motor(0);
+    if (motors[1].position != motors[1].target_position) run_motor(1);
+
+    // ČAKANJE IN KONSTANTEN IZPIS MED PREMIKOM X IN Y
+    while (motors[0].running || motors[1].running)
+    {
+        // Varnostni izhod ob sprožitvi stikal
+        if (motors[0].end_switch_triggered || motors[1].end_switch_triggered) {
+            stop_all_motors();
+            uart_transmit("\r\nALERT: Koncno stikalo sprozeno med premikom X/Y!\r\n");
+            return;
+        }
+
+        // Periodični izpis trenutne lege vrha robota
+        if (HAL_GetTick() - last_print_tick >= print_interval) {
+            uart_print_current_targets();
+            last_print_tick = HAL_GetTick();
+        }
+    }
+
+    // 4. SEKVENČNI ZAGON: Motor 2 (Orientacija), ko prva dva zaključita
+    if (motors[2].position != motors[2].target_position)
+    {
+        run_motor(2);
+
+        // ČAKANJE IN KONSTANTEN IZPIS MED PREMIKOM ORIENTACIJE
+        while (motors[2].running)
+        {
+            if (motors[2].end_switch_triggered) {
+                stop_motor(2);
+                uart_transmit("\r\nALERT: Koncno stikalo sprozeno med premikom O!\r\n");
+                return;
+            }
+
+            // Periodični izpis trenutne lege vrha robota
+            if (HAL_GetTick() - last_print_tick >= print_interval) {
+                uart_print_current_targets();
+                last_print_tick = HAL_GetTick();
             }
         }
     }
-    else if (strncmp(command, "RESET", 5) == 0) {
-        reset_motors();
-        UART_Send_Data("OK:Motors reset\r\n");
-    }
-    else {
-        snprintf(response, sizeof(response), "ERROR:Unknown command: %s\r\n", command);
-        uart_transmit(response);
-    }
+
+    // Končni izpis ob uspešnem prihodu v točko
+    uart_transmit("\r\nINFO: Premik uspesno zakljucen. Dosezena koncna tocka.\r\n");
+    uart_print_current_targets();
 }
-//konc ne rabim
 
 void motor_status(void) {
     char status[256];
@@ -3629,7 +3875,39 @@ void motor_status(void) {
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    HAL_UART_Receive_IT(&huart1, rx_buff, 30);
+	if (huart->Instance == USART3) { // Prilagodi (npr. USART1), če uporabljaš drug port
+
+	        // Preprečimo prekoračitev bufferja
+	        if (uart_rx_index < (UART_RX_BUFFER_SIZE - 1)) {
+
+	            // Če je znak konec vrstice, zaključimo niz in obdelamo ukaz
+	            if (uart_single_byte == '\n' || uart_single_byte == '\r') {
+	                if (uart_rx_index > 0) { // Obdelaj le, če buffer ni prazen
+	                    uart_rx_buffer[uart_rx_index] = '\0'; // Terminacija niza
+
+	                    // Pokličemo procesiranje ukaza neposredno iz interrupta
+	                    uart_process_command((const char*)uart_rx_buffer);
+
+	                    // Ponastavimo indeks za naslednji ukaz
+	                    uart_rx_index = 0;
+	                }
+	            }
+	            else {
+	                // Če je navaden znak, ga dodaj v buffer
+	                uart_rx_buffer[uart_rx_index++] = (char)uart_single_byte;
+	            }
+	        } else {
+	            // Buffer se je prepolnil, ga za vsak slučaj počistimo
+	            uart_rx_index = 0;
+	        }
+
+	        // KLJUČNO: Ponovno aktiviramo prekinitev za naslednji znak!
+	        HAL_UART_Receive_IT(huart, &uart_single_byte, 1);
+	    }
+	else if (huart->Instance == USART1)
+	{
+		HAL_UART_Receive_IT(&huart1, rx_buff, 30);
+	}
 }
 
 //maybe rabim?
@@ -3866,46 +4144,110 @@ void USART3_IRQHandler(void)
     if((__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) != RESET) &&
        (__HAL_UART_GET_IT_SOURCE(&huart3, UART_IT_RXNE) != RESET))
     {
+        // Preberemo prejeti znak iz registra
         uint8_t received_char = (uint8_t)(huart3.Instance->RDR & 0xFF);
 
-        // Preveri, ali je prejet konec vrstice (newline ali carriage return)
+        // --- ECHO BACK ---
+        // Takoj pošljemo prejeti znak nazaj po UART, da uporabnik vidi, kaj tipka
+        // Pri '\r' pošljemo še '\n', da v terminalu skoči v novo vrstico
+        HAL_UART_Transmit(&huart3, &received_char, 1, 10);
+        if (received_char == '\r') {
+            uint8_t nl = '\n';
+            HAL_UART_Transmit(&huart3, &nl, 1, 10);
+        }
+
+        // Preveri, ali je prejet konec vrstice
         if(received_char == '\n' || received_char == '\r')
         {
             if(uart3_rx_index > 0)
             {
                 // Zaključi string z null terminatorjem
                 uart3_rx_buffer[uart3_rx_index] = '\0';
+
                 uart3_command_ready = 1;
                 uart3_new_data = 1;
 
-                // Pretvori string v float in shrani v globalno spremenljivko
-                target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
+                // --- OBDELAVA UKAZOV ZA ROBOTA (Ignorira velike/male črke) ---
+                if(strncasecmp((char*)uart3_rx_buffer, "x=", 2) == 0)
+                {
+                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+                    if(val >= robot_bbox.min_x && val <= robot_bbox.max_x) {
+                        target_x = val;
 
-                // Opojdi, da je bil prejet nov tlak
-                char response[50];
-                snprintf(response, sizeof(response), "Pressure set to: %.2f bar\r\n", target_pressure);
-                HAL_UART_Transmit(&huart3, (uint8_t*)response, strlen(response), 100);
+                        uart_print_current_targets();
 
-                // Reset bufferja za naslednje sporočilo
+                    } else {
+                        char err[] = "\r\nERROR: X izven Bounding Boxa!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                }
+                else if(strncasecmp((char*)uart3_rx_buffer, "y=", 2) == 0)
+                {
+                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+                    if(val < 0) {
+                        char err[] = "\r\nERROR: Y mora biti pozitiven!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    } else if(val >= robot_bbox.min_y && val <= robot_bbox.max_y) {
+                        target_y = val;
+
+                        uart_print_current_targets();
+
+                    } else {
+                        char err[] = "\r\nERROR: Y izven Bounding Boxa!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                }
+                else if(strncasecmp((char*)uart3_rx_buffer, "O=", 2) == 0)
+                {
+                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+                    if(val >= -30 && val <= 30) {
+                        target_o = val;
+
+                        uart_print_current_targets();
+
+                    } else {
+                        char err[] = "\r\nERROR: Orientacija izven dovoljenega obmocja (+/- 30 st.)!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                }
+                else if(strcasecmp((char*)uart3_rx_buffer, "go") == 0)
+                {
+                    char msg[] = "\r\nEXEC: Zacetek premika robota...\r\n";
+                    HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+                    // Izvedba premika
+                    execute_robot_movement();
+                }
+                else
+                {
+                    // Stara regulacija tlaka (opcijsko)
+                    target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
+                    char echo[64];
+                    snprintf(echo, sizeof(echo), "\r\nPritisk set: %.2f\r\n", target_pressure);
+                    HAL_UART_Transmit(&huart3, (uint8_t*)echo, strlen(echo), 100);
+                }
+
+                // Reset bufferja
                 uart3_rx_index = 0;
-                memset((void*)uart3_rx_buffer, 0, 32);
+                memset((void*)uart3_rx_buffer, 0, sizeof(uart3_rx_buffer));
             }
         }
-        else if(received_char >= '0' && received_char <= '9' || received_char == '.' || received_char == '-')
+        else
         {
-            // Dodaj znak v buffer, če je številka, decimalna pika ali minus
-            if(uart3_rx_index < 31)
+            // Če znak ni konec vrstice in ni Backspace, ga dodaj v buffer
+            if (received_char != '\b' && uart3_rx_index < (sizeof(uart3_rx_buffer) - 1))
             {
                 uart3_rx_buffer[uart3_rx_index++] = received_char;
             }
+            // Podpora za Backspace (brisanje znaka v terminalu)
+            else if (received_char == '\b' && uart3_rx_index > 0)
+            {
+                uart3_rx_index--;
+            }
         }
-        // Ignoriraj ostale znake
 
-        // Počisti flag
+        // Počisti flag za RXNE
         __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE);
-
-        // Ponovno aktiviraj sprejem
-        HAL_UART_Receive_IT(&huart3, (uint8_t*)uart3_rx_buffer, 1);
     }
 }
 
