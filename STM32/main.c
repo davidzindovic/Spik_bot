@@ -386,6 +386,10 @@ volatile int32_t target_x = 0;
 volatile int32_t target_y = 0;
 volatile int32_t target_o = 0; // Orientacija v stopinjah
 
+float current_x=0;
+float current_y=0;
+float current_o=0;
+
 // Funkcija za izpis stanja spremenljivk nazaj na UART
 void uart_print_current_targets(void) {
     char response[200];
@@ -394,11 +398,11 @@ void uart_print_current_targets(void) {
     int32_t pos_x = (int32_t)motors[0].position;
     int32_t home_x = (int32_t)motors[0].home_position;
 
-    int32_t pos_y = (int32_t)motors[1].position;
-    int32_t home_y = (int32_t)motors[1].home_position;
+    int32_t pos_y = (int32_t)motors[2].position;
+    int32_t home_y = (int32_t)motors[2].home_position;
 
-    int32_t pos_o = (int32_t)motors[2].position;
-    int32_t home_o = (int32_t)motors[2].home_position;
+    int32_t pos_o = (int32_t)motors[1].position;
+    int32_t home_o = (int32_t)motors[1].home_position;
 
     // Izračun relativnih korakov (sedaj so lahko zanesljivo negativni)
     int32_t relative_steps_x = pos_x - home_x;
@@ -406,9 +410,9 @@ void uart_print_current_targets(void) {
     int32_t relative_steps_o = pos_o - home_o;
 
     // Pretvorba v fizikalne enote
-    float current_x = (motors[0].unit_conversion > 0.001f) ? ((float)relative_steps_x / motors[0].unit_conversion) : 0.0f;
-    float current_y = (motors[1].unit_conversion > 0.001f) ? ((float)relative_steps_y / motors[1].unit_conversion) : 0.0f;
-    float current_o = (motors[2].unit_conversion > 0.001f) ? ((float)relative_steps_o / motors[2].unit_conversion) : 0.0f;
+    current_x = (motors[0].unit_conversion > 0.001f) ? ((float)relative_steps_x / motors[0].unit_conversion) : 0.0f;
+    current_y = (motors[2].unit_conversion > 0.001f) ? ((float)relative_steps_y / motors[2].unit_conversion) : 0.0f;
+    current_o = (motors[1].unit_conversion > 0.001f) ? ((float)relative_steps_o / motors[1].unit_conversion) : 0.0f;
 
     // Izpis v terminal
     snprintf(response, sizeof(response),
@@ -543,7 +547,7 @@ int main(void) {
 	    //.end_switch2_pin = GPIO_PIN_15,//D9
 	    //.end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
-		.travel_length=1000, //mm
+		.travel_length=530, //mm
 		.num_steps_per_turn=40000,
 		.num_turns_from_encoder=0,
 		.encoder_A_state = 0,
@@ -560,8 +564,8 @@ int main(void) {
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 1,
-		.direction_plus = 0,
-		.direction_minus = 1,
+		.direction_plus = 1,
+		.direction_minus = 0,
 		.allowed_direction=2,
 		.num_steps_for_switch_release=1000, //spremeni
 		.direction_pin = GPIO_PIN_1,
@@ -586,8 +590,8 @@ int main(void) {
 		//.end_switch1_port = GPIOB,
 	    //.end_switch2_pin = GPIO_PIN_2,//D12
 	    //.end_switch2_port = GPIOI,
-		.unit_conversion=100, //steps per deg
-		.travel_length=170, //deg
+		.unit_conversion=100, //steps per mm
+		.travel_length=105, //mm
 		.num_steps_per_turn=40000,
 		.num_turns_from_encoder=0,
 		.encoder_A_state = 0,
@@ -630,8 +634,8 @@ int main(void) {
 		//.end_switch1_port = GPIOD,
 		//.end_switch2_pin = GPIO_PIN_3,//D13
 		//.end_switch2_port = GPIOD,
-		.unit_conversion=100, //steps per mm
-		.travel_length=300, //mm
+		.unit_conversion=100, //steps per deg
+		.travel_length=60, //deg
 		.num_steps_per_turn=40000,
 		.num_turns_from_encoder=0,
 		.encoder_A_state = 0,
@@ -737,7 +741,7 @@ int main(void) {
     uart3_command_ready = 0;
 
     // Pošlji začetno sporočilo
-    char startup_msg[] = "\n\n\n\n\nSpikBot je pripravljen.\r\n";
+    char startup_msg[] = "\n\n\n\n\n\n\n\n\n\nSpikBot je pripravljen.\r\n";
     HAL_UART_Transmit(&huart3, (uint8_t*)startup_msg, strlen(startup_msg), 100);
 
 	//uart_transmit(text);
@@ -3334,7 +3338,7 @@ void calibrate_motor(uint8_t motor_number)
 	}
 	else
 	{
-		while (motors[motor_number].position > (motors[motor_number].max_position * 9 / 10)) { /* wait */ }
+		while (motors[motor_number].position > (motors[motor_number].max_position * 1 / 10)) { /* wait */ }
 	}
 
 	stop_motor(motor_number);
@@ -3785,10 +3789,12 @@ void execute_robot_movement(void)
     uint32_t last_print_tick = 0;
     const uint32_t print_interval = 200; // Osveževanje na 200 ms (5-krat na sekundo)
 
+    uint32_t d_target = sqrt((target_x-current_x)^2+(target_y-current_y)^2);
+
     // 1. IZRAČUN CILJNIH KORAKOV GLEDE NA HOME POZICIJO
     motors[0].target_position = (uint32_t)((int32_t)motors[0].home_position + (int32_t)(target_x * motors[0].unit_conversion));
-    motors[1].target_position = (uint32_t)((int32_t)motors[1].home_position + (int32_t)(target_y * motors[1].unit_conversion));
-    motors[2].target_position = (uint32_t)((int32_t)motors[2].home_position + (int32_t)(target_o * motors[2].unit_conversion));
+    motors[1].target_position = (uint32_t)((int32_t)motors[1].home_position + (int32_t)(target_o * motors[1].unit_conversion));
+    motors[2].target_position = (uint32_t)((int32_t)motors[2].home_position + (int32_t)(target_y * motors[2].unit_conversion));
 
     // Varnostna omejitev (Saturation), da ne prebijemo kalibracijskih meja
     for (uint8_t m = 0; m <= 2; m++) {
@@ -3810,7 +3816,7 @@ void execute_robot_movement(void)
         }
     }
 
-    // 3. SOČASNI ZAGON: Motor 0 in Motor 1 (X in Y)
+    // 3. SOČASNI ZAGON: Motor 0 in Motor 1 (X in O)
     if (motors[0].position != motors[0].target_position) run_motor(0);
     if (motors[1].position != motors[1].target_position) run_motor(1);
 
@@ -3831,7 +3837,7 @@ void execute_robot_movement(void)
         }
     }
 
-    // 4. SEKVENČNI ZAGON: Motor 2 (Orientacija), ko prva dva zaključita
+    // 4. SEKVENČNI ZAGON: Motor 2 (Y), ko prva dva zaključita
     if (motors[2].position != motors[2].target_position)
     {
         run_motor(2);
