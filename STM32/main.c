@@ -58,12 +58,12 @@ typedef struct {
     uint16_t motor_pin;
     GPIO_TypeDef* motor_port;
 
-    uint32_t max_position; //in numbers of steps
-	uint32_t starting_position;
-    uint32_t position;
-    uint32_t target_position;
-    uint32_t home_position;
-    uint32_t offset;
+    int max_position; //in numbers of steps
+    int starting_position;
+    int position;
+    int target_position;
+    int home_position;
+    int offset;
 	_Bool running;
 
     _Bool reset_requested;
@@ -73,8 +73,8 @@ typedef struct {
     GPIO_TypeDef* end_switch_port;
 	_Bool end_switch_triggered;
 
-	uint32_t unit_conversion; //number of step per mm or deg
-	uint32_t travel_length; //maximum travel length distance of segment
+	int unit_conversion; //number of step per mm or deg
+	int travel_length; //maximum travel length distance of segment
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
 
@@ -304,6 +304,7 @@ void USART3_IRQHandler(void);
 float parse_float_from_string(const char* str);
 
 void execute_robot_movement(void);
+void pospravi_robota(void);
 
 /* USER CODE END PFP */
 
@@ -387,8 +388,12 @@ volatile int32_t target_y = 0;
 volatile int32_t target_o = 0; // Orientacija v stopinjah
 
 float current_x=0;
-float current_y=0;
+float current_y=90;
 float current_o=0;
+float izteg = 0;
+float max_izteg=105;
+
+#define PI 3.141592654
 
 // Funkcija za izpis stanja spremenljivk nazaj na UART
 void uart_print_current_targets(void) {
@@ -410,15 +415,30 @@ void uart_print_current_targets(void) {
     int32_t relative_steps_o = pos_o - home_o;
 
     // Pretvorba v fizikalne enote
-    current_x = (motors[0].unit_conversion > 0.001f) ? ((float)relative_steps_x / motors[0].unit_conversion) : 0.0f;
-    current_y = (motors[2].unit_conversion > 0.001f) ? ((float)relative_steps_y / motors[2].unit_conversion) : 0.0f;
-    current_o = (motors[1].unit_conversion > 0.001f) ? ((float)relative_steps_o / motors[1].unit_conversion) : 0.0f;
+    //current_x = (motors[0].unit_conversion > 0.001f) ? ((float)relative_steps_x / motors[0].unit_conversion) : 0.0f;
+    //current_y = (motors[2].unit_conversion > 0.001f) ? ((float)relative_steps_y / motors[2].unit_conversion) : 0.0f;
+    //current_o = (motors[1].unit_conversion > 0.001f) ? ((float)relative_steps_o / motors[1].unit_conversion) : 0.0f;
+
+    //izteg= (float)relative_steps_y / motors[2].unit_conversion+motors[2].offset;
+
+    /*
+    current_o=(float)relative_steps_o / motors[1].unit_conversion;
+    current_x=(float)relative_steps_x / motors[0].unit_conversion+cos((90-current_o)*PI/180)*izteg;
+    current_y=sin((90-current_o)*PI/180)*izteg;
+	*/
+
+    izteg=motors[2].position/motors[2].unit_conversion;
+
+    current_o=motors[1].position/motors[1].unit_conversion-motors[1].travel_length/2;
+    current_y=izteg*sin((90-current_o)*PI/180);
+    current_x=izteg*cos((90-current_o)*PI/180)+motors[0].position/motors[0].unit_conversion-motors[0].travel_length/2;
 
     // Izpis v terminal
     snprintf(response, sizeof(response),
-             "\r\n[STATUS] Cilj: X=%ld, Y=%ld, O=%ld |\r\n[STATUS] Trenutna lega: X=%.2f mm, Y=%.2f mm, O=%.2f st.\r\n",
+             "\r\n[STATUS] Cilj: X=%d, Y=%d, O=%d \r\n[STATUS] Trenutna lega: X=%.2f mm, Y=%.2f mm, O=%.2f st.\r\n[STATUS] Delujoci motorji: 0:%d | 1:%d | 2:%d\r\n",
              target_x, target_y, target_o,
-             current_x, current_y, current_o);
+             current_x, current_y, current_o,
+			 motors[0].running, motors[1].running, motors[2].running);
 
     HAL_UART_Transmit(&huart3, (uint8_t*)response, strlen(response), 100);
 }
@@ -773,7 +793,7 @@ int main(void) {
 
     char menu[] =
             "\r\n==================================================\r\n"
-            " KALIBRACIJA USPESNO ZAKLJUCENA! Robot je v (0,0,0)\r\n"
+            " KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
             "==================================================\r\n"
             " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
             "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
@@ -781,9 +801,10 @@ int main(void) {
             "  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
             "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
             "--------------------------------------------------\r\n"
-            " Vnesi ukaz in pritisni ENTER:\r\n\r\n";
+            " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n\r\n";
 
 	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+	uart_print_current_targets();
 
 	while (1) {
 		/* USER CODE END WHILE */
@@ -3401,8 +3422,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
             // Inkrement/Dekrement pozicije glede na trenutno smer
             if (motors[0].direction == motors[0].direction_plus) {
                 motors[0].position += 1;
-            } else {
-                if (motors[0].position > 0) motors[0].position -= 1;
+            } else if (motors[0].direction == motors[0].direction_minus)
+            {
+            	motors[0].position -= 1;
             }
 
             // Posodobitev globalnih koordinat za end-effector (opcijsko sproti)
@@ -3423,8 +3445,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         {
             if (motors[1].direction == motors[1].direction_plus) {
                 motors[1].position += 1;
-            } else {
-                if (motors[1].position > 0) motors[1].position -= 1;
+            } else if (motors[1].direction == motors[1].direction_minus)
+            {
+            	motors[1].position -= 1;
             }
 
             effector_y = motors[1].position / motors[1].unit_conversion;
@@ -3789,14 +3812,26 @@ void execute_robot_movement(void)
     uint32_t last_print_tick = 0;
     const uint32_t print_interval = 200; // Osveževanje na 200 ms (5-krat na sekundo)
 
-    uint32_t d_target = sqrt((target_x-current_x)^2+(target_y-current_y)^2);
+    //uint32_t d_target = sqrt((target_x-current_x)^2+(target_y-current_y)^2);
 
     // 1. IZRAČUN CILJNIH KORAKOV GLEDE NA HOME POZICIJO
-    motors[0].target_position = (uint32_t)((int32_t)motors[0].home_position + (int32_t)(target_x * motors[0].unit_conversion));
-    motors[1].target_position = (uint32_t)((int32_t)motors[1].home_position + (int32_t)(target_o * motors[1].unit_conversion));
-    motors[2].target_position = (uint32_t)((int32_t)motors[2].home_position + (int32_t)(target_y * motors[2].unit_conversion));
+    //motors[0].target_position = (uint32_t)((int32_t)motors[0].home_position + (int32_t)(target_x * motors[0].unit_conversion));
+    //motors[1].target_position = (uint32_t)((int32_t)motors[1].home_position + (int32_t)(target_o * motors[1].unit_conversion));
+    //motors[2].target_position = (uint32_t)((int32_t)motors[2].home_position + (int32_t)(target_y * motors[2].unit_conversion));
+
+    //float temp_target= target_x-cos((90-target_o)*PI/180)*izteg;//lokacija vozicka
+
+
+    //izračun potrebnih kotov
+    izteg=sqrt(pow(target_y/cos(target_o*PI/180),2))-motors[2].offset;
+
+    //target_x,target_y,target_o=tocka!!! ločeno se spremeni v premik motorja
+    motors[0].target_position = (int32_t)((target_x-cos((90-target_o)*PI/180)*izteg) * motors[0].unit_conversion+motors[0].max_position/2);
+    motors[1].target_position = (int32_t)(target_o * motors[1].unit_conversion+motors[1].max_position/2);
+    motors[2].target_position = (int32_t)((((target_y-motors[2].offset)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion);
 
     // Varnostna omejitev (Saturation), da ne prebijemo kalibracijskih meja
+    /*
     for (uint8_t m = 0; m <= 2; m++) {
         if ((int32_t)motors[m].target_position < 0) {
             motors[m].target_position = 0;
@@ -3805,6 +3840,7 @@ void execute_robot_movement(void)
             motors[m].target_position = motors[m].max_position;
         }
     }
+    */
 
     // 2. NASTAVITEV SMERI
     for (uint8_t m = 0; m <= 2; m++)
@@ -3826,7 +3862,7 @@ void execute_robot_movement(void)
         // Varnostni izhod ob sprožitvi stikal
         if (motors[0].end_switch_triggered || motors[1].end_switch_triggered) {
             stop_all_motors();
-            uart_transmit("\r\nALERT: Koncno stikalo sprozeno med premikom X/Y!\r\n");
+            serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom X/Y!\r\n");
             return;
         }
 
@@ -3835,6 +3871,10 @@ void execute_robot_movement(void)
             uart_print_current_targets();
             last_print_tick = HAL_GetTick();
         }
+
+        if((motors[0].position>motors[0].target_position && motors[0].direction==motors[0].direction_plus)||(motors[0].position<motors[0].target_position && motors[0].direction==motors[0].direction_minus))stop_motor(0);
+        if((motors[1].position>motors[1].target_position && motors[1].direction==motors[1].direction_plus)||(motors[1].position<motors[1].target_position && motors[1].direction==motors[1].direction_minus))stop_motor(1);
+
     }
 
     // 4. SEKVENČNI ZAGON: Motor 2 (Y), ko prva dva zaključita
@@ -3847,7 +3887,7 @@ void execute_robot_movement(void)
         {
             if (motors[2].end_switch_triggered) {
                 stop_motor(2);
-                uart_transmit("\r\nALERT: Koncno stikalo sprozeno med premikom O!\r\n");
+                serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom O!\r\n");
                 return;
             }
 
@@ -3856,12 +3896,76 @@ void execute_robot_movement(void)
                 uart_print_current_targets();
                 last_print_tick = HAL_GetTick();
             }
+
+            if((motors[2].position>motors[2].target_position && motors[2].direction==motors[2].direction_plus)||(motors[2].position<motors[2].target_position && motors[2].direction==motors[2].direction_minus))stop_motor(2);
+
         }
     }
 
     // Končni izpis ob uspešnem prihodu v točko
-    uart_transmit("\r\nINFO: Premik uspesno zakljucen. Dosezena koncna tocka.\r\n");
+    serial_print_string("\r\nINFO: Premik uspesno zakljucen. Dosezena koncna tocka.\r\n");
     uart_print_current_targets();
+}
+
+void pospravi_robota(void)
+{
+	stop_all_motors();
+
+	motors[0].target_position=0;
+	motors[1].target_position=0;
+	motors[2].target_position=motors[2].offset;
+
+	if(motors[2].position>motors[2].home_position)
+	{
+		motors[2].direction=motors[2].direction_minus;
+	}
+	else if(motors[2].position<motors[2].home_position)
+	{
+		motors[2].direction=motors[2].direction_plus;
+	}
+
+	run_motor(2);
+
+	if(motors[1].position>motors[1].home_position)
+	{
+		motors[1].direction=motors[1].direction_minus;
+	}
+	else if(motors[1].position<motors[1].home_position)
+	{
+		motors[1].direction=motors[1].direction_plus;
+	}
+
+	if(motors[0].position>motors[0].home_position)
+	{
+		motors[0].direction=motors[0].direction_minus;
+	}
+	else if(motors[0].position<motors[0].home_position)
+	{
+		motors[0].direction=motors[0].direction_plus;
+	}
+
+	while(motors[2].position>motors[2].home_position){}
+	stop_motor(2);
+
+	run_motor(1);
+	run_motor(0);
+
+	while(motors[0].running || motors[1].running || motors[2].running)
+	{
+		uart_print_current_targets();
+
+		for(uint8_t num_motor=0;num_motor<2;num_motor++)
+		{
+			if(motors[num_motor].running)
+			{
+				if((motors[num_motor].position<motors[num_motor].home_position && motors[num_motor].direction==motors[num_motor].direction_minus)||(motors[num_motor].position>motors[num_motor].home_position && motors[num_motor].direction==motors[num_motor].direction_plus))
+				{
+					stop_motor(num_motor);
+				}
+			}
+		}
+	}
+	serial_print_string("\r\nRobot je domaci poziciji.\r\n");
 }
 
 void motor_status(void) {
@@ -4146,6 +4250,10 @@ static void MX_USART3_UART_Init(void) {
  */
 void USART3_IRQHandler(void)
 {
+	static uint32_t old_target_x=0;
+	static uint32_t old_target_o=0;
+	static uint32_t old_target_y=0;
+
     // Preveri, ali je interrupt od RXNE (prejet znak)
     if((__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) != RESET) &&
        (__HAL_UART_GET_IT_SOURCE(&huart3, UART_IT_RXNE) != RESET))
@@ -4173,45 +4281,89 @@ void USART3_IRQHandler(void)
                 uart3_command_ready = 1;
                 uart3_new_data = 1;
 
+
                 // --- OBDELAVA UKAZOV ZA ROBOTA (Ignorira velike/male črke) ---
                 if(strncasecmp((char*)uart3_rx_buffer, "x=", 2) == 0)
-                {
+                {//po določitvi željene orientacija določimo x
                     int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
-                    if(val >= robot_bbox.min_x && val <= robot_bbox.max_x) {
-                        target_x = val;
+
+                    //float temp_target= val-cos((90-target_o)*PI/180)*izteg;//lokacija vozicka
+                    float temp_target= val;
+
+                    if(temp_target >= robot_bbox.min_x && temp_target <= robot_bbox.max_x)
+                    	{
+
+                    	target_x = temp_target;
+                    	//old_target_x=target_x;
 
                         uart_print_current_targets();
 
-                    } else {
+                    	}
+
+                	else
+                	{
                         char err[] = "\r\nERROR: X izven Bounding Boxa!\r\n";
                         HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                    }
+                	}
                 }
                 else if(strncasecmp((char*)uart3_rx_buffer, "y=", 2) == 0)
-                {
+                {//po določitvi željene točke x določimo točko y
                     int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
-                    if(val < 0) {
+
+                    /*
+                    float distance = sqrt(pow(val+90,2)+pow(target_x,2));
+                    if (distance>max_izteg)
+                    {
+                    	char err[] = "\r\nERROR: Pri trenutnih pogojih je y komponenta predalec!\r\n";
+						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                    */
+
+                    float temp_target=val+motors[2].offset;
+                    float x_component=(temp_target-0)/tan((90-target_o)*PI/180);
+
+                    if(val < 0)
+                    {
                         char err[] = "\r\nERROR: Y mora biti pozitiven!\r\n";
                         HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                    } else if(val >= robot_bbox.min_y && val <= robot_bbox.max_y) {
-                        target_y = val;
+                    }
+                    else if((x_component<robot_bbox.min_x) || (x_component>robot_bbox.max_x))
+                    {
+                    	char err[] = "\r\nERROR: Y izven Bounding Boxa (x component)!\r\n";
+						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                    else if(temp_target >= robot_bbox.min_y && temp_target <= robot_bbox.max_y)
+                    {
+
+                        target_y = temp_target;
+                        //old_target_y=target_y;
 
                         uart_print_current_targets();
 
-                    } else {
+                    }
+                    else
+                    {
                         char err[] = "\r\nERROR: Y izven Bounding Boxa!\r\n";
                         HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
                     }
                 }
                 else if(strncasecmp((char*)uart3_rx_buffer, "O=", 2) == 0)
-                {
+                {//orientacijo določimo prvo
                     int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
-                    if(val >= -30 && val <= 30) {
+
+                    //float temp_x= target_x-cos((90-val)*PI/180)*izteg;
+                    //float temp_y= target_y-sin((90-val)*PI/180)*izteg;//90 JE OFFSET
+
+                    if((val >= -30 && val <= 30)) {/*&& (temp_y>robot_bbox.min_y && temp_y<robot_bbox.max_y) && (temp_x>robot_bbox.min_x && temp_x<robot_bbox.max_x)*/
                         target_o = val;
+                        //target_x = old_target_x-cos((90-target_o)*PI/180)*izteg;
+                        //target_y = sin((90-target_o)*PI/180)*izteg;
 
                         uart_print_current_targets();
 
-                    } else {
+                    }
+                    else
+                    {
                         char err[] = "\r\nERROR: Orientacija izven dovoljenega obmocja (+/- 30 st.)!\r\n";
                         HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
                     }
@@ -4223,6 +4375,14 @@ void USART3_IRQHandler(void)
 
                     // Izvedba premika
                     execute_robot_movement();
+                }
+                else if(strcasecmp((char*)uart3_rx_buffer, "exit") == 0)
+                {
+                    char msg[] = "\r\nEXIT: Pospravljam robota...\r\n";
+                    HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+                    // Izvedba premika
+                    pospravi_robota();
                 }
                 else
                 {
