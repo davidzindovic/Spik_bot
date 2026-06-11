@@ -375,10 +375,10 @@ typedef struct {
 // Nastavi poljubne meje varnega območja v mm
 // med stikali J1 60cm, voziček 10cm
 volatile BoundingBox_t robot_bbox = {
-    .min_x = -(600-100)/2,
-    .max_x = (600-100)/2,
-    .min_y = 0,     // Y je lahko samo pozitiven
-    .max_y = 100
+    .min_x = -530/2,
+    .max_x = 530/2,
+    .min_y = 90,     // Y je lahko samo pozitiven
+    .max_y = 90+105
 };
 
 // Željene ciljne koordinate (nastavljene preko UART)
@@ -537,7 +537,7 @@ int main(void) {
 		.starting_position = 5000,
 	    .position = 0,
 		.target_position=0,
-		.offset=30,//odmik od osi vrtenja v mm? popravi
+		.offset=0,
 		.running = false,
 	    .reset_requested = false,
 	    .reset_completed = false,
@@ -579,7 +579,7 @@ int main(void) {
 		.starting_position=5000,
 		.position = 0,
 		.target_position=0,
-		.offset=0,//tukaj offset v deg?
+		.offset=90,//tukaj offset v deg?
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
@@ -623,7 +623,7 @@ int main(void) {
 		.starting_position=5000,
 		.position = 0,
 		.target_position=0,
-		.offset=50,//odmik od osi vrtenja v mm? popravi
+		.offset=0,
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
