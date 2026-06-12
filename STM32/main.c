@@ -3420,11 +3420,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         if (motors[0].running == true)
         {
             // Inkrement/Dekrement pozicije glede na trenutno smer
-            if (motors[0].direction == motors[0].direction_plus) {
-                motors[0].position += 1;
-            } else if (motors[0].direction == motors[0].direction_minus)
+            if (motors[0].direction == motors[0].direction_plus && motors[0].position<motors[0].max_position)
             {
-            	motors[0].position -= 1;
+                motors[0].position += 1;
+            }
+            else if (motors[0].direction == motors[0].direction_minus && motors[0].position>0)
+			{
+                motors[0].position -= 1;
             }
 
             // Posodobitev globalnih koordinat za end-effector (opcijsko sproti)
@@ -3443,11 +3445,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     {
         if (motors[1].running == true)
         {
-            if (motors[1].direction == motors[1].direction_plus) {
-                motors[1].position += 1;
-            } else if (motors[1].direction == motors[1].direction_minus)
+            if (motors[1].direction == motors[1].direction_plus && motors[1].position<motors[1].max_position)
             {
-            	motors[1].position -= 1;
+                motors[1].position += 1;
+            }
+            else if (motors[1].direction == motors[1].direction_minus && motors[1].position>0)
+			{
+                motors[1].position -= 1;
             }
 
             effector_y = motors[1].position / motors[1].unit_conversion;
@@ -3465,10 +3469,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     {
         if (motors[2].running == true)
         {
-            if (motors[2].direction == motors[2].direction_plus) {
+            if (motors[2].direction == motors[2].direction_plus && motors[2].position<motors[2].max_position)
+            {
                 motors[2].position += 1;
-            } else {
-                if (motors[2].position > 0) motors[2].position -= 1;
+            }
+            else if (motors[2].direction == motors[2].direction_minus && motors[2].position>0)
+			{
+                motors[2].position -= 1;
             }
 
             effector_orientation = motors[2].position / mapFloat(motors[2].unit_conversion, 0, 1, 0, 1); // oz. vaša pretvorba stopinj
@@ -3913,38 +3920,31 @@ void pospravi_robota(void)
 
 	motors[0].target_position=0;
 	motors[1].target_position=0;
-	motors[2].target_position=motors[2].offset;
+	motors[2].target_position=motors[2].offset+motors[2].starting_position/motors[2].unit_conversion;
 
-	if(motors[2].position>motors[2].home_position)
+	target_x=0;
+	target_y=motors[2].offset+motors[2].starting_position/motors[2].unit_conversion;
+	target_o=0;
+
+	for (uint8_t mo=0;mo<3;mo++)
 	{
-		motors[2].direction=motors[2].direction_minus;
-	}
-	else if(motors[2].position<motors[2].home_position)
-	{
-		motors[2].direction=motors[2].direction_plus;
+		if(motors[mo].position>motors[mo].home_position)
+		{
+			direction_change(mo,motors[mo].direction_minus);
+		}
+		else if(motors[mo].position<motors[mo].home_position)
+		{
+			direction_change(mo,motors[mo].direction_plus);
+		}
 	}
 
 	run_motor(2);
 
-	if(motors[1].position>motors[1].home_position)
-	{
-		motors[1].direction=motors[1].direction_minus;
-	}
-	else if(motors[1].position<motors[1].home_position)
-	{
-		motors[1].direction=motors[1].direction_plus;
-	}
 
-	if(motors[0].position>motors[0].home_position)
+	while(motors[2].position>motors[2].home_position)
 	{
-		motors[0].direction=motors[0].direction_minus;
+		uart_print_current_targets();
 	}
-	else if(motors[0].position<motors[0].home_position)
-	{
-		motors[0].direction=motors[0].direction_plus;
-	}
-
-	while(motors[2].position>motors[2].home_position){}
 	stop_motor(2);
 
 	run_motor(1);
