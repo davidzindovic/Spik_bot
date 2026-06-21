@@ -188,7 +188,7 @@ TIM_HandleTypeDef htim1;  // Example timer handles - adjust based on which timer
 TIM_HandleTypeDef htim15;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim12;
-TIM_HandleTypeDef htim6;
+TIM_HandleTypeDef htim8;
 
 MMC_HandleTypeDef hmmc1;
 
@@ -229,7 +229,7 @@ extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim12;
-//extern TIM_HandleTypeDef htim6;
+
 
 motor_struct_t motors[4]; // Declaration only
 
@@ -368,8 +368,8 @@ static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val);
 static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *val);
 static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *val);
 static void VL53L0X_PerformSPADCalibration(void);
-static void MX_TIM6_Init(void);
-void TIM6_DAC_IRQHandler(void);
+static void MX_TIM8_Init(void);
+void TIM8_DAC_IRQHandler(void);
 void VL53L0X_Diagnose(void);
 void DC_Motor_Init(void);
 void DC_Motor_Update(uint16_t distance_mm);
@@ -453,7 +453,7 @@ int main(void) {
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 
 	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);  /* highest priority */
-	HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 8, 0);  /* lower than SysTick */
+	HAL_NVIC_SetPriority(TIM8_DAC_IRQn, 8, 0);  /* lower than SysTick */
 
     uint32_t RNG_PTR[2];
     for(uint8_t i=0;i<30;i++)rx_buff[i]='\0';
@@ -562,7 +562,7 @@ int main(void) {
 		VL53L0X_Init();
 		HAL_Delay(100);
 		VL53L0X_Diagnose();
-		MX_TIM6_Init();
+		MX_TIM8_Init();
 		//DC_Motor_Init();
 	} else {
 		serial_print_string("Senzorja na 0x52 ni. Preskakujem init, da preprecim HardFault.\r\n");
@@ -2133,6 +2133,14 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Alternate = GPIO_AF2_TIM12;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+	/*Configure GPIO pin : PB15 */
+	GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;
+	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
 	GPIO_InitStruct.Pin = GPIO_PIN_6;
     //GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -2434,21 +2442,21 @@ void DC_Motor_Set_Speed(int16_t speed) {
 
     if (speed >= 0) {
         /* SMER NAPREJ */
-        // IN2A (PF8) postavimo na LOW (0V)
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+        // IN2A (PB4) postavimo na LOW (0V)
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 
-        // IN1A (PA6) dobi standardni PWM signal (gasi/pali mostiček proti masi)
-        __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, (uint32_t)speed);
+        // IN1A (PH15) dobi standardni PWM signal (gasi/pali mostiček proti masi)
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)speed);
     }
     else {
         /* SMER NAZAJ */
-        // IN2A (PF8) postavimo na HIGH (3.3V)
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+        // IN2A (PB4) postavimo na HIGH (3.3V)
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
 
-        // Ker je IN2 sedaj HIGH, moramo na IN1 (PA6) poslati INVERZNI PWM,
+        // Ker je IN2 sedaj HIGH, moramo na IN1 (PH15) poslati INVERZNI PWM,
         // da motor vidi razliko napetosti (npr. če želimo 30% moči, mora biti PWM na 70%)
         int16_t inverse_speed = 999 - (-speed);
-        __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, (uint32_t)inverse_speed);
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)inverse_speed);
     }
 }
 
@@ -3404,9 +3412,9 @@ uint16_t VL53L0X_ReadDistance(void) {
 }
 
 /* ================================================================
- * Periodic TIM interrupt – configure ONE free timer (e.g. TIM6)
+ * Periodic TIM interrupt – configure ONE free timer (e.g. TIM8)
  *
- * TIM6 is a basic timer, perfect for this – no PWM pins needed.
+ * TIM8 is a basic timer, perfect for this – no PWM pins needed.
  * Period = (PSC+1)*(ARR+1) / TIM_CLK
  * With TIM_CLK = 200 MHz (D2 domain after PLL1):
  *   PSC = 9999  → 20 kHz tick
@@ -3414,32 +3422,32 @@ uint16_t VL53L0X_ReadDistance(void) {
  * Adjust ARR to taste.
  * ================================================================ */
 
-static void MX_TIM6_Init(void) {
-    __HAL_RCC_TIM6_CLK_ENABLE();
+static void MX_TIM8_Init(void) {
+    __HAL_RCC_TIM8_CLK_ENABLE();
 
-    /* Force the RCC write to complete before touching TIM6 registers.
+    /* Force the RCC write to complete before touching TIM8 registers.
        Without this, the AHB write buffer can still be pending when
-       HAL_TIM_Base_Init writes TIM6->CR1, causing an imprecise bus fault. */
+       HAL_TIM_Base_Init writes TIM8->CR1, causing an imprecise bus fault. */
     __DSB();
     __ISB();
 
-    htim6.Instance               = TIM6;
-    htim6.Init.Prescaler         = 9999;   /* 200 MHz / 10000 = 20 kHz */
-    htim6.Init.CounterMode       = TIM_COUNTERMODE_UP;
-    htim6.Init.Period             = 1999;   /* 20 kHz / 2000 = 10 Hz = 100 ms */
-    htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    htim8.Instance               = TIM8;
+    htim8.Init.Prescaler         = 9999;   /* 200 MHz / 10000 = 20 kHz */
+    htim8.Init.CounterMode       = TIM_COUNTERMODE_UP;
+    htim8.Init.Period             = 1999;   /* 20 kHz / 2000 = 10 Hz = 100 ms */
+    htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 
-    if (HAL_TIM_Base_Init(&htim6) != HAL_OK) Error_Handler();
+    if (HAL_TIM_Base_Init(&htim8) != HAL_OK) Error_Handler();
 
-    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 8, 0);
-    HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+    HAL_NVIC_SetPriority(TIM8_DAC_IRQn, 8, 0);
+    HAL_NVIC_EnableIRQ(TIM8_DAC_IRQn);
 
-    HAL_TIM_Base_Start_IT(&htim6);   /* start immediately */
+    HAL_TIM_Base_Start_IT(&htim8);   /* start immediately */
 }
 
 /* IRQ handler – put this with your other IRQ handlers */
-void TIM6_DAC_IRQHandler(void) {
-    HAL_TIM_IRQHandler(&htim6);
+void TIM8_DAC_IRQHandler(void) {
+    HAL_TIM_IRQHandler(&htim8);
 }
 
 /* USER CODE END 4 */
@@ -3794,7 +3802,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			motors[3].position -= 1;
 		}
     }
-    if (htim->Instance == TIM6) {
+    if (htim->Instance == TIM8) {
             vl53_data_ready  = 1;
     }
 }
