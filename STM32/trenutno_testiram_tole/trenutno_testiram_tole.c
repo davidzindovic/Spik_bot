@@ -58,10 +58,12 @@ typedef struct {
     uint16_t motor_pin;
     GPIO_TypeDef* motor_port;
 
-    uint32_t max_position; //in numbers of steps
-	uint32_t starting_position;
-    uint32_t position;
-    uint32_t offset;
+    int max_position; //in numbers of steps
+    int starting_position;
+    int position;
+    int target_position;
+    int home_position;
+    int offset;
 	_Bool running;
 
     _Bool reset_requested;
@@ -71,23 +73,10 @@ typedef struct {
     GPIO_TypeDef* end_switch_port;
 	_Bool end_switch_triggered;
 
-	uint32_t unit_conversion; //number of mm or deg per step
-	uint32_t travel_length; //maximum travel length distance of segment
+	int unit_conversion; //number of step per mm or deg
+	int travel_length; //maximum travel length distance of segment
 
 	uint32_t num_steps_per_turn; //number of steps per rotation (360°)
-
-	uint32_t num_turns_from_encoder;
-
-	//encoder only one cable per channel due to lack of pins
-	uint32_t encoder_A_state;
-	uint16_t encoder_A_pin;
-    GPIO_TypeDef* encoder_A_port;
-	uint32_t encoder_B_state;
-	uint16_t encoder_B_pin;
-    GPIO_TypeDef* encoder_B_port;
-	_Bool encoder_Z_state;
-	uint16_t encoder_Z_pin;
-    GPIO_TypeDef* encoder_Z_port;
 
 }motor_struct_t;
 
@@ -126,13 +115,13 @@ typedef struct {
  *  Note: TIM13_CH1 je na PA6 (AF9) — PF8 nima timer AF na STM32H750XB.
  *        PF8 se uporablja kot navaden GPIO za smer.
  */
-#define DC_IN1_PORT         GPIOA
-#define DC_IN1_PIN          GPIO_PIN_6          /* A6 – TIM13_CH1 AF9 – PWM */
-#define DC_IN2_PORT         GPIOF
-#define DC_IN2_PIN          GPIO_PIN_8          /* A1 – GPIO output, direction control */
+#define DC_IN1_PORT         GPIOH
+#define DC_IN1_PIN          GPIO_PIN_15          /* PH15 – TIM8_CH3 AF – PWM */
+#define DC_IN2_PORT         GPIOB
+#define DC_IN2_PIN          GPIO_PIN_4          /* D10 – GPIO output, direction control */
 
-#define DC_BTN_PORT         GPIOA
-#define DC_BTN_PIN          GPIO_PIN_1          /* A3 – EXTI1, active LOW */
+//#define DC_BTN_PORT         GPIOA
+//#define DC_BTN_PIN          GPIO_PIN_1          /* A3 – EXTI1, active LOW */
 
 #define DC_TIM_PERIOD       999U    /* ARR  → 1000 steps resolution              */
 #define DC_TIM_PRESCALER    199U    /* 200 MHz / 200 / 1000 = 1 kHz PWM freq     */
@@ -211,8 +200,6 @@ const osThreadAttr_t defaultTask_attributes = {
 /* USER CODE BEGIN PV */
 __IO uint32_t ButtonState = 0;
 
-I2C_HandleTypeDef hi2c4;    // Ročaj za I2C4 perifernik
-
 volatile float target_pressure = 0.0f;     // Ciljni tlak iz UART3
 volatile uint8_t uart3_rx_buffer[32];      // Buffer za sprejem
 volatile uint8_t uart3_rx_index = 0;       // Indeks v bufferju
@@ -229,7 +216,6 @@ extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim12;
-
 
 motor_struct_t motors[4]; // Declaration only
 
@@ -302,6 +288,7 @@ void test_motor(uint8_t motor_number);
 void test_all_motors();
 void demo_za_predstavitev();
 void move_motor_2_end_switch(uint8_t motor_number, _Bool direction);
+void calibrate_all_motors(void);
 
 void process_encoder(uint8_t encoder_number, _Bool A, _Bool B, _Bool Z);
 
@@ -333,9 +320,8 @@ void USART3_Pin_Init(void);
 void configure_end_switch_interrupts(void);
 //void EXTI2_IRQHandler(void);
 void EXTI3_IRQHandler(void);
-void EXTI4_IRQHandler(void);
+void EXTI2_IRQHandler(void);
 void EXTI15_10_IRQHandler(void);
-void EXTI1_IRQHandler(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 //void USART_write(int ch);
 
@@ -361,6 +347,7 @@ void USART3_IRQHandler(void);
 float parse_float_from_string(const char* str);
 
 static void MX_I2C4_Init(void);
+void I2C4_BusRecovery(void);
 void VL53L0X_Init(void);
 uint16_t VL53L0X_ReadDistance(void);
 void VL53L0X_LoadTuningSettings(void);
@@ -368,26 +355,36 @@ static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val);
 static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *val);
 static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *val);
 static void VL53L0X_PerformSPADCalibration(void);
+static HAL_StatusTypeDef VL53L0X_PerformRefCalibration(void);
 static void MX_TIM8_Init(void);
 void TIM8_DAC_IRQHandler(void);
 void VL53L0X_Diagnose(void);
 void DC_Motor_Init(void);
 void DC_Motor_Update(uint16_t distance_mm);
 void DC_Motor_Set_Speed(int16_t speed);
+
+void execute_robot_movement(void);
+void pospravi_robota(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 TS_Init_t *hTSs;
 
-__attribute__((aligned(32))) char rx_buff[32];        // padded to cache line size
-__attribute__((aligned(32))) uint8_t uart_rx_buffer[32];
+#define BUFFER_SIZE 30
+
+char rx_buff[BUFFER_SIZE];
 //char rcv_buff[30];
 
 uint32_t timing_uart = 0;
 uint32_t limit_uart = 5; //mej osveževanja
 
-uint8_t uart_rx_index = 0;
+#define UART_RX_BUFFER_SIZE 64
+char uart_rx_buffer[UART_RX_BUFFER_SIZE];
+uint16_t uart_rx_index = 0;
+uint8_t uart_single_byte; // Tukaj HAL shrani zadnji prejeti znak
+extern UART_HandleTypeDef huart3;
 
 uint8_t podatki;
 char vnos[100];
@@ -432,6 +429,85 @@ uint8_t vl53_stop_variable = 0;   /* used in Init and referenced via extern */
 //_Bool end_switch1_triggered=0;
 //_Bool end_switch2_triggered=0;
 
+
+// Bounding Box definicija (v mm)
+typedef struct {
+    int32_t min_x;
+    int32_t max_x;
+    int32_t min_y;
+    int32_t max_y;
+} BoundingBox_t;
+
+// Nastavi poljubne meje varnega območja v mm
+// med stikali J1 60cm, voziček 10cm
+volatile BoundingBox_t robot_bbox = {
+    .min_x = -530/2,
+    .max_x = 530/2,
+    .min_y = 90,     // Y je lahko samo pozitiven
+    .max_y = 90+105
+};
+
+// Željene ciljne koordinate (nastavljene preko UART)
+volatile int32_t target_x = 0;
+volatile int32_t target_y = 0;
+volatile int32_t target_o = 0; // Orientacija v stopinjah
+
+float current_x=0;
+float current_y=90;
+float current_o=0;
+float izteg = 0;
+float max_izteg=105;
+
+#define PI 3.141592654
+
+// Funkcija za izpis stanja spremenljivk nazaj na UART
+void uart_print_current_targets(void) {
+    char response[200];
+
+    // Eksplicitno pretvorimo obe vrednosti v int32_t pred odštevanjem!
+    int32_t pos_x = (int32_t)motors[0].position;
+    int32_t home_x = (int32_t)motors[0].home_position;
+
+    int32_t pos_y = (int32_t)motors[2].position;
+    int32_t home_y = (int32_t)motors[2].home_position;
+
+    int32_t pos_o = (int32_t)motors[1].position;
+    int32_t home_o = (int32_t)motors[1].home_position;
+
+    // Izračun relativnih korakov (sedaj so lahko zanesljivo negativni)
+    int32_t relative_steps_x = pos_x - home_x;
+    int32_t relative_steps_y = pos_y - home_y;
+    int32_t relative_steps_o = pos_o - home_o;
+
+    // Pretvorba v fizikalne enote
+    //current_x = (motors[0].unit_conversion > 0.001f) ? ((float)relative_steps_x / motors[0].unit_conversion) : 0.0f;
+    //current_y = (motors[2].unit_conversion > 0.001f) ? ((float)relative_steps_y / motors[2].unit_conversion) : 0.0f;
+    //current_o = (motors[1].unit_conversion > 0.001f) ? ((float)relative_steps_o / motors[1].unit_conversion) : 0.0f;
+
+    //izteg= (float)relative_steps_y / motors[2].unit_conversion+motors[2].offset;
+
+    /*
+    current_o=(float)relative_steps_o / motors[1].unit_conversion;
+    current_x=(float)relative_steps_x / motors[0].unit_conversion+cos((90-current_o)*PI/180)*izteg;
+    current_y=sin((90-current_o)*PI/180)*izteg;
+	*/
+
+    izteg=motors[2].position/motors[2].unit_conversion;
+
+    current_o=motors[1].position/motors[1].unit_conversion-motors[1].travel_length/2;
+    current_y=izteg*sin((90-current_o)*PI/180);
+    current_x=izteg*cos((90-current_o)*PI/180)+motors[0].position/motors[0].unit_conversion-motors[0].travel_length/2;
+
+    // Izpis v terminal
+    snprintf(response, sizeof(response),
+             "\r\n[STATUS] Cilj: X=%d, Y=%d, O=%d \r\n[STATUS] Trenutna lega: X=%.2f mm, Y=%.2f mm, O=%.2f st.\r\n[STATUS] Delujoci motorji: 0:%d | 1:%d | 2:%d\r\n",
+             target_x, target_y, target_o,
+             current_x, current_y, current_o,
+			 motors[0].running, motors[1].running, motors[2].running);
+
+    HAL_UART_Transmit(&huart3, (uint8_t*)response, strlen(response), 100);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -439,6 +515,7 @@ uint8_t vl53_stop_variable = 0;   /* used in Init and referenced via extern */
  * @retval int
  */
 int main(void) {
+
 	CPU_CACHE_Enable();
 	HAL_Init();
 
@@ -450,44 +527,23 @@ int main(void) {
     __DSB();
     __ISB();
 
-	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-
 	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);  /* highest priority */
 	HAL_NVIC_SetPriority(TIM8_DAC_IRQn, 8, 0);  /* lower than SysTick */
 
-    uint32_t RNG_PTR[2];
-    for(uint8_t i=0;i<30;i++)rx_buff[i]='\0';
+	uint32_t RNG_PTR[2];
+	for(uint8_t i=0;i<30;i++)rx_buff[i]='\0';
+	for(uint8_t i=0;i<30;i++)uart_rx_buffer[i]='\0';
 
-	/*
-	// TESTNI BLOK: Prisilni preklop na 0V
-	__HAL_RCC_GPIOD_CLK_ENABLE();
-	GPIO_InitTypeDef GPIO_TestStruct = {0};
-	GPIO_TestStruct.Pin = GPIO_PIN_12 | GPIO_PIN_13;
-	GPIO_TestStruct.Mode = GPIO_MODE_OUTPUT_PP; // Push-pull (najmočnejši izhod)
-	GPIO_TestStruct.Pull = GPIO_NOPULL;
-	GPIO_TestStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(GPIOD, &GPIO_TestStruct);
+	/* USER CODE BEGIN 1 */
+	 //CPU_CACHE_Enable();
+	/* USER CODE END 1 */
 
-	while(1) {
-	    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13, GPIO_PIN_RESET); // Prisili na 0V
-	    HAL_Delay(3000); // Zdaj bi voltmeter MORAL kazati 0V
-	    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13, GPIO_PIN_SET);   // Prisili na 3.3V
-	    HAL_Delay(3000);
-	}
-	*/
+	/* MCU Configuration--------------------------------------------------------*/
 
-
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	//HAL_Init();
 	// Add right after HAL_Init():
-	/*
-	ADC1->CR |= ADC_CR_ADEN | ADC_CR_BOOST;  // 0x10010001
-	while(!(ADC1->ISR & ADC_ISR_ADRDY));
 
-	ADC2->CR |= ADC_CR_ADEN | ADC_CR_BOOST;  // 0x10010001
-	while(!(ADC2->ISR & ADC_ISR_ADRDY));
-
-	ADC3->CR |= ADC_CR_ADEN | ADC_CR_BOOST;  // 0x10010001
-	while(!(ADC3->ISR & ADC_ISR_ADRDY));
-	*/
 	/* USER CODE BEGIN Init */
 
 	/* USER CODE END Init */
@@ -497,21 +553,12 @@ int main(void) {
 	PeriphCommonClock_Config();
 
 
-	/* Configure the peripherals common clocks */
-
-
 	/* USER CODE BEGIN SysInit */
 
 	/* USER CODE END SysInit */
 
 	/* Initialize all configured peripherals */
 
-
-	/* 1. Popolnoma onemogoči QSPI, da sprosti Port D */
-
-
-
-	// Add these after your clock configuration
 	__HAL_RCC_TIM1_CLK_ENABLE();
 	__HAL_RCC_TIM3_CLK_ENABLE();
 	__HAL_RCC_TIM15_CLK_ENABLE();
@@ -528,9 +575,6 @@ int main(void) {
 
 	if (!uart_blocks_disabled) {MX_USART3_UART_Init();}
 
-
-
-
 	I2C4_BusRecovery();
 	HAL_Delay(10);
 
@@ -544,7 +588,7 @@ int main(void) {
 	HAL_GPIO_WritePin(GPIOG, GPIO_PIN_6, GPIO_PIN_RESET); // Poskusi za trenutek sprostiti CS
 
 
-	serial_print_string("Skeniram naslove na I2C4 (8-bit format)...\r\n");
+		serial_print_string("Skeniram naslove na I2C4 (8-bit format)...\r\n");
 	char msg[32];
 	for(uint16_t i = 1; i < 255; i++) {
 		// STM32 HAL skener preverja sode (pisanje) naslove
@@ -568,32 +612,30 @@ int main(void) {
 		serial_print_string("Senzorja na 0x52 ni. Preskakujem init, da preprecim HardFault.\r\n");
 	}
 
-	/* 5. Inicializacija senzorja */
-   // VL53L0X_Init();
-
-
+	//GPIO initialization
+	//MX_GPIO_Init();
+	//MX_USART3_UART_Init();
 	//HAL_UART_Receive_IT(&huart3, rx_buff_usb, 10);
 	MX_USART1_UART_Init();
-	// Clear any pending interrupts
-	//__HAL_UART_CLEAR_FLAG(&huart1, UART_CLEAR_TCF | UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_FEF | UART_CLEAR_PEF);
-
-	// Enable RX interrupt in NVIC
-	//HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);
-	//HAL_NVIC_EnableIRQ(USART1_IRQn);
-
-	// Enable RX interrupt in USART peripheral
-	//__HAL_UART_ENABLE_IT(&huart1, UART_IT_RXNE);
 
 	// Start receiving - THIS IS CRITICAL!
+	//HAL_UART_Receive_IT(&huart1, rx_buff, 30);  // Receive 1 byte at a time
+	//HAL_UART_Receive_IT(&huart3, &uart_single_byte, 1);
+    //Debug_USART1_Config();
+
 	SCB_InvalidateDCache_by_Addr((uint32_t*)rx_buff, 32);
 	HAL_UART_Receive_IT(&huart1, (uint8_t*)rx_buff, 30);  // Receive 1 byte at a time
-    //Debug_USART1_Config();
 
 	//Timer initialization
 	MX_TIM1_Init();
 	MX_TIM15_Init();
 	MX_TIM3_Init();
 	MX_TIM12_Init();
+
+	// Nastavi časovnike na višjo prioriteto (npr. 3), da lahko prekinjajo UART
+	HAL_NVIC_SetPriority(USART3_IRQn, 6, 0);
+	HAL_NVIC_SetPriority(TIM3_IRQn, 3, 0);
+	//HAL_NVIC_SetPriority(TIM1_BRK_UP_TRG_COM_IRQn, 3, 0);
 
 	/* USER CODE BEGIN 2 */
 	// freq=100000 -> hitro
@@ -611,36 +653,26 @@ int main(void) {
 	    .direction_port = GPIOG,//D2
 	    .timer = &htim3,
 	    .timer_channel = TIM_CHANNEL_1,
-		.frequency = 50000,
+		.frequency = 30000,
 	    .motor_pin = GPIO_PIN_6,//D3
 	    .motor_port = GPIOA,
-	    .max_position = 100000,
+	    .max_position = 10000000,
 		.starting_position = 5000,
 	    .position = 0,
-		.offset=30,//odmik od osi vrtenja v mm? popravi
+		.target_position=0,
+		.offset=0,
 		.running = false,
 	    .reset_requested = false,
 	    .reset_completed = false,
 	    .end_switch_pin = GPIO_PIN_3,//D8
 	    .end_switch_port = GPIOE,
 		.end_switch_triggered = 0,
-	    //.end_switch2_pin = GPIO_PIN_15,//D9
-	    //.end_switch2_port = GPIOH,
+
 		.unit_conversion=100, //steps per mm
-		.travel_length=1000, //mm
-		.num_steps_per_turn=40000,
-		.num_turns_from_encoder=0,
-		.encoder_A_state = 0,
-		.encoder_A_pin = GPIO_PIN_3,
-	    .encoder_A_port = GPIOE,
-		.encoder_B_state = 0,
-		.encoder_B_pin = GPIO_PIN_3,
-	    .encoder_B_port = GPIOE,
-		.encoder_Z_state = 0,
-		.encoder_Z_pin = GPIO_PIN_3,
-	    .encoder_Z_port = GPIOE
+		.travel_length=530, //mm
+		.num_steps_per_turn=40000
 	};
-	motors[1] = (motor_struct_t){
+	motors[2] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 1,
@@ -652,38 +684,26 @@ int main(void) {
 		.direction_port = GPIOK,//D4
 		.timer = &htim1,
 		.timer_channel = TIM_CHANNEL_1,
-		.frequency = 50000,
+		.frequency = 30000,
 		.motor_pin = GPIO_PIN_8,//D5
 		.motor_port = GPIOA,
-		.max_position = 100000,
+		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
-		.offset=0,//tukaj offset v deg?
+		.target_position=0,
+		.offset=90,//tukaj offset v deg?
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch_pin = GPIO_PIN_15,//D9
-		.end_switch_port = GPIOH,
+		.end_switch_pin = GPIO_PIN_3,//bilo 15
+		.end_switch_port = GPIOD,//bilo H
 		.end_switch_triggered = 0,
-		//.end_switch1_pin = GPIO_PIN_4,//D10
-		//.end_switch1_port = GPIOB,
-	    //.end_switch2_pin = GPIO_PIN_2,//D12
-	    //.end_switch2_port = GPIOI,
-		.unit_conversion=100, //steps per deg
-		.travel_length=170, //deg
-		.num_steps_per_turn=40000,
-		.num_turns_from_encoder=0,
-		.encoder_A_state = 0,
-		.encoder_A_pin = GPIO_PIN_3,
-	    .encoder_A_port = GPIOE,
-		.encoder_B_state = 0,
-		.encoder_B_pin = GPIO_PIN_3,
-	    .encoder_B_port = GPIOE,
-		.encoder_Z_state = 0,
-		.encoder_Z_pin = GPIO_PIN_3,
-	    .encoder_Z_port = GPIOE
+
+		.unit_conversion=100, //steps per mm
+		.travel_length=105, //mm
+		.num_steps_per_turn=40000
 	};
-	motors[2] = (motor_struct_t){
+	motors[1] = (motor_struct_t){
 		.max_speed = 10000,
 		.current_speed = 0,
 		.direction = 1,
@@ -695,36 +715,24 @@ int main(void) {
 		.direction_port = GPIOI,//D7
 		.timer = &htim15,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 50000,
+		.frequency = 30000,
 		.motor_pin = GPIO_PIN_6,//D6
 		.motor_port = GPIOE,
-		.max_position = 100000,
+		.max_position = 10000000,
 		.starting_position=5000,
 		.position = 0,
-		.offset=50,//odmik od osi vrtenja v mm? popravi
+		.target_position=0,
+		.offset=0,
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch_pin = GPIO_PIN_3,//D10
-		.end_switch_port = GPIOD,//prej PB4
+		.end_switch_pin = GPIO_PIN_2,//D10
+		.end_switch_port = GPIOI,//prej PB4
 		.end_switch_triggered = 0,
-		//.end_switch1_pin = GPIO_PIN_13,//D14
-		//.end_switch1_port = GPIOD,
-		//.end_switch2_pin = GPIO_PIN_3,//D13
-		//.end_switch2_port = GPIOD,
-		.unit_conversion=100, //steps per mm
-		.travel_length=300, //mm
-		.num_steps_per_turn=40000,
-		.num_turns_from_encoder=0,
-		.encoder_A_state = 0,
-		.encoder_A_pin = GPIO_PIN_3,
-	    .encoder_A_port = GPIOE,
-		.encoder_B_state = 0,
-		.encoder_B_pin = GPIO_PIN_3,
-	    .encoder_B_port = GPIOE,
-		.encoder_Z_state = 0,
-		.encoder_Z_pin = GPIO_PIN_3,
-	    .encoder_Z_port = GPIOE
+
+		.unit_conversion=100, //steps per deg
+		.travel_length=60, //deg
+		.num_steps_per_turn=40000
 	};
 	motors[3] = (motor_struct_t){ //max 50000 freq
 		.max_speed = 10000, //pomembno za max pretok
@@ -744,6 +752,7 @@ int main(void) {
 		.max_position = 10000,
 		.starting_position=5000,
 		.position = 0,
+		.target_position=0,
 		.offset=0,//odmik od osi vrtenja v mm?
 		.running = false,
 
@@ -758,20 +767,7 @@ int main(void) {
 
 		.unit_conversion=100, //steps per mm
 		.travel_length=360, //deg
-		.num_steps_per_turn=200,
-		.num_turns_from_encoder=0,
-
-		//NE UPORABLJAJ = IGNORIRAJ:
-		.encoder_A_state = 0,
-		.encoder_A_pin = GPIO_PIN_3,
-	    .encoder_A_port = GPIOE,
-		.encoder_B_state = 0,
-		.encoder_B_pin = GPIO_PIN_3,
-	    .encoder_B_port = GPIOE,
-		.encoder_Z_state = 0,
-		.encoder_Z_pin = GPIO_PIN_3,
-	    .encoder_Z_port = GPIOE
-		//konc prepovedi
+		.num_steps_per_turn=200
 	};
 
 	// Initialize analog pins A0-A5
@@ -779,7 +775,7 @@ int main(void) {
 
 
 	//usable IO: I2
-	//configure_end_switch_interrupts();
+	configure_end_switch_interrupts();
 
 	/* Configure LED1 */
 	//BSP_LED_Init(LED1);
@@ -790,26 +786,12 @@ int main(void) {
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 
-	/*
-	//Start the PWMs
-	HAL_TIM_PWM_Start(motors[0].timer, motors[0].timer_channel);
-	HAL_TIM_PWM_Start(motors[1].timer, motors[1].timer_channel);
-	HAL_TIM_PWM_Start(motors[2].timer, motors[2].timer_channel);
-
-	// Starts interrupts (for position increments in callback functions)
-	HAL_TIM_Base_Start_IT(motors[0].timer);
-	HAL_TIM_Base_Start_IT(motors[1].timer);
-	HAL_TIM_Base_Start_IT(motors[2].timer);
-	*/
+	
 	stop_all_motors();
 
-	//reset_motors();
 
 	_Bool values[6]={0,0,0,0,0,0};
 
-	//run_motor(0);
-
-	//run_motor(2);
 
 
     // Počisti UART3 buffer
@@ -818,45 +800,46 @@ int main(void) {
     uart3_command_ready = 0;
 
     // Pošlji začetno sporočilo
-    char startup_msg[] = "System ready. Enter target pressure (0-4 bar):\r\n";
+    char startup_msg[] = "\n\n\n\n\n\n\n\n\n\nSpikBot je pripravljen.\r\n";
     HAL_UART_Transmit(&huart3, (uint8_t*)startup_msg, strlen(startup_msg), 100);
 
 
-	//uart_transmit(text);
+/*
+    if(uart3_new_data)
+    {
+        uart3_new_data = 0;  // Počisti flag
 
-	//run_motor(0);
-	//run_motor(1);
-	//run_motor(2);
-	//run_motor(3);
+        // Izhod za debug
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Using pressure: %.2f bar\r\n", target_pressure);
+        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+    }
+    reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2);
+    */
 
-	//receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_z_coordinate,&target_phi);
-	//HAL_Delay(1);
+    calibrate_all_motors();
 
-	//hitrost motorjev lahko štelamo tudi s stikali (pulz/rev)
-	//jermen gre samo eno stopnjo hitreje, pri več pa ruži
+	HAL_Delay(10);
+	DC_Motor_Init();  // Pokličemo tu, da povozi TIM3 nastavitve na PA6
 
+    char menu[] =
+            "\r\n==================================================\r\n"
+            " KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
+            "==================================================\r\n"
+            " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
+            "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
+            "  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
+            "  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
+            "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
+            "--------------------------------------------------\r\n"
+            " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n\r\n";
 
-    /*
-        __HAL_RCC_I2C4_FORCE_RESET();
-        HAL_Delay(10);
-        __HAL_RCC_I2C4_RELEASE_RESET();
-        HAL_Delay(10);
-
-            MX_I2C4_Init();
-            HAL_Delay(100);
-            VL53L0X_Init();
-            */
-    HAL_Delay(10);
-        DC_Motor_Init();  // Pokličemo tu, da povozi TIM3 nastavitve na PA6
-
-       // if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET)HAL_Delay(1000);
-
-	//while(HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET){}
+	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+	uart_print_current_targets();
 
 	while (1) {
 		/* USER CODE END WHILE */
 
-		//---------------------------------stepperji-------------------------------------
 		//test_motor(0);
 		//test_motor(1);
 		//test_motor(2);
@@ -872,88 +855,45 @@ int main(void) {
 		//motor_status();
 
 		//serial_print_string("URAVNOVEŠENO!\r\n");
-		//------------------------------------------------------------------------------
 
 
-		//---------------------------------------pritisk--------------------------------
-		//za pumpo: vmesti tako da ko se motor parkira potem se zažene pumpa
+
 		/*
-        if(uart3_new_data)
-        {
-            uart3_new_data = 0;  // Počisti flag
-
-            // Izhod za debug
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Using pressure: %.2f bar\r\n", target_pressure);
-            HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
-        }
-
         while(!reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2))
         {
             HAL_Delay(300);
             //motor_status();
         }
-		 */
-		//---------------------------------------------------------------------
+        */
+		//test_all_motors();
 
 
-		//--------------------------------za ptuj dc motor-------------------------------
-		// 1. Če zastavica NI postavljena, beremo tipko
-		        if (zagon_izvedbe == false) {
-		            // Ker je vezano na Pull-up, je pritisnjena tipka enaka GPIO_PIN_RESET (0V)
-		            if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
-		                // Preprosto preprečevanje odboja kontaktov (Debounce)
-		                HAL_Delay(50);
-		                if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
-		                    zagon_izvedbe = true; // Postavimo zastavico na true
-		                    dc_current_state = DC_STATE_REGULATED;
-		                }
-		            }
-		        }
+		if (zagon_izvedbe == false) {
+			// Ker je vezano na Pull-up, je pritisnjena tipka enaka GPIO_PIN_RESET (0V)
+			if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
+				// Preprosto preprečevanje odboja kontaktov (Debounce)
+				HAL_Delay(50);
+				if (HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_3) == GPIO_PIN_RESET) {
+					zagon_izvedbe = true; // Postavimo zastavico na true
+					dc_current_state = DC_STATE_REGULATED;
+				}
+			}
+		}
 
-		        // 2. Če je zastavica true, izvedemo kodo, medtem se tipka NE bere
-		        while (zagon_izvedbe == true) {
+		// 2. Če je zastavica true, izvedemo kodo, medtem se tipka NE bere
+		while (zagon_izvedbe == true) {
 
-		            if (vl53_data_ready) {
-		                vl53_data_ready = 0;
-		                uint16_t trenutna_razdalja = VL53L0X_ReadDistance();
+			if (vl53_data_ready) {
+				vl53_data_ready = 0;
+				uint16_t trenutna_razdalja = VL53L0X_ReadDistance();
 
-						DC_Motor_Update(trenutna_razdalja);
+				DC_Motor_Update(trenutna_razdalja);
 
-		                char debug_msg[64];
-		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm | Stanje avtomata: %d\r\n", trenutna_razdalja, dc_current_state);
-		                serial_print_string(debug_msg);
-
-		            }
-
-		        }
-
-			//---------------------------------------------------------
-
-
-
-		//-----------------------------dc motor test---------------------------------
-/*
-		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
-		    serial_print_string("Test: Motor naprej...\r\n");
-		    DC_Motor_Set_Speed(600);
-		    HAL_Delay(3000); // Drži 3 sekunde
-
-		    // Ustavi motor
-		    serial_print_string("Test: Motor STOP...\r\n");
-		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(1000); // Čakaj 1 sekundo
-
-		    // Prisilno pošljemo ukaz za vrtenje NAZAJ (hitrost -600)
-		    serial_print_string("Test: Motor nazaj...\r\n");
-		    DC_Motor_Set_Speed(-600);
-		    HAL_Delay(3000); // Drži 3 sekunde
-
-		    // Ustavi motor
-		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(1000);
-*/
-		//----------------------------------------------------------------------------
+				char debug_msg[64];
+				snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm | Stanje avtomata: %d\r\n", trenutna_razdalja, dc_current_state);
+				serial_print_string(debug_msg);
+			}
+		}
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -1005,20 +945,19 @@ void SystemClock_Config(void) {
 
 	while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {
 	}
-	/*
 	// Add these after your clock configuration
+	/*
 	__HAL_RCC_TIM1_CLK_ENABLE();
 	__HAL_RCC_TIM3_CLK_ENABLE();
 	__HAL_RCC_TIM15_CLK_ENABLE();
 	__HAL_RCC_TIM12_CLK_ENABLE();
 	__HAL_RCC_USART1_CLK_ENABLE();
-	//__DSB();
-	//__ISB();
 
 	//__HAL_RCC_ADC123_CLK_ENABLE();
 	__HAL_RCC_ADC12_CLK_ENABLE();  // For ADC1 and ADC2
 	__HAL_RCC_ADC3_CLK_ENABLE();    // For ADC3
-	HAL_Delay(1);*/
+	HAL_Delay(1);
+	*/
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
 	 */
@@ -1093,27 +1032,29 @@ void SystemClock_Config(void) {
  * @retval None
  */
 void PeriphCommonClock_Config(void) {
-    RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+	RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = { 0 };
 
-    /** 1. Nastavitev ure za I2C4 (ostane ista kot prej)
-    */
-    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2C4;
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2C4;
     PeriphClkInitStruct.I2c4ClockSelection = RCC_I2C4CLKSOURCE_HSI; // Spremeni tole
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
         Error_Handler();
     }
 
-    /** 2. Nastavitev ure za ADC
-    * ADC na H7 seriji potrebuje namensko uro (običajno PLL2P ali PLL3R).
-    * Spodaj je primer uporabe PLL2, ki je pogosta izbira.
-    */
-    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-    // PLL2P je pogosta izbira za ADC, ker omogoča visoke frekvence (do 80MHz)
-    PeriphClkInitStruct.AdcClockSelection = RCC_ADCCLKSOURCE_PLL2;
-
-    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
-        Error_Handler();
-    }
+	/** Initializes the peripherals clock
+	 */
+	PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+	PeriphClkInitStruct.PLL2.PLL2M = 2;
+	PeriphClkInitStruct.PLL2.PLL2N = 12;
+	PeriphClkInitStruct.PLL2.PLL2P = 5;
+	PeriphClkInitStruct.PLL2.PLL2Q = 2;
+	PeriphClkInitStruct.PLL2.PLL2R = 2;
+	PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3;
+	PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOMEDIUM;
+	PeriphClkInitStruct.PLL2.PLL2FRACN = 0;
+	PeriphClkInitStruct.AdcClockSelection = RCC_ADCCLKSOURCE_PLL2;
+	if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
+		Error_Handler();
+	}
 }
 
 /**
@@ -1160,16 +1101,7 @@ static void MX_ADC1_Init(void) {
 	if (HAL_ADC_Init(&hadc1) != HAL_OK) {
 		Error_Handler();
 	}
-	/*
-	HAL_Delay(10);
-	// For STM32H7, you may also need to calibrate:
-	uint32_t tickstart = HAL_GetTick();
-	    while(HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED) != HAL_OK) {
-	        if((HAL_GetTick() - tickstart) > 1000) {
-	            Error_Handler();
-	        }
-	    }
-	 */
+
 	HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
 
 	sConfig.Channel = ADC_CHANNEL_10;        // PC0
@@ -2003,7 +1935,6 @@ static void MX_GPIO_Init(void) {
 	__HAL_RCC_GPIOC_CLK_ENABLE();
 	__HAL_RCC_GPIOA_CLK_ENABLE();
 	__HAL_RCC_GPIOE_CLK_ENABLE();
-	__HAL_RCC_GPIOF_CLK_ENABLE();
 	__HAL_RCC_GPIOJ_CLK_ENABLE();
 	__HAL_RCC_GPIOD_CLK_ENABLE();
 	__HAL_RCC_GPIOH_CLK_ENABLE();
@@ -2018,19 +1949,28 @@ static void MX_GPIO_Init(void) {
 	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 
+	/*Configure GPIO pin : PH15 */
+	/*
+	GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;
+	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+	*/
+	/*
+	GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+	 */
 
 	/*Configure GPIO pin : LCD_DISPD7_Pin */
 	GPIO_InitStruct.Pin = LCD_DISPD7_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(LCD_DISPD7_GPIO_Port, &GPIO_InitStruct);
-
-	// Konfiguracija pina PE3 za tipko
-	GPIO_InitStruct.Pin = GPIO_PIN_3;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;     // Vhodni način
-	GPIO_InitStruct.Pull = GPIO_PULLUP;          // Izberemo Pull-up, ker vežemo na GND
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : PE5 PE4 */
 	GPIO_InitStruct.Pin = GPIO_PIN_5 | GPIO_PIN_4;
@@ -2059,6 +1999,97 @@ static void MX_GPIO_Init(void) {
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
+    GPIO_InitStruct.Pin = GPIO_PIN_12;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;  // Push-pull output
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    //konc
+
+    // inicializacija digital inputov (expansion board)
+    /*
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+	*/
+    /*
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;  // Interrupt on rising edge
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+     */
+
+    /*
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+     */
+
+	/*
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	*/
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_4;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+	*/
+
+	/*
+    GPIO_InitStruct.Pin = GPIO_PIN_2;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
+	*/
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_2;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOI, &GPIO_InitStruct);
+	*/
+
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_13;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+     */
+
+	/*
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;  // Push-pull output
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+	*/
+    /*
+	GPIO_InitStruct.Pin = GPIO_PIN_3;
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+     */
+
+    //konc
+
+	/*Configure GPIO pins : USB_OTG_FS2_ID_Pin OTG_FS2_PSO_Pin */
+	//GPIO_InitStruct.Pin = USB_OTG_FS2_ID_Pin | OTG_FS2_PSO_Pin;
+	//GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	//GPIO_InitStruct.Pull = GPIO_NOPULL;
+	//HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : B1_Pin */
 	GPIO_InitStruct.Pin = B1_Pin;
@@ -2083,7 +2114,7 @@ static void MX_GPIO_Init(void) {
 
 	/*Configure GPIO pin : LCD_INT_Pin */
 	GPIO_InitStruct.Pin = LCD_INT_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;//GPIO_MODE_IT_RISING
+	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(LCD_INT_GPIO_Port, &GPIO_InitStruct);
 
@@ -2102,12 +2133,12 @@ static void MX_GPIO_Init(void) {
 	//timers:
 
 	/*Configure GPIO pin : PA6 */
-	/*GPIO_InitStruct.Pin = GPIO_PIN_6;
+	GPIO_InitStruct.Pin = GPIO_PIN_6;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	GPIO_InitStruct.Alternate = GPIO_AF9_TIM13;//tim13
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);*/
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : PA8 */
 	GPIO_InitStruct.Pin = GPIO_PIN_8;
@@ -2133,7 +2164,6 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Alternate = GPIO_AF2_TIM12;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : PB15 */
 	GPIO_InitStruct.Pin = GPIO_PIN_15;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -2141,6 +2171,24 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;
 	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
+	//konc timers
+
+	//usart:
+    /* Configure USART1 TX (PB6) and RX (PB7) pins */
+
+	//__HAL_RCC_USART1_CLK_ENABLE();
+	/*
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 115200;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX_RX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+	huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+*/
 	GPIO_InitStruct.Pin = GPIO_PIN_6;
     //GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -2156,7 +2204,23 @@ static void MX_GPIO_Init(void) {
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF7_USART1;  // USART1 uses AF7
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
+/*
+	if (HAL_UART_Init(&huart1) != HAL_OK) {
+		Error_Handler();
+	}
+	if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8)
+			!= HAL_OK) {
+		Error_Handler();
+	}
+	if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8)
+			!= HAL_OK) {
+		Error_Handler();
+	}
+	if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK) {
+		Error_Handler();
+	}
+	*/
+    //konc usart
 
 	/*Configure GPIO pins : MII_TX_ER_nINT_Pin LCD_RST_Pin */
 	GPIO_InitStruct.Pin = MII_TX_ER_nINT_Pin | LCD_RST_Pin;
@@ -2172,16 +2236,35 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(LD1_GPIO_Port, &GPIO_InitStruct);
 
+	/* USER CODE BEGIN MX_GPIO_Init_2 */
+	// Configure ADC input pins as analog inputs
+	//GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-	/* Konfiguracija pina PF8 za smer motorja A (IN2A) */
-	GPIO_InitStruct.Pin = GPIO_PIN_8;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;   // Push-Pull izhod
-	GPIO_InitStruct.Pull = GPIO_NOPULL;           // Brez pull-up/down uporov
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;  // Nizka frekvenca preklapljanja je dovolj
+	/*
+	// A0 (PC0) - ADC1_IN10
+	GPIO_InitStruct.Pin = GPIO_PIN_0;
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	// A1 (PF8) - ADC2_IN6
+	GPIO_InitStruct.Pin = GPIO_PIN_8;//8
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIOF->MODER |= (3 << (2*8));  // Analog mode
+	GPIOF->PUPDR &= ~(3 << (2*8)); // No pull
 	HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-	/* Postavimo pin na LOW ob zagonu (Smer naprej privzeto) */
-	HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+	// A2 (PA0_C) - ADC3_IN10
+	GPIO_InitStruct.Pin = GPIO_PIN_0;//0
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIOA->MODER |= (3 << (2*0));
+	GPIOA->PUPDR &= ~(3 << (2*0));
+	SYSCFG->PMCR |= SYSCFG_PMCR_PA0SO; // Critical for PA0_C!
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+	*/
+
 
 	/* USER CODE END MX_GPIO_Init_2 */
 }
@@ -2269,7 +2352,6 @@ void configure_analog_pins(void)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-    /*
     // Configure PF8 as analog (A1)
     GPIO_InitStruct.Pin = GPIO_PIN_8;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
@@ -2291,7 +2373,6 @@ void configure_analog_pins(void)
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     // Enable PA1_C special function
     SYSCFG->PMCR |= SYSCFG_PMCR_PA1SO;
-    */
 
     // Configure PC2_C as analog (A4)
     GPIO_InitStruct.Pin = GPIO_PIN_2;
@@ -2430,38 +2511,6 @@ float nastavi_pritisk()
 }
 
 /**
- * @brief  Nastavi hitrost in smer DC motorja.
- * @param  speed: Vrednost med -999 in 999.
- * Pozitivne vrednosti = naprej, negativne = nazaj, 0 = stop.
- * @retval None
- */
-void DC_Motor_Set_Speed(int16_t speed) {
-    // Omejitev hitrosti znotraj varnih meja (ARR = 999)
-    if (speed > 999)  speed = 999;
-    if (speed < -999) speed = -999;
-
-    if (speed >= 0) {
-        /* SMER NAPREJ */
-        // IN2A (PB4) postavimo na LOW (0V)
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
-
-        // IN1A (PH15) dobi standardni PWM signal (gasi/pali mostiček proti masi)
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)speed);
-    }
-    else {
-        /* SMER NAZAJ */
-        // IN2A (PB4) postavimo na HIGH (3.3V)
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-
-        // Ker je IN2 sedaj HIGH, moramo na IN1 (PH15) poslati INVERZNI PWM,
-        // da motor vidi razliko napetosti (npr. če želimo 30% moči, mora biti PWM na 70%)
-        int16_t inverse_speed = 999 - (-speed);
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)inverse_speed);
-    }
-}
-
-
-/**
  * @brief Enostaven P regulator za uravnavanje tlaka
  * @param izmerjen_tlak: Trenutna izmerjena vrednost tlaka (float, v barih)
  * @param zeljen_tlak: Željena vrednost tlaka (uint16_t, celo število v barih)
@@ -2563,6 +2612,496 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     return false;
 }
 
+/**
+ * @brief Uradno zaporedje za nalaganje nastavitev iz vl53l0x_tuning.h
+ */
+void VL53L0X_LoadTuningSettings(void) {
+    // Definiramo tabelo kot statično, da ne obremenjujemo sklada (stack)
+    static const uint8_t settings[][2] = {
+        {0xFF, 0x01}, {0x00, 0x00}, {0xFF, 0x00}, {0x09, 0x00},
+        {0x10, 0x00}, {0x11, 0x00}, {0x24, 0x01}, {0x25, 0xFF},
+        {0x75, 0x00}, {0xFF, 0x01}, {0x4E, 0x2C}, {0x48, 0x00},
+        {0x30, 0x20}, {0xFF, 0x00}, {0x30, 0x09}, {0x54, 0x00},
+        {0x31, 0x04}, {0x32, 0x03}, {0x40, 0x83}, {0x46, 0x25},
+        {0x60, 0x00}, {0x27, 0x00}, {0x50, 0x06}, {0x51, 0x00},
+        {0x52, 0x96}, {0x56, 0x08}, {0x57, 0x30}, {0x61, 0x00},
+        {0x62, 0x00}, {0x64, 0x00}, {0x65, 0x00}, {0x66, 0xA0},
+        {0xFF, 0x01}, {0x22, 0x32}, {0x47, 0x14}, {0x49, 0xFF},
+        {0x4A, 0x00}, {0xFF, 0x00}, {0x7A, 0x0A}, {0x7B, 0x00},
+        {0x78, 0x21}, {0xFF, 0x01}, {0x23, 0x34}, {0x42, 0x00},
+        {0x44, 0xFF}, {0x45, 0x26}, {0x46, 0x05}, {0x40, 0x40},
+        {0x0E, 0x06}, {0x20, 0x1A}, {0x43, 0x40}, {0xFF, 0x00},
+        {0x34, 0x03}, {0x35, 0x44}, {0xFF, 0x01}, {0x31, 0x04},
+        {0x4B, 0x09}, {0x4C, 0x05}, {0x4D, 0x04}, {0xFF, 0x00},
+        {0x44, 0x00}, {0x45, 0x20}, {0x47, 0x08}, {0x48, 0x28},
+        {0x67, 0x00}, {0x70, 0x04}, {0x71, 0x01}, {0x72, 0xFE},
+        {0x76, 0x00}, {0x77, 0x00}, {0xFF, 0x01}, {0x0D, 0x01},
+        {0xFF, 0x00}, {0x80, 0x01}, {0x01, 0xF8}, {0xFF, 0x01},
+        {0x8E, 0x01}, {0x00, 0x01}, {0xFF, 0x00}, {0x80, 0x00}
+    };
+
+    for(uint32_t i = 0; i < (sizeof(settings)/sizeof(settings[0])); i++) {
+            uint8_t reg = settings[i][0];
+            uint8_t data = settings[i][1];
+            if (HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg, 1, &data, 1, 10) != HAL_OK) {
+                break; // Prekini ob napaki
+            }
+        }
+}
+
+void I2C4_BusRecovery(void) {
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+
+    // 1. Nastavi SCL (PD12) kot navaden izhodni pin v Open-Drain načinu
+    GPIO_InitStruct.Pin = GPIO_PIN_12;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+    // 2. Nastavi SDA (PD13) kot vhod, da preveriš, če ga senzor drži nizko
+    GPIO_InitStruct.Pin = GPIO_PIN_13;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+    // 3. Pošlji 9 urinih taktov (tako se sprosti I2C vodilo, če je senzor obtičal sredi branja)
+    for (int i = 0; i < 9; i++) {
+        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+        HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
+        HAL_Delay(1);
+    }
+
+    // 4. Majhen zamik, da se linije umirijo
+    HAL_Delay(5);
+}
+
+static void MX_I2C4_Init(void) {
+    // 1. Enable clocks FIRST
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+    __HAL_RCC_I2C4_CLK_ENABLE();
+    __DSB();  /* <-- add after the clock enables */
+    __ISB();
+
+    // 2. Configure GPIO pins
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_12 | GPIO_PIN_13;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C4;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+    // 3. Then init the peripheral
+    hi2c4.Instance = I2C4;
+    hi2c4.Init.Timing = 0x10808DD3 ;//0x00F0EDFF
+    hi2c4.Init.OwnAddress1 = 0;
+    hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c4.Init.OwnAddress2 = 0;
+    hi2c4.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c4.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+
+    HAL_I2C_DeInit(&hi2c4);
+    if (HAL_I2C_Init(&hi2c4) != HAL_OK) {
+        Error_Handler();
+    }
+
+    // 4. Optional noise filter
+    HAL_I2CEx_ConfigDigitalFilter(&hi2c4, 0x0F);
+}
+/* ================================================================
+ * VL53L0X minimal correct driver + periodic TIM interrupt
+ * Target: STM32H750B-DK, I2C4, PD12=SCL, PD13=SDA
+ * ================================================================ */
+
+/* ---- register helpers (keep these as before) ---- */
+static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val) {
+    return HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg,
+                             I2C_MEMADD_SIZE_8BIT, &val, 1, 50);
+}
+static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *out) {
+    return HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg,
+                            I2C_MEMADD_SIZE_8BIT, out, 1, 50);
+}
+static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *out) {
+    uint8_t b[2];
+    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg,
+                                            I2C_MEMADD_SIZE_8BIT, b, 2, 50);
+    *out = ((uint16_t)b[0] << 8) | b[1];
+    return s;
+}
+
+void VL53L0X_Diagnose(void) {
+    uint8_t val;
+    uint16_t val16;
+    char buf[96];   // was 60 — must be at least 80, use 96 for safety
+
+    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
+        serial_print_string("DIAG: sensor not responding on I2C\r\n");
+        return;
+    }
+    serial_print_string("DIAG: sensor alive on I2C\r\n");
+
+    vl_read(0xC0, &val);
+    snprintf(buf, sizeof(buf), "DIAG: model ID = 0x%02X (expect 0xEE)\r\n", val);
+    serial_print_string(buf);
+
+    vl_read(0x00, &val);
+    snprintf(buf, sizeof(buf), "DIAG: SYSRANGE_START = 0x%02X\r\n", val);
+    serial_print_string(buf);
+
+    vl_read(0x13, &val);
+    snprintf(buf, sizeof(buf), "DIAG: interrupt status reg 0x13 = 0x%02X\r\n", val);
+    serial_print_string(buf);
+
+    vl_read(0x14, &val);
+    uint8_t range_status = (val >> 3) & 0x1F;
+    snprintf(buf, sizeof(buf), "DIAG: range status nibble = %u\r\n", range_status);
+    serial_print_string(buf);
+
+    vl_read16(0x1E, &val16);
+    snprintf(buf, sizeof(buf), "DIAG: raw range 0x1E:0x1F = %u mm\r\n", val16);
+    serial_print_string(buf);
+
+    HAL_Delay(200);
+    vl_read(0x13, &val);
+    snprintf(buf, sizeof(buf), "DIAG: interrupt status after 200ms = 0x%02X\r\n", val);
+    serial_print_string(buf);
+
+    vl_read16(0x1E, &val16);
+    snprintf(buf, sizeof(buf), "DIAG: range after 200ms = %u mm\r\n", val16);
+    serial_print_string(buf);
+
+    vl_write(0x0B, 0x01);   // clear interrupt → sensor queues next measurement
+}
+
+/* ================================================================
+ * SPAD calibration – must run once before ranging
+ * Reads the factory-programmed SPAD count/type from NVM and
+ * applies them so the analog front-end has correct sensitivity.
+ * ================================================================ */
+static void VL53L0X_PerformSPADCalibration(void) {
+    uint8_t val, spad_count, spad_type_is_aperture;
+    uint8_t ref_spad_map[6];
+
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
+    vl_write(0xFF, 0x06);
+    vl_read(0x83, &val); vl_write(0x83, val | 0x04);
+    vl_write(0xFF, 0x07); vl_write(0x81, 0x01);
+    vl_write(0x80, 0x01); vl_write(0x94, 0x6B); vl_write(0x83, 0x00);
+
+    uint32_t t0 = HAL_GetTick();
+    do { vl_read(0x83, &val); } while (val == 0 && (HAL_GetTick()-t0) < 100);
+    vl_write(0x83, 0x01);
+
+    vl_read(0x92, &val);
+    spad_count            = val & 0x7F;
+    spad_type_is_aperture = (val >> 7) & 0x01;
+
+    vl_write(0x81, 0x00); vl_write(0xFF, 0x06);
+    vl_read(0x83, &val); vl_write(0x83, val & ~0x04);
+    vl_write(0xFF, 0x01); vl_write(0x00, 0x01);
+    vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
+
+    /* read the 6-byte SPAD map — plain polling, no cache ops needed */
+    HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0xB0,
+                     I2C_MEMADD_SIZE_8BIT, ref_spad_map, 6, 50);
+
+    uint8_t first_spad = spad_type_is_aperture ? 12 : 0;
+    uint8_t enabled = 0;
+    for (uint8_t i = 0; i < 48; i++) {
+        if (i < first_spad || enabled == spad_count)
+            ref_spad_map[i/8] &= ~(1 << (i%8));
+        else if (ref_spad_map[i/8] & (1 << (i%8)))
+            enabled++;
+    }
+    HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0xB0,
+                      I2C_MEMADD_SIZE_8BIT, ref_spad_map, 6, 50);
+}
+
+static HAL_StatusTypeDef VL53L0X_PerformRefCalibration(void) {
+    uint8_t val;
+
+    /* VHV */
+    vl_write(0x01, 0x01);
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
+    vl_write(0x91, vl53_stop_variable);
+    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
+    vl_write(0x00, 0x01);                        /* single shot */
+    uint32_t t0 = HAL_GetTick();
+    do {
+        vl_read(0x13, &val);
+        if ((HAL_GetTick()-t0) > 500) return HAL_TIMEOUT;
+    } while ((val & 0x07) == 0);
+    vl_write(0x0B, 0x01); vl_write(0x00, 0x00); /* clear + stop */
+
+    /* phase */
+    vl_write(0x01, 0x02);
+    vl_write(0x00, 0x01);
+    t0 = HAL_GetTick();
+    do {
+        vl_read(0x13, &val);
+        if ((HAL_GetTick()-t0) > 500) return HAL_TIMEOUT;
+    } while ((val & 0x07) == 0);
+    vl_write(0x0B, 0x01); vl_write(0x00, 0x00);
+
+    vl_write(0x01, 0xE8);                        /* restore all sequence steps */
+    return HAL_OK;
+}
+
+/* ================================================================
+ * VL53L0X_Init
+ * ================================================================ */
+void VL53L0X_Init(void) {
+    uint8_t val;
+
+    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
+        serial_print_string("VL53L0X not found\r\n");
+        return;
+    }
+
+    /* wake-up handshake */
+    vl_write(0x88, 0x00);
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
+    vl_read(0x91, &val);
+    vl53_stop_variable = val;
+    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
+
+    /* disable MSRC + TCC limit checks */
+    vl_write(0x60, 0x00);
+
+    /* signal rate limit 0.25 MCPS */
+    vl_write(0x44, 0x00); vl_write(0x45, 0x20);
+
+    /* load tuning settings */
+    VL53L0X_LoadTuningSettings();
+
+    /* SPAD calibration */
+    VL53L0X_PerformSPADCalibration();
+
+    /* GPIO: interrupt on new sample ready, active low; clear any pending */
+    vl_write(0x0A, 0x04);
+    vl_read(0x84, &val); vl_write(0x84, val & ~0x10);
+    vl_write(0x0B, 0x01);
+
+    /* reference calibration */
+    if (VL53L0X_PerformRefCalibration() != HAL_OK) {
+        serial_print_string("VL53L0X ref cal FAILED\r\n");
+        return;
+    }
+
+    /* start continuous ranging */
+    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
+    vl_write(0x91, vl53_stop_variable);
+    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
+    vl_write(0x00, 0x02);   /* SYSRANGE_START = continuous back-to-back */
+
+    HAL_Delay(100);         /* wait for first measurement to complete */
+    vl_write(0x0B, 0x01);  /* clear that first interrupt so pipeline is clean */
+
+    serial_print_string("VL53L0X init OK\r\n");
+}
+
+
+/* ================================================================
+ * VL53L0X_ReadDistance
+ * Returns distance in mm, or 0xFFFF if result is invalid/timeout.
+ * Call this from your TIM interrupt (or poll it in main).
+ * ================================================================ */
+/* Non-blocking version - safe to call from a TIM interrupt */
+uint16_t VL53L0X_ReadDistance(void) {
+    uint8_t status, range_status;
+    uint16_t distance;
+
+    if (vl_read(0x13, &status) != HAL_OK) return 0xFFFF;
+    if ((status & 0x07) == 0) return 0xFFFF;   /* not ready */
+
+    vl_read(0x14, &range_status);
+    range_status = (range_status >> 3) & 0x1F;
+
+    vl_read16(0x1E, &distance);
+    vl_write(0x0B, 0x01);   /* clear → triggers next measurement */
+
+    /* status 0  = valid
+       status 11 = VCSEL continuity test — also valid for this sensor/SPAD config
+       everything else = real error */
+    if (range_status != 0 && range_status != 11) return 0xFFFF;
+
+    return distance;
+}
+
+/* ================================================================
+ * Periodic TIM interrupt – configure ONE free timer (e.g. TIM6)
+ *
+ * TIM6 is a basic timer, perfect for this – no PWM pins needed.
+ * Period = (PSC+1)*(ARR+1) / TIM_CLK
+ * With TIM_CLK = 200 MHz (D2 domain after PLL1):
+ *   PSC = 9999  → 20 kHz tick
+ *   ARR = 1999  → interrupt every 100 ms  (10 Hz)
+ * Adjust ARR to taste.
+ * ================================================================ */
+
+static void MX_TIM8_Init(void) {
+    __HAL_RCC_TIM8_CLK_ENABLE();
+
+    /* Force the RCC write to complete before touching TIM6 registers.
+       Without this, the AHB write buffer can still be pending when
+       HAL_TIM_Base_Init writes TIM6->CR1, causing an imprecise bus fault. */
+    __DSB();
+    __ISB();
+
+    htim8.Instance               = TIM8;
+    htim8.Init.Prescaler         = 9999;   /* 200 MHz / 10000 = 20 kHz */
+    htim8.Init.CounterMode       = TIM_COUNTERMODE_UP;
+    htim8.Init.Period             = 1999;   /* 20 kHz / 2000 = 10 Hz = 100 ms */
+    htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+
+    if (HAL_TIM_Base_Init(&htim8) != HAL_OK) Error_Handler();
+
+    HAL_NVIC_SetPriority(TIM8_DAC_IRQn, 8, 0);
+    HAL_NVIC_EnableIRQ(TIM8_DAC_IRQn);
+
+    HAL_TIM_Base_Start_IT(&htim8);   /* start immediately */
+}
+
+/* IRQ handler – put this with your other IRQ handlers */
+void TIM8_DAC_IRQHandler(void) {
+    HAL_TIM_IRQHandler(&htim8);
+}
+
+/**
+ * @brief  Posodablja stanje in hitrost DC motorja glede na razdaljo do ovire.
+ * Deluje kot neblokirajoči avtomat stanj (State Machine).
+ * @param  distance_mm: Trenutna razdalja iz senzorja v milimetrih.
+ * @retval None
+ */
+void DC_Motor_Update(uint16_t distance_mm) {
+    /* Preprečimo neveljavne meritve senzorja (npr. 0xFFFF ob napaki) */
+    if (distance_mm == 0xFFFF || distance_mm == 0) {
+        return;
+    }
+
+    switch (dc_current_state) {
+
+        case DC_STATE_REGULATED: {
+            /* 1. Pogoj za ustavitev: dosežen minimum (preblizu ovire) */
+            if (distance_mm <= DC_DIST_MIN_MM) {
+                DC_Motor_Set_Speed(0);  /* Takojšnja ustavitev */
+                dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
+                dc_current_state = DC_STATE_WAITING;
+                serial_print_string("Blizu ovire! Stop. Cakam 5 sekund...\r\n");
+                break;
+            }
+
+            /* 2. Izračun hitrosti: dlje kot je ovira, hitreje se motor premika.
+               Uporabimo linearno interpolacijo med varnim minimumom in maksimumom. */
+            int16_t calculated_speed;
+
+            if (distance_mm >= DC_DIST_MAX_MM) {
+                /* Če smo izven regulacijskega območja (zelo daleč), gremo s polno hitrostjo */
+                calculated_speed = 950;
+            } else {
+                /* Linearna prilagoditev hitrosti med 200 (min hitrost za premik) in 950 (max) */
+                float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
+                calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
+            }
+
+            /* Varnostna omejitev, da ne preseže maksimalnega ARR časovnika (999) */
+            if (calculated_speed > 950) calculated_speed = 950;
+            if (calculated_speed < 200) calculated_speed = 200;
+
+            /* Nastavimo hitrost za vožnjo naprej (pozitivna vrednost) */
+            DC_Motor_Set_Speed(calculated_speed);
+            //serial_print_string("Priblizujem se oviri.\r\n");
+            break;
+        }
+
+        case DC_STATE_WAITING: {
+            /* Preverimo, če je pretekel določen čas (npr. 5000 ms) brez blokiranja kode */
+            if ((HAL_GetTick() - dc_stop_timestamp) >= dc_wait_time_ms) {
+                serial_print_string("Cas cakanja potekel. Umikam motor nazaj...\r\n");
+                dc_current_state = DC_STATE_RETRACTING;
+            }
+            break;
+        }
+
+        case DC_STATE_RETRACTING: {
+            /* 1. Pogoj za konec umikanja: ko dosežemo želeno varnostno razdaljo (maksimum) */
+            if (distance_mm >= DC_DIST_MAX_MM) {
+                DC_Motor_Set_Speed(0);
+                //dc_current_state = DC_STATE_REGULATED;
+                zagon_izvedbe = false;
+                serial_print_string("Umaknjen na varno razdaljo.\r\n");
+                break;
+            }
+
+            /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
+            DC_Motor_Set_Speed(-500);
+            break;
+        }
+
+        default:
+            //dc_current_state = DC_STATE_REGULATED;
+            break;
+    }
+}
+
+void DC_Motor_Init(void) {
+    /* 1. VKLOP UR ZA TIM13 IN PORT A (Kritično za H7!) */
+    __HAL_RCC_TIM8_CLK_ENABLE();  // <-- TA VRSTICA JE MANJKALA!
+    __HAL_RCC_GPIOH_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    // Kratek sistemski premor, da H7 uskladi registre ur (strojna specifika H7)
+        __DSB();
+        __ISB();
+
+    /* 2. Konfiguracija smernega pina PF8 */
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
+    /* 3. Konfiguracija PWM pina Ph15 (TIM8_CH3, AF3) */
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;  
+    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+    /* 4. Konfiguracija časovnika TIM13 */
+    htim13.Instance = TIM8;
+    htim13.Init.Prescaler = 199; // 200 MHz / 200 = 1 MHz osnova
+    htim13.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim13.Init.Period = 999;    // 1 kHz frekvenca PWM signala
+    htim13.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim13.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    if (HAL_TIM_PWM_Init(&htim8) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* 5. Konfiguracija PWM kanala 1 */
+    TIM_OC_InitTypeDef oc = {0};
+    oc.OCMode     = TIM_OCMODE_PWM1;
+    oc.Pulse      = 0; // Začne z ustavljenim motorjem
+    oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+    oc.OCFastMode = TIM_OCFAST_DISABLE;
+    if (HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_3) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* 6. Zagon strojnega PWM-ja */
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+
+    serial_print_string("DC motor init OK\r\n");
+}
+
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -2609,6 +3148,17 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF2_TIM12;  // TIM12_CH2 uses AF2
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  }
+    else if(timHandle->Instance==TIM8)
+  {
+    /* TIM8 CH3 on PH15 */
+    __HAL_RCC_GPIOH_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;  // TIM12_CH2 uses AF2
+    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
   }
 }
 
@@ -2954,9 +3504,22 @@ void run_motor(uint8_t motor_number)
 		//htim15.Instance->DIER |= TIM_DIER_UIE;
 		//motors[motor_number].timer->Instance->CR1 |= TIM_CR1_CEN;
 
+		/*
+        IRQn_Type irqn;
+        if      (motors[motor_number].timer->Instance == TIM1)  irqn = TIM1_UP_IRQn;
+        else if (motors[motor_number].timer->Instance == TIM3)  irqn = TIM3_IRQn;
+        else if (motors[motor_number].timer->Instance == TIM15) irqn = TIM15_IRQn;
+        else if (motors[motor_number].timer->Instance == TIM12) irqn = TIM8_BRK_TIM12_IRQn;
+        else goto skip_nvic;
+        HAL_NVIC_SetPriority(irqn, 5, 0);
+        HAL_NVIC_EnableIRQ(irqn);
+        skip_nvic:;
+        */
+
 		HAL_TIM_Base_Start(motors[motor_number].timer);
-		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
 		HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
+		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
+		motors[motor_number].timer->Instance->DIER |= TIM_DIER_UIE; // force it
 
 		motors[motor_number].running = true;
 	}
@@ -3071,7 +3634,7 @@ void test_all_motors()
 	run_motor(0);
 	run_motor(1);
 	run_motor(2);
-	HAL_Delay(3000);
+	HAL_Delay(1000);
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
@@ -3083,374 +3646,11 @@ void test_all_motors()
 	run_motor(0);
 	run_motor(1);
 	run_motor(2);
-	HAL_Delay(3000);
+	HAL_Delay(1000);
 	stop_motor(0);
 	stop_motor(1);
 	stop_motor(2);
 }
-
-
-
-/**
- * @brief Uradno zaporedje za nalaganje nastavitev iz vl53l0x_tuning.h
- */
-void VL53L0X_LoadTuningSettings(void) {
-    // Definiramo tabelo kot statično, da ne obremenjujemo sklada (stack)
-    static const uint8_t settings[][2] = {
-        {0xFF, 0x01}, {0x00, 0x00}, {0xFF, 0x00}, {0x09, 0x00},
-        {0x10, 0x00}, {0x11, 0x00}, {0x24, 0x01}, {0x25, 0xFF},
-        {0x75, 0x00}, {0xFF, 0x01}, {0x4E, 0x2C}, {0x48, 0x00},
-        {0x30, 0x20}, {0xFF, 0x00}, {0x30, 0x09}, {0x54, 0x00},
-        {0x31, 0x04}, {0x32, 0x03}, {0x40, 0x83}, {0x46, 0x25},
-        {0x60, 0x00}, {0x27, 0x00}, {0x50, 0x06}, {0x51, 0x00},
-        {0x52, 0x96}, {0x56, 0x08}, {0x57, 0x30}, {0x61, 0x00},
-        {0x62, 0x00}, {0x64, 0x00}, {0x65, 0x00}, {0x66, 0xA0},
-        {0xFF, 0x01}, {0x22, 0x32}, {0x47, 0x14}, {0x49, 0xFF},
-        {0x4A, 0x00}, {0xFF, 0x00}, {0x7A, 0x0A}, {0x7B, 0x00},
-        {0x78, 0x21}, {0xFF, 0x01}, {0x23, 0x34}, {0x42, 0x00},
-        {0x44, 0xFF}, {0x45, 0x26}, {0x46, 0x05}, {0x40, 0x40},
-        {0x0E, 0x06}, {0x20, 0x1A}, {0x43, 0x40}, {0xFF, 0x00},
-        {0x34, 0x03}, {0x35, 0x44}, {0xFF, 0x01}, {0x31, 0x04},
-        {0x4B, 0x09}, {0x4C, 0x05}, {0x4D, 0x04}, {0xFF, 0x00},
-        {0x44, 0x00}, {0x45, 0x20}, {0x47, 0x08}, {0x48, 0x28},
-        {0x67, 0x00}, {0x70, 0x04}, {0x71, 0x01}, {0x72, 0xFE},
-        {0x76, 0x00}, {0x77, 0x00}, {0xFF, 0x01}, {0x0D, 0x01},
-        {0xFF, 0x00}, {0x80, 0x01}, {0x01, 0xF8}, {0xFF, 0x01},
-        {0x8E, 0x01}, {0x00, 0x01}, {0xFF, 0x00}, {0x80, 0x00}
-    };
-
-    for(uint32_t i = 0; i < (sizeof(settings)/sizeof(settings[0])); i++) {
-            uint8_t reg = settings[i][0];
-            uint8_t data = settings[i][1];
-            if (HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg, 1, &data, 1, 10) != HAL_OK) {
-                break; // Prekini ob napaki
-            }
-        }
-}
-
-void I2C4_BusRecovery(void) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_GPIOD_CLK_ENABLE();
-
-    // 1. Nastavi SCL (PD12) kot navaden izhodni pin v Open-Drain načinu
-    GPIO_InitStruct.Pin = GPIO_PIN_12;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-    // 2. Nastavi SDA (PD13) kot vhod, da preveriš, če ga senzor drži nizko
-    GPIO_InitStruct.Pin = GPIO_PIN_13;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-    // 3. Pošlji 9 urinih taktov (tako se sprosti I2C vodilo, če je senzor obtičal sredi branja)
-    for (int i = 0; i < 9; i++) {
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
-        HAL_Delay(1);
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
-        HAL_Delay(1);
-    }
-
-    // 4. Majhen zamik, da se linije umirijo
-    HAL_Delay(5);
-}
-
-static void MX_I2C4_Init(void) {
-    // 1. Enable clocks FIRST
-    __HAL_RCC_GPIOD_CLK_ENABLE();
-    __HAL_RCC_I2C4_CLK_ENABLE();
-    __DSB();  /* <-- add after the clock enables */
-    __ISB();
-
-    // 2. Configure GPIO pins
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = GPIO_PIN_12 | GPIO_PIN_13;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF4_I2C4;
-    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-    // 3. Then init the peripheral
-    hi2c4.Instance = I2C4;
-    hi2c4.Init.Timing = 0x10808DD3 ;//0x00F0EDFF
-    hi2c4.Init.OwnAddress1 = 0;
-    hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-    hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-    hi2c4.Init.OwnAddress2 = 0;
-    hi2c4.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-    hi2c4.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-
-    HAL_I2C_DeInit(&hi2c4);
-    if (HAL_I2C_Init(&hi2c4) != HAL_OK) {
-        Error_Handler();
-    }
-
-    // 4. Optional noise filter
-    HAL_I2CEx_ConfigDigitalFilter(&hi2c4, 0x0F);
-}
-/* ================================================================
- * VL53L0X minimal correct driver + periodic TIM interrupt
- * Target: STM32H750B-DK, I2C4, PD12=SCL, PD13=SDA
- * ================================================================ */
-
-/* ---- register helpers (keep these as before) ---- */
-static HAL_StatusTypeDef vl_write(uint8_t reg, uint8_t val) {
-    return HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, reg,
-                             I2C_MEMADD_SIZE_8BIT, &val, 1, 50);
-}
-static HAL_StatusTypeDef vl_read(uint8_t reg, uint8_t *out) {
-    return HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg,
-                            I2C_MEMADD_SIZE_8BIT, out, 1, 50);
-}
-static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *out) {
-    uint8_t b[2];
-    HAL_StatusTypeDef s = HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, reg,
-                                            I2C_MEMADD_SIZE_8BIT, b, 2, 50);
-    *out = ((uint16_t)b[0] << 8) | b[1];
-    return s;
-}
-
-void VL53L0X_Diagnose(void) {
-    uint8_t val;
-    uint16_t val16;
-    char buf[96];   // was 60 — must be at least 80, use 96 for safety
-
-    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
-        serial_print_string("DIAG: sensor not responding on I2C\r\n");
-        return;
-    }
-    serial_print_string("DIAG: sensor alive on I2C\r\n");
-
-    vl_read(0xC0, &val);
-    snprintf(buf, sizeof(buf), "DIAG: model ID = 0x%02X (expect 0xEE)\r\n", val);
-    serial_print_string(buf);
-
-    vl_read(0x00, &val);
-    snprintf(buf, sizeof(buf), "DIAG: SYSRANGE_START = 0x%02X\r\n", val);
-    serial_print_string(buf);
-
-    vl_read(0x13, &val);
-    snprintf(buf, sizeof(buf), "DIAG: interrupt status reg 0x13 = 0x%02X\r\n", val);
-    serial_print_string(buf);
-
-    vl_read(0x14, &val);
-    uint8_t range_status = (val >> 3) & 0x1F;
-    snprintf(buf, sizeof(buf), "DIAG: range status nibble = %u\r\n", range_status);
-    serial_print_string(buf);
-
-    vl_read16(0x1E, &val16);
-    snprintf(buf, sizeof(buf), "DIAG: raw range 0x1E:0x1F = %u mm\r\n", val16);
-    serial_print_string(buf);
-
-    HAL_Delay(200);
-    vl_read(0x13, &val);
-    snprintf(buf, sizeof(buf), "DIAG: interrupt status after 200ms = 0x%02X\r\n", val);
-    serial_print_string(buf);
-
-    vl_read16(0x1E, &val16);
-    snprintf(buf, sizeof(buf), "DIAG: range after 200ms = %u mm\r\n", val16);
-    serial_print_string(buf);
-
-    vl_write(0x0B, 0x01);   // clear interrupt → sensor queues next measurement
-}
-
-/* ================================================================
- * SPAD calibration – must run once before ranging
- * Reads the factory-programmed SPAD count/type from NVM and
- * applies them so the analog front-end has correct sensitivity.
- * ================================================================ */
-static void VL53L0X_PerformSPADCalibration(void) {
-    uint8_t val, spad_count, spad_type_is_aperture;
-    uint8_t ref_spad_map[6];
-
-    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
-    vl_write(0xFF, 0x06);
-    vl_read(0x83, &val); vl_write(0x83, val | 0x04);
-    vl_write(0xFF, 0x07); vl_write(0x81, 0x01);
-    vl_write(0x80, 0x01); vl_write(0x94, 0x6B); vl_write(0x83, 0x00);
-
-    uint32_t t0 = HAL_GetTick();
-    do { vl_read(0x83, &val); } while (val == 0 && (HAL_GetTick()-t0) < 100);
-    vl_write(0x83, 0x01);
-
-    vl_read(0x92, &val);
-    spad_count            = val & 0x7F;
-    spad_type_is_aperture = (val >> 7) & 0x01;
-
-    vl_write(0x81, 0x00); vl_write(0xFF, 0x06);
-    vl_read(0x83, &val); vl_write(0x83, val & ~0x04);
-    vl_write(0xFF, 0x01); vl_write(0x00, 0x01);
-    vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
-
-    /* read the 6-byte SPAD map — plain polling, no cache ops needed */
-    HAL_I2C_Mem_Read(&hi2c4, VL53L0X_ADDR, 0xB0,
-                     I2C_MEMADD_SIZE_8BIT, ref_spad_map, 6, 50);
-
-    uint8_t first_spad = spad_type_is_aperture ? 12 : 0;
-    uint8_t enabled = 0;
-    for (uint8_t i = 0; i < 48; i++) {
-        if (i < first_spad || enabled == spad_count)
-            ref_spad_map[i/8] &= ~(1 << (i%8));
-        else if (ref_spad_map[i/8] & (1 << (i%8)))
-            enabled++;
-    }
-    HAL_I2C_Mem_Write(&hi2c4, VL53L0X_ADDR, 0xB0,
-                      I2C_MEMADD_SIZE_8BIT, ref_spad_map, 6, 50);
-}
-
-static HAL_StatusTypeDef VL53L0X_PerformRefCalibration(void) {
-    uint8_t val;
-
-    /* VHV */
-    vl_write(0x01, 0x01);
-    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
-    vl_write(0x91, vl53_stop_variable);
-    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
-    vl_write(0x00, 0x01);                        /* single shot */
-    uint32_t t0 = HAL_GetTick();
-    do {
-        vl_read(0x13, &val);
-        if ((HAL_GetTick()-t0) > 500) return HAL_TIMEOUT;
-    } while ((val & 0x07) == 0);
-    vl_write(0x0B, 0x01); vl_write(0x00, 0x00); /* clear + stop */
-
-    /* phase */
-    vl_write(0x01, 0x02);
-    vl_write(0x00, 0x01);
-    t0 = HAL_GetTick();
-    do {
-        vl_read(0x13, &val);
-        if ((HAL_GetTick()-t0) > 500) return HAL_TIMEOUT;
-    } while ((val & 0x07) == 0);
-    vl_write(0x0B, 0x01); vl_write(0x00, 0x00);
-
-    vl_write(0x01, 0xE8);                        /* restore all sequence steps */
-    return HAL_OK;
-}
-
-/* ================================================================
- * VL53L0X_Init
- * ================================================================ */
-void VL53L0X_Init(void) {
-    uint8_t val;
-
-    if (HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 3, 50) != HAL_OK) {
-        serial_print_string("VL53L0X not found\r\n");
-        return;
-    }
-
-    /* wake-up handshake */
-    vl_write(0x88, 0x00);
-    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
-    vl_read(0x91, &val);
-    vl53_stop_variable = val;
-    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
-
-    /* disable MSRC + TCC limit checks */
-    vl_write(0x60, 0x00);
-
-    /* signal rate limit 0.25 MCPS */
-    vl_write(0x44, 0x00); vl_write(0x45, 0x20);
-
-    /* load tuning settings */
-    VL53L0X_LoadTuningSettings();
-
-    /* SPAD calibration */
-    VL53L0X_PerformSPADCalibration();
-
-    /* GPIO: interrupt on new sample ready, active low; clear any pending */
-    vl_write(0x0A, 0x04);
-    vl_read(0x84, &val); vl_write(0x84, val & ~0x10);
-    vl_write(0x0B, 0x01);
-
-    /* reference calibration */
-    if (VL53L0X_PerformRefCalibration() != HAL_OK) {
-        serial_print_string("VL53L0X ref cal FAILED\r\n");
-        return;
-    }
-
-    /* start continuous ranging */
-    vl_write(0x80, 0x01); vl_write(0xFF, 0x01); vl_write(0x00, 0x00);
-    vl_write(0x91, vl53_stop_variable);
-    vl_write(0x00, 0x01); vl_write(0xFF, 0x00); vl_write(0x80, 0x00);
-    vl_write(0x00, 0x02);   /* SYSRANGE_START = continuous back-to-back */
-
-    HAL_Delay(100);         /* wait for first measurement to complete */
-    vl_write(0x0B, 0x01);  /* clear that first interrupt so pipeline is clean */
-
-    serial_print_string("VL53L0X init OK\r\n");
-}
-
-
-/* ================================================================
- * VL53L0X_ReadDistance
- * Returns distance in mm, or 0xFFFF if result is invalid/timeout.
- * Call this from your TIM interrupt (or poll it in main).
- * ================================================================ */
-/* Non-blocking version - safe to call from a TIM interrupt */
-uint16_t VL53L0X_ReadDistance(void) {
-    uint8_t status, range_status;
-    uint16_t distance;
-
-    if (vl_read(0x13, &status) != HAL_OK) return 0xFFFF;
-    if ((status & 0x07) == 0) return 0xFFFF;   /* not ready */
-
-    vl_read(0x14, &range_status);
-    range_status = (range_status >> 3) & 0x1F;
-
-    vl_read16(0x1E, &distance);
-    vl_write(0x0B, 0x01);   /* clear → triggers next measurement */
-
-    /* status 0  = valid
-       status 11 = VCSEL continuity test — also valid for this sensor/SPAD config
-       everything else = real error */
-    if (range_status != 0 && range_status != 11) return 0xFFFF;
-
-    return distance;
-}
-
-/* ================================================================
- * Periodic TIM interrupt – configure ONE free timer (e.g. TIM8)
- *
- * TIM8 is a basic timer, perfect for this – no PWM pins needed.
- * Period = (PSC+1)*(ARR+1) / TIM_CLK
- * With TIM_CLK = 200 MHz (D2 domain after PLL1):
- *   PSC = 9999  → 20 kHz tick
- *   ARR = 1999  → interrupt every 100 ms  (10 Hz)
- * Adjust ARR to taste.
- * ================================================================ */
-
-static void MX_TIM8_Init(void) {
-    __HAL_RCC_TIM8_CLK_ENABLE();
-
-    /* Force the RCC write to complete before touching TIM8 registers.
-       Without this, the AHB write buffer can still be pending when
-       HAL_TIM_Base_Init writes TIM8->CR1, causing an imprecise bus fault. */
-    __DSB();
-    __ISB();
-
-    htim8.Instance               = TIM8;
-    htim8.Init.Prescaler         = 9999;   /* 200 MHz / 10000 = 20 kHz */
-    htim8.Init.CounterMode       = TIM_COUNTERMODE_UP;
-    htim8.Init.Period             = 1999;   /* 20 kHz / 2000 = 10 Hz = 100 ms */
-    htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-
-    if (HAL_TIM_Base_Init(&htim8) != HAL_OK) Error_Handler();
-
-    HAL_NVIC_SetPriority(TIM8_DAC_IRQn, 8, 0);
-    HAL_NVIC_EnableIRQ(TIM8_DAC_IRQn);
-
-    HAL_TIM_Base_Start_IT(&htim8);   /* start immediately */
-}
-
-/* IRQ handler – put this with your other IRQ handlers */
-void TIM8_DAC_IRQHandler(void) {
-    HAL_TIM_IRQHandler(&htim8);
-}
-
-/* USER CODE END 4 */
 
 /**
   * @brief  Runs the motors for a specific time to reach a predetermined point.
@@ -3613,62 +3813,161 @@ void move_motor_2_end_switch(uint8_t motor_number, _Bool direction)
 }
 
 /**
-  * @brief  Function for calibrating the chosen motor by reaching the end switches.
-  			Once calibrated the segment should move to the center.
-			Calibration result is the change of the motors parameters:
-			max_position, unit_conversion
-  * @param  motor_number: number of the motor that should be calibrated
+  * @brief  Function for calibrating the chosen motor by reaching both end switches.
+  *         Both switches are wired to the same input pin per motor.
+  *         Procedure:
+  *           1. Move in direction_minus until switch triggers (switch 1 hit).
+  *           2. Reverse to direction_plus, run for at least 1 second blind
+  *              (do not read switch) to clear the switch mechanically.
+  *           3. Count steps while moving until the switch triggers again (switch 2 hit).
+  *           4. The step count between the two switch events = max_position.
+  *           5. Update unit_conversion and move to centre.
+  *
+  *         WARNING: If the mechanism starts already pressing a switch, it cannot
+  *         determine which end it is at. Move it away from the switch manually
+  *         before calling this function.
+  *
+  * @param  motor_number: number of the motor to calibrate (0, 1 or 2 — motor 3 unused)
   * @retval None
   */
 void calibrate_motor(uint8_t motor_number)
-{	//WARNING: If the robot is shutdown in one of two end positions (pressing the switch)
-	//			the user should move the unit away from the switch manually.
-	//			The robot does not move if the segment's switch is pressed. Freezes the software.
+{
+	char msg[80];
 
-	// In case of contact with the switch at the start the software disables the motors.
-	// The reason is that we cannot know which switch s pressed due to lack of IO pins.
-	if(read_switch(motor_number))
+	/* --- Safety check: switch already pressed at startup --- */
+	if (read_switch(motor_number))
 	{
+		snprintf(msg, sizeof(msg), "CAL M%d: ERR - switch pressed at start, move away manually\r\n", motor_number);
+		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 		stop_motor(motor_number);
-		while(1){};
+		return; /* Do not freeze — return so caller can handle it */
 	}
 
-	direction_change(motor_number,motors[motor_number].direction_minus);
+	snprintf(msg, sizeof(msg), "CAL M%d: moving to switch 1 (dir_minus)...\r\n", motor_number);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* --- Phase 1: drive in direction_minus until switch 1 triggers --- */
+	motors[motor_number].position = 0;
+	motors[motor_number].end_switch_triggered = 0;
+	motors[motor_number].allowed_direction = 2; /* allow both directions during calibration */
+
+	direction_change(motor_number, motors[motor_number].direction_minus);
+	HAL_Delay(100);
 	run_motor(motor_number);
 
-	while(!read_switch(motor_number)){}
-	motors[motor_number].starting_position=0;
-	motors[motor_number].position=0;
+	while (!read_switch(motor_number)) { /* spin until switch fires */ }
 
 	stop_motor(motor_number);
-	direction_change(motor_number,motors[motor_number].direction_plus);
+
+	snprintf(msg, sizeof(msg), "CAL M%d: switch 1 hit. Reversing...\r\n", motor_number);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* --- Phase 2: reverse direction and move BLIND for at least 1 second --- */
+	direction_change(motor_number, motors[motor_number].direction_plus);
 	HAL_Delay(100);
 
-	uint32_t tickstart = HAL_GetTick();
+	motors[motor_number].position = 0; /* reset step counter at switch-1 position */
+	motors[motor_number].end_switch_triggered = 0;
+
 	run_motor(motor_number);
 
-	// run until switch encounter; the number of steps for switch release is taken into account
-	while(!(read_switch(motor_number)&&(motors[motor_number].position>motors[motor_number].num_steps_for_switch_release))){}
+	/* Mandatory blind travel: do NOT read the switch for the first 1000 ms.
+	   This ensures the mechanism has physically cleared the switch actuator. */
+	HAL_Delay(1000);
+
+	snprintf(msg, sizeof(msg), "CAL M%d: blind phase done, counting steps to switch 2...\r\n", motor_number);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* --- Phase 3: continue until switch 2 triggers, counting steps --- */
+	/* position is incremented by the TIM IRQ callback while running */
+	while (!read_switch(motor_number)) { /* spin until switch fires */ }
 
 	stop_motor(motor_number);
 
-	// abort if switch is pressed to early (less than 0.5s) or if there is an error in step counting
-	if ((HAL_GetTick()-tickstart)<500)
+	uint32_t measured_steps = motors[motor_number].position;
+
+	snprintf(msg, sizeof(msg), "CAL M%d: switch 2 hit. Steps between switches: %lu\r\n",
+	         motor_number, measured_steps);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	/* Sanity check: if we measured almost nothing the count is wrong */
+	if (measured_steps < 100)
 	{
-		while(1){};
+		snprintf(msg, sizeof(msg), "CAL M%d: ERR - step count too low (%lu), aborting\r\n",
+		         motor_number, measured_steps);
+		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+		return;
 	}
 
-	motors[motor_number].max_position=motors[motor_number].position;
+	/* --- Phase 4: update motor parameters --- */
+	motors[motor_number].max_position    = measured_steps;
+	motors[motor_number].unit_conversion = measured_steps / motors[motor_number].travel_length;
+	motors[motor_number].end_switch_triggered = 0;
+	motors[motor_number].allowed_direction    = 2;
+
+	snprintf(msg, sizeof(msg), "CAL M%d: max_pos=%lu, unit_conv=%lu. Moving to centre...\r\n",
+	         motor_number,
+	         motors[motor_number].max_position,
+	         motors[motor_number].unit_conversion);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+
+	/* --- Phase 5: drive back to the centre of the travel range --- */
+	direction_change(motor_number, motors[motor_number].direction_minus);
+	HAL_Delay(100);
+	run_motor(motor_number);
+
+	if(motor_number!=2)
+	{
+		while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
+	}
+	else
+	{
+		while (motors[motor_number].position > (motors[motor_number].max_position * 1 / 10)) { /* wait */ }
+	}
+
+	stop_motor(motor_number);
+
+	motors[motor_number].starting_position = motors[motor_number].position;
 	motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
 
-	direction_change(motor_number,motors[motor_number].direction_minus);
-	HAL_Delay(100);
+	snprintf(msg, sizeof(msg), "CAL M%d: done. Centre pos=%lu\r\n",
+	         motor_number, motors[motor_number].position);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+}
 
-	run_motor(motor_number);
+/**
+  * @brief  Calibrates motors 0, 1 and 2 sequentially.
+  *         Motor 3 (pump) is intentionally skipped — it has no end switches.
+  *         Each motor is driven to its first end switch, then in reverse for
+  *         at least 1 second (blind phase) before the second switch is detected
+  *         and the full travel range is measured in steps.
+  *         Results stored in motors[n].max_position and motors[n].unit_conversion.
+  * @retval None
+  */
+void calibrate_all_motors(void)
+{
+	serial_print_string("CALIBRATION: starting motors 0, 1, 2...\r\n");
 
-	while(motors[motor_number].position>(motors[motor_number].max_position/2)){}
+	for (uint8_t m = 0; m <= 2; m++)
+	{
+		motors[m].reset_requested=1;
+		serial_print_string("-----------------------\r\n");
+		calibrate_motor(m);
+		motors[m].reset_requested=0;
+		HAL_Delay(500); /* short pause between motors */
+	}
 
-	stop_motor(motor_number);
+	serial_print_string("CALIBRATION: complete.\r\n");
+
+	for (uint8_t m = 0; m <= 2; m++) {
+	    // Sredinska pozicija v korakih postane referenčna ničla ("Home")
+	    motors[m].home_position = motors[m].position;
+	}
+
+	target_x = 0;
+	target_y = 0;
+	target_o = 0;
 }
 
 /**
@@ -3679,25 +3978,100 @@ void calibrate_motor(uint8_t motor_number)
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
+    // ---------- MOTOR 0 (TIM3) ----------
+    if (htim->Instance == TIM3)
+    {
+        if (motors[0].running == true)
+        {
+            // Inkrement/Dekrement pozicije glede na trenutno smer
+            if (motors[0].direction == motors[0].direction_plus && motors[0].position<motors[0].max_position)
+            {
+                motors[0].position += 1;
+            }
+            else if (motors[0].direction == motors[0].direction_minus && motors[0].position>0)
+			{
+                motors[0].position -= 1;
+            }
+
+            // Posodobitev globalnih koordinat za end-effector (opcijsko sproti)
+            effector_x = motors[0].position / motors[0].unit_conversion;
+
+            // DOSEŽEN CILJ: Če smo prispeli na target_position, ustavi motor!
+            if (!motors[0].reset_requested && (motors[0].position == motors[0].target_position))
+            {
+                stop_motor(0);
+            }
+        }
+    }
+
+    // ---------- MOTOR 1 (TIM15) ----------
+    else if (htim->Instance == TIM15)
+    {
+        if (motors[1].running == true)
+        {
+            if (motors[1].direction == motors[1].direction_plus && motors[1].position<motors[1].max_position)
+            {
+                motors[1].position += 1;
+            }
+            else if (motors[1].direction == motors[1].direction_minus && motors[1].position>0)
+			{
+                motors[1].position -= 1;
+            }
+
+            effector_y = motors[1].position / motors[1].unit_conversion;
+
+            // DOSEŽEN CILJ
+            if (!motors[1].reset_requested && (motors[1].position == motors[1].target_position))
+            {
+                stop_motor(1);
+            }
+        }
+    }
+
+    // ---------- MOTOR 2 (TIM1) ----------
+    else if (htim->Instance == TIM1)
+    {
+        if (motors[2].running == true)
+        {
+            if (motors[2].direction == motors[2].direction_plus && motors[2].position<motors[2].max_position)
+            {
+                motors[2].position += 1;
+            }
+            else if (motors[2].direction == motors[2].direction_minus && motors[2].position>0)
+			{
+                motors[2].position -= 1;
+            }
+
+            effector_orientation = motors[2].position / mapFloat(motors[2].unit_conversion, 0, 1, 0, 1); // oz. vaša pretvorba stopinj
+
+            // DOSEŽEN CILJ
+            if (!motors[2].reset_requested && (motors[2].position == motors[2].target_position))
+            {
+                stop_motor(2);
+            }
+        }
+    }
+}
+/*void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
 	static uint16_t end_switch_reset_cnt[]={0,0,0};//[M0,M1,M2]
 
 
     if (htim->Instance == TIM3)
     {
-    	//if (false)
-		if ((((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true)
+		if (!motors[0].reset_requested&&(((motors[0].position==motors[0].max_position && motors[0].direction==motors[0].direction_plus) || (motors[0].position==0 && motors[0].direction==motors[0].direction_minus)) && !motors[0].reset_requested ) && motors[0].running==true)
 		{
 			stop_motor(0);
 			motors[0].running=false;
 		}
-		else if (motors[0].running=true && motors[0].direction==motors[0].direction_plus && (motors[0].reset_completed || motors[0].position<motors[0].max_position))
+		else if (motors[0].running==true && motors[0].direction==motors[0].direction_plus)
 		{
 			motors[0].position += 1;
 			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
-		else if (motors[0].running=true && motors[0].direction==motors[0].direction_minus && (motors[0].reset_completed || motors[0].position>0))
+		else if (motors[0].running==true && motors[0].direction==motors[0].direction_minus)
 		{
-			motors[0].position -= 1;
+			if (motors[0].position > 0) motors[0].position -= 1;
 			J1_offset_mm=motors[0].position*motors[0].unit_conversion/motors[0].num_steps_per_turn;
 		}
 
@@ -3719,21 +4093,21 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		}
 
 	}
-    else if (htim->Instance == TIM1)
+    else if (htim->Instance == TIM15)
     {
-		if ((((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true)
+		if (!motors[1].reset_requested&&(((motors[1].position==motors[1].max_position && motors[1].direction==motors[1].direction_plus) || (motors[1].position==0 && motors[1].direction==motors[1].direction_minus)) && !motors[1].reset_requested ) && motors[1].running==true)
 		{
 			stop_motor(1);
 			motors[1].running=false;
 		}
-		else if (motors[1].running=true && motors[1].direction==motors[1].direction_plus && (motors[1].reset_completed || motors[1].position<motors[1].max_position))
+		else if (motors[1].running==true && motors[1].direction==motors[1].direction_plus)
 		{
 			motors[1].position += 1;
 			//J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
-		else if (motors[1].running=true && motors[1].direction==motors[1].direction_minus && (motors[1].reset_completed || motors[1].position>0))
+		else if (motors[1].running==true && motors[1].direction==motors[1].direction_minus)
 		{
-			motors[1].position -= 1;
+			if (motors[1].position > 0) motors[1].position -= 1;
 			J2_offset_deg=motors[1].position*motors[1].unit_conversion/motors[1].num_steps_per_turn;
 		}
 
@@ -3754,21 +4128,21 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			}
 		}
     }
-    else if (htim->Instance == TIM15)
+    else if (htim->Instance == TIM1)
     {
-		if ((((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true)
+		if (!motors[2].reset_requested&&(((motors[2].position==motors[2].max_position && motors[2].direction==motors[2].direction_plus) || (motors[2].position==0 && motors[2].direction==motors[2].direction_minus)) && !motors[2].reset_requested ) && motors[2].running==true)
 		{
 			stop_motor(2);
 			motors[2].running=false;
 		}
-		else if (motors[2].running=true && motors[2].direction==motors[2].direction_plus && (motors[2].reset_completed || motors[2].position<motors[2].max_position))
+		else if (motors[2].running==true && motors[2].direction==motors[2].direction_plus)
 		{
 			motors[2].position += 1;
 			J3_offset_mm=J3_offset_base+motors[2].position*motors[2].unit_conversion/motors[2].num_steps_per_turn;
 		}
-		else if (motors[2].running=true && motors[2].direction==motors[2].direction_minus && (motors[2].reset_completed || motors[2].position>0))
+		else if (motors[2].running==true && motors[2].direction==motors[2].direction_minus)
 		{
-			motors[2].position -= 1;
+			if (motors[2].position > 0) motors[2].position -= 1;
 			J3_offset_mm=J3_offset_base+motors[2].position*motors[2].unit_conversion/motors[2].num_steps_per_turn;
 		}
 
@@ -3792,20 +4166,17 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     else if (htim->Instance == TIM12)
     {
 
-		if (motors[3].running=true && motors[3].direction==motors[3].direction_plus)
+		if (motors[3].running==true && motors[3].direction==motors[3].direction_plus)
 		{
 			motors[3].position += 1;
 			J4_ammount_of_liquid=J4_volume_per_turn*motors[3].position/motors[3].num_steps_per_turn;
 		}
-		else if (motors[3].running=true && motors[3].direction==motors[3].direction_minus)
+		else if (motors[3].running==true && motors[3].direction==motors[3].direction_minus)
 		{
-			motors[3].position -= 1;
+			if (motors[3].position > 0) motors[3].position -= 1;
 		}
     }
-    if (htim->Instance == TIM8) {
-            vl53_data_ready  = 1;
-    }
-}
+}*/
 
 /**
   * @brief  Makes the timer IRQ handler readable for the specific timer.
@@ -3962,45 +4333,204 @@ void TestADCs() {
 
 //ne rabim:
 void uart_process_command(const char* command) {
-    char response[128];
+	if (strncmp(command, "x=", 2) == 0) {
+	        int32_t val = (int32_t)atoi(command + 2);
 
-    if (strncmp(command, "STATUS", 6) == 0) {
-    	motor_status();
-    }
-    else if (strncmp(command, "STOP", 4) == 0) {
-        stop_all_motors();
-        uart_transmit("OK:All motors stopped\r\n");
-    }
-    else if (strncmp(command, "START", 5) == 0) {
-        // Parse motor number: START 0, START 1, etc.
-        int motor_num = command[6] - '0';
-        if (motor_num >= 0 && motor_num < 4) {
-            run_motor(motor_num);
-            snprintf(response, sizeof(response), "OK:Motor %d started\r\n", motor_num);
-            uart_transmit(response);
-        }
-    }
-    else if (strncmp(command, "MOVE", 4) == 0) {
-        // Example: MOVE 0 50000 - move motor 0 to position 50000
-        int motor_num, position;
-        if (sscanf(command, "MOVE %d %d", &motor_num, &position) == 2) {
-            if (motor_num >= 0 && motor_num < 4) {
-                // Add your move logic here
-                snprintf(response, sizeof(response), "OK:Moving motor %d to %d\r\n", motor_num, position);
-                uart_transmit(response);
-            }
-        }
-    }
-    else if (strncmp(command, "RESET", 5) == 0) {
-        reset_motors();
-        UART_Send_Data("OK:Motors reset\r\n");
-    }
-    else {
-        snprintf(response, sizeof(response), "ERROR:Unknown command: %s\r\n", command);
-        uart_transmit(response);
-    }
+	        // Preverjanje Bounding Boxa za X
+	        if (val >= robot_bbox.min_x && val <= robot_bbox.max_x) {
+	            target_x = val;
+	            uart_print_current_targets();
+	        } else {
+	            uart_transmit("ERROR: X izven Bounding Boxa!\r\n");
+	        }
+	    }
+	    else if (strncmp(command, "y=", 2) == 0) {
+	        int32_t val = (int32_t)atoi(command + 2);
+
+	        // Y mora biti pozitiven in znotraj Bounding Boxa
+	        if (val < 0) {
+	            uart_transmit("ERROR: Y mora biti pozitiven!\r\n");
+	        } else if (val >= robot_bbox.min_y && val <= robot_bbox.max_y) {
+	            target_y = val;
+	            uart_print_current_targets();
+	        } else {
+	            uart_transmit("ERROR: Y izven Bounding Boxa!\r\n");
+	        }
+	    }
+	    else if (strncmp(command, "O=", 2) == 0) {
+	        int32_t val = (int32_t)atoi(command + 2);
+
+	        // Omejitev orientacije na +- 30 stopinj
+	        if (val >= -30 && val <= 30) {
+	            target_o = val;
+	            uart_print_current_targets();
+	        } else {
+	            uart_transmit("ERROR: Orientacija izven dovoljenega obmocja (+/- 30 st.)! Vnesi veljavne podatke.\r\n");
+	        }
+	    }
+	    else if (strcmp(command, "go") == 0) {
+	        uart_transmit("EXEC: Zacetek premika...\r\n");
+
+	        // Pokličemo izvedbo giba
+	        execute_robot_movement();
+	    }
 }
 //konc ne rabim
+
+void execute_robot_movement(void)
+{
+    // Pomožna spremenljivka za časovno osveževanje izpisa (v milisekundah)
+    uint32_t last_print_tick = 0;
+    const uint32_t print_interval = 200; // Osveževanje na 200 ms (5-krat na sekundo)
+
+    //uint32_t d_target = sqrt((target_x-current_x)^2+(target_y-current_y)^2);
+
+    // 1. IZRAČUN CILJNIH KORAKOV GLEDE NA HOME POZICIJO
+    //motors[0].target_position = (uint32_t)((int32_t)motors[0].home_position + (int32_t)(target_x * motors[0].unit_conversion));
+    //motors[1].target_position = (uint32_t)((int32_t)motors[1].home_position + (int32_t)(target_o * motors[1].unit_conversion));
+    //motors[2].target_position = (uint32_t)((int32_t)motors[2].home_position + (int32_t)(target_y * motors[2].unit_conversion));
+
+    //float temp_target= target_x-cos((90-target_o)*PI/180)*izteg;//lokacija vozicka
+
+
+    //izračun potrebnih kotov
+    izteg=sqrt(pow(target_y/cos(target_o*PI/180),2))-motors[2].offset;
+
+    //target_x,target_y,target_o=tocka!!! ločeno se spremeni v premik motorja
+    motors[0].target_position = (int32_t)((target_x-cos((90-target_o)*PI/180)*izteg) * motors[0].unit_conversion+motors[0].max_position/2);
+    motors[1].target_position = (int32_t)(target_o * motors[1].unit_conversion+motors[1].max_position/2);
+    motors[2].target_position = (int32_t)((((target_y-motors[2].offset)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion);
+
+    // Varnostna omejitev (Saturation), da ne prebijemo kalibracijskih meja
+    /*
+    for (uint8_t m = 0; m <= 2; m++) {
+        if ((int32_t)motors[m].target_position < 0) {
+            motors[m].target_position = 0;
+        }
+        if (motors[m].target_position > motors[m].max_position) {
+            motors[m].target_position = motors[m].max_position;
+        }
+    }
+    */
+
+    // 2. NASTAVITEV SMERI
+    for (uint8_t m = 0; m <= 2; m++)
+    {
+        if (motors[m].target_position > motors[m].position) {
+            direction_change(m, motors[m].direction_plus);
+        } else if (motors[m].target_position < motors[m].position) {
+            direction_change(m, motors[m].direction_minus);
+        }
+    }
+
+    // 3. SOČASNI ZAGON: Motor 0 in Motor 1 (X in O)
+    if (motors[0].position != motors[0].target_position) run_motor(0);
+    if (motors[1].position != motors[1].target_position) run_motor(1);
+
+    // ČAKANJE IN KONSTANTEN IZPIS MED PREMIKOM X IN Y
+    while (motors[0].running || motors[1].running)
+    {
+        // Varnostni izhod ob sprožitvi stikal
+        if (motors[0].end_switch_triggered || motors[1].end_switch_triggered) {
+            stop_all_motors();
+            serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom X/Y!\r\n");
+            return;
+        }
+
+        // Periodični izpis trenutne lege vrha robota
+        if (HAL_GetTick() - last_print_tick >= print_interval) {
+            uart_print_current_targets();
+            last_print_tick = HAL_GetTick();
+        }
+
+        if((motors[0].position>motors[0].target_position && motors[0].direction==motors[0].direction_plus)||(motors[0].position<motors[0].target_position && motors[0].direction==motors[0].direction_minus))stop_motor(0);
+        if((motors[1].position>motors[1].target_position && motors[1].direction==motors[1].direction_plus)||(motors[1].position<motors[1].target_position && motors[1].direction==motors[1].direction_minus))stop_motor(1);
+
+    }
+
+    // 4. SEKVENČNI ZAGON: Motor 2 (Y), ko prva dva zaključita
+    if (motors[2].position != motors[2].target_position)
+    {
+        run_motor(2);
+
+        // ČAKANJE IN KONSTANTEN IZPIS MED PREMIKOM ORIENTACIJE
+        while (motors[2].running)
+        {
+            if (motors[2].end_switch_triggered) {
+                stop_motor(2);
+                serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom O!\r\n");
+                return;
+            }
+
+            // Periodični izpis trenutne lege vrha robota
+            if (HAL_GetTick() - last_print_tick >= print_interval) {
+                uart_print_current_targets();
+                last_print_tick = HAL_GetTick();
+            }
+
+            if((motors[2].position>motors[2].target_position && motors[2].direction==motors[2].direction_plus)||(motors[2].position<motors[2].target_position && motors[2].direction==motors[2].direction_minus))stop_motor(2);
+
+        }
+    }
+
+    // Končni izpis ob uspešnem prihodu v točko
+    serial_print_string("\r\nINFO: Premik uspesno zakljucen. Dosezena koncna tocka.\r\n");
+    uart_print_current_targets();
+}
+
+void pospravi_robota(void)
+{
+	stop_all_motors();
+
+	motors[0].target_position=0;
+	motors[1].target_position=0;
+	motors[2].target_position=motors[2].offset+motors[2].starting_position/motors[2].unit_conversion;
+
+	target_x=0;
+	target_y=motors[2].offset+motors[2].starting_position/motors[2].unit_conversion;
+	target_o=0;
+
+	for (uint8_t mo=0;mo<3;mo++)
+	{
+		if(motors[mo].position>motors[mo].home_position)
+		{
+			direction_change(mo,motors[mo].direction_minus);
+		}
+		else if(motors[mo].position<motors[mo].home_position)
+		{
+			direction_change(mo,motors[mo].direction_plus);
+		}
+	}
+
+	run_motor(2);
+
+
+	while(motors[2].position>motors[2].home_position)
+	{
+		uart_print_current_targets();
+	}
+	stop_motor(2);
+
+	run_motor(1);
+	run_motor(0);
+
+	while(motors[0].running || motors[1].running || motors[2].running)
+	{
+		uart_print_current_targets();
+
+		for(uint8_t num_motor=0;num_motor<2;num_motor++)
+		{
+			if(motors[num_motor].running)
+			{
+				if((motors[num_motor].position<motors[num_motor].home_position && motors[num_motor].direction==motors[num_motor].direction_minus)||(motors[num_motor].position>motors[num_motor].home_position && motors[num_motor].direction==motors[num_motor].direction_plus))
+				{
+					stop_motor(num_motor);
+				}
+			}
+		}
+	}
+	serial_print_string("\r\nRobot je domaci poziciji.\r\n");
+}
 
 void motor_status(void) {
     char status[256];
@@ -4019,7 +4549,39 @@ void motor_status(void) {
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-    HAL_UART_Receive_IT(&huart1, rx_buff, 30);
+	if (huart->Instance == USART3) { // Prilagodi (npr. USART1), če uporabljaš drug port
+
+	        // Preprečimo prekoračitev bufferja
+	        if (uart_rx_index < (UART_RX_BUFFER_SIZE - 1)) {
+
+	            // Če je znak konec vrstice, zaključimo niz in obdelamo ukaz
+	            if (uart_single_byte == '\n' || uart_single_byte == '\r') {
+	                if (uart_rx_index > 0) { // Obdelaj le, če buffer ni prazen
+	                    uart_rx_buffer[uart_rx_index] = '\0'; // Terminacija niza
+
+	                    // Pokličemo procesiranje ukaza neposredno iz interrupta
+	                    uart_process_command((const char*)uart_rx_buffer);
+
+	                    // Ponastavimo indeks za naslednji ukaz
+	                    uart_rx_index = 0;
+	                }
+	            }
+	            else {
+	                // Če je navaden znak, ga dodaj v buffer
+	                uart_rx_buffer[uart_rx_index++] = (char)uart_single_byte;
+	            }
+	        } else {
+	            // Buffer se je prepolnil, ga za vsak slučaj počistimo
+	            uart_rx_index = 0;
+	        }
+
+	        // KLJUČNO: Ponovno aktiviramo prekinitev za naslednji znak!
+	        HAL_UART_Receive_IT(huart, &uart_single_byte, 1);
+	    }
+	else if (huart->Instance == USART1)
+	{
+		HAL_UART_Receive_IT(&huart1, rx_buff, 30);
+	}
 }
 
 //maybe rabim?
@@ -4063,22 +4625,12 @@ void uart_transmit(char *sporocilo)
 	//char buffer[40]={'0'};
 	//sprintf(buffer,"my variable is %s \r\n",sporocilo);
 
-	if (!uart_blocks_disabled) {
 	HAL_UART_Transmit_IT(&huart1, sporocilo,strlen(sporocilo)-1);
 	HAL_Delay(1);
-	}
 }
 
 char uart_receive(char *beseda)
 {
-
-	if (uart_blocks_disabled) {
-	        if (beseda != NULL) {
-	        	beseda[0] = '\0';
-	        }
-	        return '\0';
-	    }
-
 	static char znak='\0'; 					//aktiven prebran znak
 	static char znak_temp;
 
@@ -4262,50 +4814,170 @@ static void MX_USART3_UART_Init(void) {
  */
 void USART3_IRQHandler(void)
 {
+	static uint32_t old_target_x=0;
+	static uint32_t old_target_o=0;
+	static uint32_t old_target_y=0;
+
     // Preveri, ali je interrupt od RXNE (prejet znak)
     if((__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) != RESET) &&
        (__HAL_UART_GET_IT_SOURCE(&huart3, UART_IT_RXNE) != RESET))
     {
+        // Preberemo prejeti znak iz registra
         uint8_t received_char = (uint8_t)(huart3.Instance->RDR & 0xFF);
 
-        // Preveri, ali je prejet konec vrstice (newline ali carriage return)
+        // --- ECHO BACK ---
+        // Takoj pošljemo prejeti znak nazaj po UART, da uporabnik vidi, kaj tipka
+        // Pri '\r' pošljemo še '\n', da v terminalu skoči v novo vrstico
+        HAL_UART_Transmit(&huart3, &received_char, 1, 10);
+        if (received_char == '\r') {
+            uint8_t nl = '\n';
+            HAL_UART_Transmit(&huart3, &nl, 1, 10);
+        }
+
+        // Preveri, ali je prejet konec vrstice
         if(received_char == '\n' || received_char == '\r')
         {
             if(uart3_rx_index > 0)
             {
                 // Zaključi string z null terminatorjem
                 uart3_rx_buffer[uart3_rx_index] = '\0';
+
                 uart3_command_ready = 1;
                 uart3_new_data = 1;
 
-                // Pretvori string v float in shrani v globalno spremenljivko
-                target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
 
-                // Opojdi, da je bil prejet nov tlak
-                char response[50];
-                snprintf(response, sizeof(response), "Pressure set to: %.2f bar\r\n", target_pressure);
-                HAL_UART_Transmit(&huart3, (uint8_t*)response, strlen(response), 100);
+                // --- OBDELAVA UKAZOV ZA ROBOTA (Ignorira velike/male črke) ---
+                if(strncasecmp((char*)uart3_rx_buffer, "x=", 2) == 0)
+                {//po določitvi željene orientacija določimo x
+                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
 
-                // Reset bufferja za naslednje sporočilo
+                    //float temp_target= val-cos((90-target_o)*PI/180)*izteg;//lokacija vozicka
+                    float temp_target= val;
+
+                    if(temp_target >= robot_bbox.min_x && temp_target <= robot_bbox.max_x)
+                    	{
+
+                    	target_x = temp_target;
+                    	//old_target_x=target_x;
+
+                        uart_print_current_targets();
+
+                    	}
+
+                	else
+                	{
+                        char err[] = "\r\nERROR: X izven Bounding Boxa!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                	}
+                }
+                else if(strncasecmp((char*)uart3_rx_buffer, "y=", 2) == 0)
+                {//po določitvi željene točke x določimo točko y
+                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+
+                    /*
+                    float distance = sqrt(pow(val+90,2)+pow(target_x,2));
+                    if (distance>max_izteg)
+                    {
+                    	char err[] = "\r\nERROR: Pri trenutnih pogojih je y komponenta predalec!\r\n";
+						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                    */
+
+                    float temp_target=val+motors[2].offset;
+                    float x_component=(temp_target-0)/tan((90-target_o)*PI/180);
+
+                    if(val < 0)
+                    {
+                        char err[] = "\r\nERROR: Y mora biti pozitiven!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                    else if((x_component<robot_bbox.min_x) || (x_component>robot_bbox.max_x))
+                    {
+                    	char err[] = "\r\nERROR: Y izven Bounding Boxa (x component)!\r\n";
+						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                    else if(temp_target >= robot_bbox.min_y && temp_target <= robot_bbox.max_y)
+                    {
+
+                        target_y = temp_target;
+                        //old_target_y=target_y;
+
+                        uart_print_current_targets();
+
+                    }
+                    else
+                    {
+                        char err[] = "\r\nERROR: Y izven Bounding Boxa!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                }
+                else if(strncasecmp((char*)uart3_rx_buffer, "O=", 2) == 0)
+                {//orientacijo določimo prvo
+                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+
+                    //float temp_x= target_x-cos((90-val)*PI/180)*izteg;
+                    //float temp_y= target_y-sin((90-val)*PI/180)*izteg;//90 JE OFFSET
+
+                    if((val >= -30 && val <= 30)) {/*&& (temp_y>robot_bbox.min_y && temp_y<robot_bbox.max_y) && (temp_x>robot_bbox.min_x && temp_x<robot_bbox.max_x)*/
+                        target_o = val;
+                        //target_x = old_target_x-cos((90-target_o)*PI/180)*izteg;
+                        //target_y = sin((90-target_o)*PI/180)*izteg;
+
+                        uart_print_current_targets();
+
+                    }
+                    else
+                    {
+                        char err[] = "\r\nERROR: Orientacija izven dovoljenega obmocja (+/- 30 st.)!\r\n";
+                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+                    }
+                }
+                else if(strcasecmp((char*)uart3_rx_buffer, "go") == 0)
+                {
+                    char msg[] = "\r\nEXEC: Zacetek premika robota...\r\n";
+                    HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+                    // Izvedba premika
+                    execute_robot_movement();
+                }
+                else if(strcasecmp((char*)uart3_rx_buffer, "exit") == 0)
+                {
+                    char msg[] = "\r\nEXIT: Pospravljam robota...\r\n";
+                    HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+                    // Izvedba premika
+                    pospravi_robota();
+                }
+                else
+                {
+                    // Stara regulacija tlaka (opcijsko)
+                    target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
+                    char echo[64];
+                    snprintf(echo, sizeof(echo), "\r\nPritisk set: %.2f\r\n", target_pressure);
+                    HAL_UART_Transmit(&huart3, (uint8_t*)echo, strlen(echo), 100);
+                }
+
+                // Reset bufferja
                 uart3_rx_index = 0;
-                memset((void*)uart3_rx_buffer, 0, 32);
+                memset((void*)uart3_rx_buffer, 0, sizeof(uart3_rx_buffer));
             }
         }
-        else if(received_char >= '0' && received_char <= '9' || received_char == '.' || received_char == '-')
+        else
         {
-            // Dodaj znak v buffer, če je številka, decimalna pika ali minus
-            if(uart3_rx_index < 31)
+            // Če znak ni konec vrstice in ni Backspace, ga dodaj v buffer
+            if (received_char != '\b' && uart3_rx_index < (sizeof(uart3_rx_buffer) - 1))
             {
                 uart3_rx_buffer[uart3_rx_index++] = received_char;
             }
+            // Podpora za Backspace (brisanje znaka v terminalu)
+            else if (received_char == '\b' && uart3_rx_index > 0)
+            {
+                uart3_rx_index--;
+            }
         }
-        // Ignoriraj ostale znake
 
-        // Počisti flag
+        // Počisti flag za RXNE
         __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE);
-
-        // Ponovno aktiviraj sprejem
-        HAL_UART_Receive_IT(&huart3, (uint8_t*)uart3_rx_buffer, 1);
     }
 }
 
@@ -4443,11 +5115,11 @@ void EXTI3_IRQHandler(void)
     }
 }
 
-void EXTI4_IRQHandler(void)
+void EXTI2_IRQHandler(void)
 {
-    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_4) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_4);
-        HAL_GPIO_EXTI_Callback(GPIO_PIN_4);
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_2) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_2);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_2);
     }
 }
 
@@ -4456,14 +5128,6 @@ void EXTI15_10_IRQHandler(void)
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_15);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
-    }
-}
-
-void EXTI1_IRQHandler(void)
-{
-    if(__HAL_GPIO_EXTI_GET_IT(DC_BTN_PIN) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(DC_BTN_PIN);
-        HAL_GPIO_EXTI_Callback(DC_BTN_PIN);
     }
 }
 
@@ -4480,7 +5144,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         switch(GPIO_Pin) {
             case GPIO_PIN_3://motors[0].end_switch_pin:
 				// Motor 0 Switch 1 (PE3)
-            	if(!motors[0].end_switch_triggered)
+            	if(read_switch(0))
             	{
 					stop_motor(0);
 					if (motors[0].direction=motors[0].direction_plus)
@@ -4495,13 +5159,30 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[0].running = false;
 					//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
-					motors[0].end_switch_triggered=1;
+					motors[0].end_switch_triggered=0;
             	}
+            	else if (read_switch(2))
+				{
+					stop_motor(2);
+					if (motors[2].direction=motors[2].direction_plus)
+					{
+						motors[2].position = motors[2].max_position;
+						motors[2].allowed_direction=motors[2].direction_minus;
+					}
+					else if (motors[2].direction=motors[2].direction_minus)
+					{
+						motors[2].position = 0;
+						motors[2].allowed_direction=motors[2].direction_plus;
+					}
+					motors[2].running = false;
+					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
+					motors[2].end_switch_triggered=0;
+				}
                 break;
 
-            case GPIO_PIN_15://motors[1].end_switch_pin:
+            case GPIO_PIN_2://motors[1].end_switch_pin:
                 // Motor 0 (PH15)
-            	if(!motors[1].end_switch_triggered)
+            	if(read_switch(1))
             	{
 					stop_motor(1);
 					if (motors[1].direction=motors[1].direction_plus)
@@ -4516,41 +5197,15 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					}
 					motors[1].running = false;
 					//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
-					motors[1].end_switch_triggered=1;
+					motors[1].end_switch_triggered=0;
             	}
                 break;
-
+/*
             case GPIO_PIN_4://motors[2].end_switch_pin:
                 // Motor 1 (PB4)
-            	if(!motors[2].end_switch_triggered)
-            	{
-					stop_motor(2);
-					if (motors[2].direction=motors[2].direction_plus)
-					{
-						motors[2].position = motors[2].max_position;
-						motors[2].allowed_direction=motors[2].direction_minus;
-					}
-					else if (motors[2].direction=motors[2].direction_minus)
-					{
-						motors[2].position = 0;
-						motors[2].allowed_direction=motors[2].direction_plus;
-					}
-					motors[2].running = false;
-					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
-					motors[2].end_switch_triggered=1;
-            	}
-                break;
 
-            case GPIO_PIN_1:
-                if (htim13.Instance != NULL) {
-                    dc_direction = (dc_direction == DC_DIR_FORWARD)
-                                   ? DC_DIR_REVERSE : DC_DIR_FORWARD;
-                    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
-                    HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_RESET); /* coast */
-                    dc_dir_changed = 1;
-                }
                 break;
-
+*/
             default:
                 // Unknown pin - this shouldn't happen
                 //char msg[50];
@@ -4559,137 +5214,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 break;
         }
     }
-}
-
-/**
- * @brief  Posodablja stanje in hitrost DC motorja glede na razdaljo do ovire.
- * Deluje kot neblokirajoči avtomat stanj (State Machine).
- * @param  distance_mm: Trenutna razdalja iz senzorja v milimetrih.
- * @retval None
- */
-void DC_Motor_Update(uint16_t distance_mm) {
-    /* Preprečimo neveljavne meritve senzorja (npr. 0xFFFF ob napaki) */
-    if (distance_mm == 0xFFFF || distance_mm == 0) {
-        return;
-    }
-
-    switch (dc_current_state) {
-
-        case DC_STATE_REGULATED: {
-            /* 1. Pogoj za ustavitev: dosežen minimum (preblizu ovire) */
-            if (distance_mm <= DC_DIST_MIN_MM) {
-                DC_Motor_Set_Speed(0);  /* Takojšnja ustavitev */
-                dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
-                dc_current_state = DC_STATE_WAITING;
-                serial_print_string("Blizu ovire! Stop. Cakam 5 sekund...\r\n");
-                break;
-            }
-
-            /* 2. Izračun hitrosti: dlje kot je ovira, hitreje se motor premika.
-               Uporabimo linearno interpolacijo med varnim minimumom in maksimumom. */
-            int16_t calculated_speed;
-
-            if (distance_mm >= DC_DIST_MAX_MM) {
-                /* Če smo izven regulacijskega območja (zelo daleč), gremo s polno hitrostjo */
-                calculated_speed = 950;
-            } else {
-                /* Linearna prilagoditev hitrosti med 200 (min hitrost za premik) in 950 (max) */
-                float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
-                calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
-            }
-
-            /* Varnostna omejitev, da ne preseže maksimalnega ARR časovnika (999) */
-            if (calculated_speed > 950) calculated_speed = 950;
-            if (calculated_speed < 200) calculated_speed = 200;
-
-            /* Nastavimo hitrost za vožnjo naprej (pozitivna vrednost) */
-            DC_Motor_Set_Speed(calculated_speed);
-            //serial_print_string("Priblizujem se oviri.\r\n");
-            break;
-        }
-
-        case DC_STATE_WAITING: {
-            /* Preverimo, če je pretekel določen čas (npr. 5000 ms) brez blokiranja kode */
-            if ((HAL_GetTick() - dc_stop_timestamp) >= dc_wait_time_ms) {
-                serial_print_string("Cas cakanja potekel. Umikam motor nazaj...\r\n");
-                dc_current_state = DC_STATE_RETRACTING;
-            }
-            break;
-        }
-
-        case DC_STATE_RETRACTING: {
-            /* 1. Pogoj za konec umikanja: ko dosežemo želeno varnostno razdaljo (maksimum) */
-            if (distance_mm >= DC_DIST_MAX_MM) {
-                DC_Motor_Set_Speed(0);
-                //dc_current_state = DC_STATE_REGULATED;
-                zagon_izvedbe = false;
-                serial_print_string("Umaknjen na varno razdaljo.\r\n");
-                break;
-            }
-
-            /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            DC_Motor_Set_Speed(-500);
-            break;
-        }
-
-        default:
-            //dc_current_state = DC_STATE_REGULATED;
-            break;
-    }
-}
-
-void DC_Motor_Init(void) {
-    /* 1. VKLOP UR ZA TIM13 IN PORT A (Kritično za H7!) */
-    __HAL_RCC_TIM13_CLK_ENABLE();  // <-- TA VRSTICA JE MANJKALA!
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOF_CLK_ENABLE();
-
-    // Kratek sistemski premor, da H7 uskladi registre ur (strojna specifika H7)
-        __DSB();
-        __ISB();
-
-    /* 2. Konfiguracija smernega pina PF8 */
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = GPIO_PIN_8;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-
-    /* 3. Konfiguracija PWM pina PA6 (TIM13_CH1, AF9) */
-    GPIO_InitStruct.Pin = GPIO_PIN_6;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF9_TIM13;  // AF9 je pravilen za TIM13 na PA6
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    /* 4. Konfiguracija časovnika TIM13 */
-    htim13.Instance = TIM13;
-    htim13.Init.Prescaler = 199; // 200 MHz / 200 = 1 MHz osnova
-    htim13.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim13.Init.Period = 999;    // 1 kHz frekvenca PWM signala
-    htim13.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    htim13.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-    if (HAL_TIM_PWM_Init(&htim13) != HAL_OK) {
-        Error_Handler();
-    }
-
-    /* 5. Konfiguracija PWM kanala 1 */
-    TIM_OC_InitTypeDef oc = {0};
-    oc.OCMode     = TIM_OCMODE_PWM1;
-    oc.Pulse      = 0; // Začne z ustavljenim motorjem
-    oc.OCPolarity = TIM_OCPOLARITY_HIGH;
-    oc.OCFastMode = TIM_OCFAST_DISABLE;
-    if (HAL_TIM_PWM_ConfigChannel(&htim13, &oc, TIM_CHANNEL_1) != HAL_OK) {
-        Error_Handler();
-    }
-
-    /* 6. Zagon strojnega PWM-ja */
-    HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1);
-
-    serial_print_string("DC motor init (TIM13 ure popravljene) OK\r\n");
 }
 
 /* USER CODE END 4 */
