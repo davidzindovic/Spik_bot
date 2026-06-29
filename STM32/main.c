@@ -789,6 +789,10 @@ int main(void) {
     reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2);
     */
 
+
+    //test_motor(0);
+	//test_motor(1);
+	//test_motor(2);
     calibrate_all_motors();
 
     char menu[] =
@@ -3041,13 +3045,13 @@ void test_motor(uint8_t motor_number)
 		direction_change(motor_number,motors[motor_number].direction_minus);
 		HAL_Delay(500);
 		run_motor(motor_number);
-		HAL_Delay(3000);
+		HAL_Delay(200);
 		stop_motor(motor_number);
 		HAL_Delay(1000);
 		direction_change(motor_number,motors[motor_number].direction_plus);
 		HAL_Delay(500);
 		run_motor(motor_number);
-		HAL_Delay(3000);
+		HAL_Delay(200);
 		stop_motor(motor_number);
 	//}
 }
@@ -4494,8 +4498,8 @@ void configure_end_switch_interrupts(void)
 	    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 
 	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct); // PE3
-	    GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
-	    GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
+	    //GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
+	    //GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
 	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PB4
 	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PB4
 
@@ -4559,6 +4563,7 @@ void EXTI2_IRQHandler(void)
     }
 }
 
+/*
 void EXTI15_10_IRQHandler(void)
 {
     if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
@@ -4566,6 +4571,7 @@ void EXTI15_10_IRQHandler(void)
         HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
     }
 }
+*/
 
 // Enhanced callback with proper shared line handling
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
