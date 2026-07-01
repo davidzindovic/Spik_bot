@@ -603,8 +603,8 @@ int main(void) {
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
-		.end_switch_pin = GPIO_PIN_15,//bilo 3
-		.end_switch_port = GPIOH,//bilo D
+		.end_switch_pin = GPIO_PIN_3,//bilo 15
+		.end_switch_port = GPIOD,//bilo H
 		.end_switch_triggered = 0,
 		//.end_switch1_pin = GPIO_PIN_4,//D10
 		//.end_switch1_port = GPIOB,
@@ -4498,12 +4498,12 @@ void configure_end_switch_interrupts(void)
 	    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 
 	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct); // PE3
-	    GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
+	    //GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
 	    //GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
 
 	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PB4
 
-	   // GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PB4
+	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PB4
 
 	    /*
 	    // Now manually configure EXTI for each pin
@@ -4605,10 +4605,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
 					motors[0].end_switch_triggered=0;
             	}
-            	break;
-            case GPIO_PIN_15:
-            	//else if (read_switch(2))
-				//{
+            //	break;
+            //case GPIO_PIN_15:
+            	if (read_switch(2))
+				{
 					stop_motor(2);
 					if (motors[2].direction=motors[2].direction_plus)
 					{
@@ -4623,7 +4623,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					motors[2].running = false;
 					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
 					motors[2].end_switch_triggered=0;
-				//}
+				}
                 break;
 
             case GPIO_PIN_2://motors[1].end_switch_pin:
