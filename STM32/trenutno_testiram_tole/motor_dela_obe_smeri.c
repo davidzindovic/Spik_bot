@@ -230,7 +230,7 @@ extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim12;
-//extern TIM_HandleTypeDef htim6;
+extern TIM_HandleTypeDef htim8;
 
 motor_struct_t motors[4]; // Declaration only
 
@@ -239,7 +239,7 @@ analog_pin_config_t analog_pins[6];
 typedef enum { DC_DIR_FORWARD = 0, DC_DIR_REVERSE = 1 } dc_direction_t;
 
 static TIM_HandleTypeDef       htim2;   /* unused – kept to avoid linker errors */
-static TIM_HandleTypeDef       htim8;  /* TIM13_CH1 → IN1 on PA6 (A6) */
+//static TIM_HandleTypeDef       htim8;  /* TIM13_CH1 → IN1 on PA6 (A6) */
 volatile dc_direction_t        dc_direction    = DC_DIR_FORWARD;
 volatile uint8_t               dc_dir_changed  = 0;
 
@@ -371,6 +371,7 @@ static HAL_StatusTypeDef vl_read16(uint8_t reg, uint16_t *val);
 static void VL53L0X_PerformSPADCalibration(void);
 static void MX_TIM6_Init(void);
 void TIM6_DAC_IRQHandler(void);
+static void MX_TIM8_Init(void);
 void VL53L0X_Diagnose(void);
 void DC_Motor_Init(void);
 void DC_Motor_Update(uint16_t distance_mm);
@@ -900,6 +901,7 @@ int main(void) {
 		//---------------------------------------------------------------------
 
 
+		/*
 		//--------------------------------za ptuj dc motor-------------------------------
 		// 1. Če zastavica NI postavljena, beremo tipko
 		        if (zagon_izvedbe == false) {
@@ -930,32 +932,32 @@ int main(void) {
 		            }
 
 		        }
-
+*/
 			//---------------------------------------------------------
 
 
 
 		//-----------------------------dc motor test---------------------------------
-/*
+
 		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
 		    serial_print_string("Test: Motor naprej...\r\n");
 		    DC_Motor_Set_Speed(600);
-		    HAL_Delay(3000); // Drži 3 sekunde
+		    HAL_Delay(500); // Drži 3 sekunde
 
 		    // Ustavi motor
 		    serial_print_string("Test: Motor STOP...\r\n");
 		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(1000); // Čakaj 1 sekundo
+		    HAL_Delay(500); // Čakaj 1 sekundo
 
 		    // Prisilno pošljemo ukaz za vrtenje NAZAJ (hitrost -600)
 		    serial_print_string("Test: Motor nazaj...\r\n");
 		    DC_Motor_Set_Speed(-600);
-		    HAL_Delay(3000); // Drži 3 sekunde
+		    HAL_Delay(1000); // Drži 3 sekunde
 
 		    // Ustavi motor
 		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(1000);
-*/
+		    HAL_Delay(500);
+
 		//----------------------------------------------------------------------------
 
 		/* USER CODE BEGIN 3 */
@@ -2516,26 +2518,36 @@ float nastavi_pritisk()
  *                 Positive values = forward, negative = reverse, 0 = stop.
  */
 void DC_Motor_Set_Speed(int16_t speed) {
-    // Bound the speed matching your ARR period constraint (ARR = 999)
+    // 1. Bound the input to our max ARR value (999)
     if (speed > 999)  speed = 999;
     if (speed < -999) speed = -999;
 
-    if (speed >= 0) {
-        /* FORWARD DIRECTION */
-        // Set PB4 to LOW
-        HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_RESET);
+    // 2. Handle absolute STOP condition
+    // Setting CCR to 1000 (ARR + 1) ensures the complementary channel (CH3N)
+    // stays completely and continuously LOW (0% Duty Cycle).
+    if (speed == 0) {
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, 1000);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+        return;
+    }
 
-        // Update TIM8 Channel 3 compare register
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)speed);
+    // 3. Direction & Duty Cycle Logic
+    if (speed > 0) {
+        /* FORWARD DIRECTION */
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // PB4 LOW
+
+        // Maps speed 1..999 to CCR 998..0 (which yields 0% to 100% duty cycle on CH3N)
+        uint32_t duty = 999 - (uint32_t)speed;
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
     }
     else {
         /* REVERSE DIRECTION */
-        // Set PB4 to HIGH
-        HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);   // PB4 HIGH
 
-        // Apply complementary inversion to standard PWM logic for reverse driver tracking
-        int16_t inverse_speed = 999 - (-speed);
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)inverse_speed);
+        // Convert negative speed to positive magnitude
+        uint32_t magnitude = (uint32_t)(-speed);
+        uint32_t duty = 999 - magnitude;
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
     }
 }
 
@@ -4621,10 +4633,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 break;
 
             case GPIO_PIN_1:
-                if (htim13.Instance != NULL) {
+                if (htim8.Instance != NULL) {
                     dc_direction = (dc_direction == DC_DIR_FORWARD)
                                    ? DC_DIR_REVERSE : DC_DIR_FORWARD;
-                    __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0);
+                    __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_1, 0);
                     HAL_GPIO_WritePin(DC_IN2_PORT, DC_IN2_PIN, GPIO_PIN_RESET); /* coast */
                     dc_dir_changed = 1;
                 }
@@ -4719,7 +4731,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
 void DC_Motor_Init(void) {
     /* 1. VKLOP UR ZA TIM13 IN PORT A (Kritično za H7!) */
-    __HAL_RCC_TIM13_CLK_ENABLE();  // <-- TA VRSTICA JE MANJKALA!
+    __HAL_RCC_TIM8_CLK_ENABLE();  // <-- TA VRSTICA JE MANJKALA!
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOF_CLK_ENABLE();
 
@@ -4729,29 +4741,29 @@ void DC_Motor_Init(void) {
 
     /* 2. Konfiguracija smernega pina PF8 */
     GPIO_InitTypeDef GPIO_InitStruct = {0};
-    GPIO_InitStruct.Pin = GPIO_PIN_8;
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 
     /* 3. Konfiguracija PWM pina PA6 (TIM13_CH1, AF9) */
-    GPIO_InitStruct.Pin = GPIO_PIN_6;
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF9_TIM13;  // AF9 je pravilen za TIM13 na PA6
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;  // AF9 je pravilen za TIM13 na PA6
+    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
     /* 4. Konfiguracija časovnika TIM13 */
-    htim13.Instance = TIM13;
-    htim13.Init.Prescaler = 199; // 200 MHz / 200 = 1 MHz osnova
-    htim13.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim13.Init.Period = 999;    // 1 kHz frekvenca PWM signala
-    htim13.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    htim13.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-    if (HAL_TIM_PWM_Init(&htim13) != HAL_OK) {
+    htim8.Instance = TIM8;
+    htim8.Init.Prescaler = 199; // 200 MHz / 200 = 1 MHz osnova
+    htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim8.Init.Period = 999;    // 1 kHz frekvenca PWM signala
+    htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    if (HAL_TIM_PWM_Init(&htim8) != HAL_OK) {
         Error_Handler();
     }
 
@@ -4761,12 +4773,12 @@ void DC_Motor_Init(void) {
     oc.Pulse      = 0; // Začne z ustavljenim motorjem
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
-    if (HAL_TIM_PWM_ConfigChannel(&htim13, &oc, TIM_CHANNEL_1) != HAL_OK) {
+    if (HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_1) != HAL_OK) {
         Error_Handler();
     }
 
     /* 6. Zagon strojnega PWM-ja */
-    HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
 
     serial_print_string("DC motor init (TIM13 ure popravljene) OK\r\n");
 }
