@@ -131,9 +131,9 @@ typedef struct {
  *        PF8 se uporablja kot navaden GPIO za smer.
  */
 #define DC_IN1_PORT         GPIOH
-#define DC_IN1_PIN          GPIO_PIN_15          /* A6 – TIM13_CH1 AF9 – PWM */
+#define DC_IN1_PIN          GPIO_PIN_15
 #define DC_IN2_PORT         GPIOB
-#define DC_IN2_PIN          GPIO_PIN_4          /* A1 – GPIO output, direction control */
+#define DC_IN2_PIN          GPIO_PIN_4
 
 #define DC_BTN_PORT         GPIOA
 #define DC_BTN_PIN          GPIO_PIN_1          /* A3 – EXTI1, active LOW */
@@ -634,7 +634,7 @@ int main(void) {
 		VL53L0X_Init();
 		HAL_Delay(100);
 		VL53L0X_Diagnose();
-		//MX_TIM6_Init();
+		MX_TIM6_Init();
 		MX_TIM8_Init();
 		//DC_Motor_Init();
 	} else {
@@ -867,15 +867,7 @@ int main(void) {
 	/* USER CODE BEGIN WHILE */
 
 	/*
-	//Start the PWMs
-	HAL_TIM_PWM_Start(motors[0].timer, motors[0].timer_channel);
-	HAL_TIM_PWM_Start(motors[1].timer, motors[1].timer_channel);
-	HAL_TIM_PWM_Start(motors[2].timer, motors[2].timer_channel);
 
-	// Starts interrupts (for position increments in callback functions)
-	HAL_TIM_Base_Start_IT(motors[0].timer);
-	HAL_TIM_Base_Start_IT(motors[1].timer);
-	HAL_TIM_Base_Start_IT(motors[2].timer);
 	*/
 	stop_all_motors();
 
@@ -926,9 +918,11 @@ int main(void) {
     //test_motor(0);
 	//test_motor(1);
 	//test_motor(2);
-    calibrate_all_motors();
+    //calibrate_all_motors();
     HAL_Delay(10);
-	DC_Motor_Init();  // Pokličemo tu, da povozi TIM3 nastavitve na PA6
+
+    DC_Motor_Init();
+	DC_Motor_Set_Speed(0);
 
 
     char menu[] =
@@ -966,19 +960,33 @@ int main(void) {
 		//serial_print_string("URAVNOVEŠENO!\r\n");
 
 
+///*
+ //tof test
+		while(1){
+ 		            if (vl53_data_ready) {
+		                vl53_data_ready = 0;
+		                uint16_t trenutna_razdalja = VL53L0X_ReadDistance();
+
+		                char debug_msg[64];
+		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
+		                serial_print_string(debug_msg);
+ 		             }
+		            }
+ //*/
 
 
 
 
-		/*
+/*
+ //pressure sensor test
         while(!reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2))
         {
             HAL_Delay(300);
             //motor_status();
         }
-        */
-		//test_all_motors();
 
+		//test_all_motors();
+*/
 
 
 
@@ -989,6 +997,7 @@ int main(void) {
 
 
 /*
+ //dc motor test
  		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
 		    serial_print_string("Test: Motor naprej...\r\n");
 		    DC_Motor_Set_Speed(600);
@@ -4115,6 +4124,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
                 stop_motor(2);
             }
         }
+    }
+
+    if (htim->Instance == TIM6) {
+            vl53_data_ready  = 1;
     }
 }
 /*void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
