@@ -2481,7 +2481,7 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 
 float izmeri_pritisk()
 {
-	uint8_t analog_pin_za_merjenje=1;//0 do 5
+	uint8_t analog_pin_za_merjenje=0;//0 do 5
 	float max_bari_senzor=8.2943; //vrednost pri 3.3V
 	uint32_t analog_average=0;
 
