@@ -827,7 +827,7 @@ int main(void) {
 
 
 		//uporabljeno za dc motor:
-		.end_switch_pin = GPIO_PIN_14,//D14
+		.end_switch_pin = GPIO_PIN_13,//D14
 		.end_switch_port = GPIOD,
 		.end_switch_triggered = 0,
 
@@ -946,7 +946,7 @@ int main(void) {
 		//test_motor(0);
 		//test_motor(1);
 		//test_motor(2);
-		//test_motor(3);
+		test_motor(3);
 		//test_all_motors();
 
 		//demo_za_predstavitev();
@@ -960,7 +960,7 @@ int main(void) {
 		//serial_print_string("URAVNOVEŠENO!\r\n");
 
 
-///*
+/*
  //tof test
 		while(1){
  		            if (vl53_data_ready) {
@@ -972,7 +972,7 @@ int main(void) {
 		                serial_print_string(debug_msg);
  		             }
 		            }
- //*/
+ */
 
 
 
