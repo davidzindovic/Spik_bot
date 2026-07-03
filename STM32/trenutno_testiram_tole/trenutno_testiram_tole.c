@@ -216,6 +216,9 @@ const osThreadAttr_t defaultTask_attributes = {
 /* USER CODE BEGIN PV */
 __IO uint32_t ButtonState = 0;
 
+volatile _Bool manual_mode = false;
+volatile uint8_t manual_motor_idx = 0; // Trenutno izbran motor (0-3)
+
 I2C_HandleTypeDef hi2c4;
 
 volatile float target_pressure = 0.0f;     // Ciljni tlak iz UART3
@@ -481,6 +484,9 @@ float current_y=90;
 float current_o=0;
 float izteg = 0;
 float max_izteg=105;
+_Bool premik_done=0;
+
+float igla_sklop_offset=150;//v mm
 
 #define PI 3.141592654
 
@@ -661,7 +667,7 @@ int main(void) {
 	HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_3);
 
 	// Nastavi časovnike na višjo prioriteto (npr. 3), da lahko prekinjajo UART
-	HAL_NVIC_SetPriority(USART3_IRQn, 6, 0); //?
+	HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); //?
 	HAL_NVIC_SetPriority(TIM3_IRQn, 3, 0); //?
 	//HAL_NVIC_SetPriority(TIM1_BRK_UP_TRG_COM_IRQn, 3, 0);
 
@@ -811,7 +817,7 @@ int main(void) {
 		.direction_port = GPIOD,//D15
 		.timer = &htim12,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 50000,
+		.frequency = 1000,
 		.motor_pin = GPIO_PIN_15,//D11
 		.motor_port = GPIOB,
 		.max_position = 10000,
@@ -915,15 +921,13 @@ int main(void) {
     */
 
 
-    //test_motor(0);
-	//test_motor(1);
-	//test_motor(2);
-    //calibrate_all_motors();
+
     HAL_Delay(10);
 
     DC_Motor_Init();
 	DC_Motor_Set_Speed(0);
 
+	//calibrate_all_motors();
 
     char menu[] =
             "\r\n==================================================\r\n"
@@ -934,19 +938,23 @@ int main(void) {
             "  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
             "  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
             "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
-            "--------------------------------------------------\r\n"
+            "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
+    		"--------------------------------------------------\r\n"
             " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n\r\n";
 
 	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
 	uart_print_current_targets();
 
+	//DC_Motor_Set_Speed(-600);
+
+	uint16_t trenutna_razdalja=2;
 	while (1) {
 		/* USER CODE END WHILE */
 
 		//test_motor(0);
 		//test_motor(1);
 		//test_motor(2);
-		test_motor(3);
+		//test_motor(3);
 		//test_all_motors();
 
 		//demo_za_predstavitev();
@@ -960,20 +968,33 @@ int main(void) {
 		//serial_print_string("URAVNOVEŠENO!\r\n");
 
 
-/*
- //tof test
-		while(1){
- 		            if (vl53_data_ready) {
+
+/* //tof
+		//while(1){
+ 		            if (vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)
+ 		            {
 		                vl53_data_ready = 0;
-		                uint16_t trenutna_razdalja = VL53L0X_ReadDistance();
+		                trenutna_razdalja = VL53L0X_ReadDistance();
 
-		                char debug_msg[64];
-		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
-		                serial_print_string(debug_msg);
- 		             }
-		            }
- */
+						DC_Motor_Update(trenutna_razdalja);
+		                //char debug_msg[64];
+		                //snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
+		                //serial_print_string(debug_msg);
+ 		            }
+		                else if(trenutna_razdalja==0 || trenutna_razdalja>65000)
+		                {//če zgubi podatke od senzorja ustavi dc motor
+		                	DC_Motor_Set_Speed(0);
+		                }
 
+
+			   // }
+
+*/
+
+
+		//serial_print_uint16(read_analog_pin(2));
+		//serial_print_uint16(read_analog_pin(3));
+		//serial_print_string("\r\n\n");
 
 
 
@@ -996,7 +1017,7 @@ int main(void) {
 
 
 
-/*
+
  //dc motor test
  		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
 		    serial_print_string("Test: Motor naprej...\r\n");
@@ -1016,7 +1037,7 @@ int main(void) {
 		    // Ustavi motor
 		    DC_Motor_Set_Speed(0);
 		    HAL_Delay(500);
- */
+
 
 
 		/* USER CODE BEGIN 3 */
@@ -2482,6 +2503,53 @@ static void MX_GPIO_Init(void) {
 	/* USER CODE END MX_GPIO_Init_2 */
 }
 
+
+
+/**
+  * @brief  Prebere analogni pin (_C) in vrne digitalno stanje (true/false)
+  * @param  hadc: Kazalec na ADC strukturo (npr. &hadc3)
+  * @param  channel: ADC kanal (npr. ADC_CHANNEL_0 za PA0_C ali ADC_CHANNEL_1 za PA1_C)
+  * @retval _Bool: true (HIGH) ali false (LOW)
+  */
+/*_Bool read_analog_pin_as_digital(ADC_HandleTypeDef* hadc, uint32_t channel)
+{
+    ADC_ChannelConfTypeDef sConfig = {0};
+    uint32_t raw_value = 0;
+
+    // 1. Konfiguracija kanala za to specifično meritev
+    sConfig.Channel = channel;
+    sConfig.Rank = ADC_REGULAR_RANK_1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_81CYCLES_5; // Dovolj dolg čas za stabilno meritev
+    sConfig.SingleDiff = ADC_SINGLE_ENDED;
+    sConfig.OffsetNumber = ADC_OFFSET_NONE;
+    sConfig.Offset = 0;
+
+    if (HAL_ADC_ConfigChannel(hadc, &sConfig) != HAL_OK)
+    {
+        // Napaka pri konfiguraciji
+        return false;
+    }
+
+    // 2. Izvedba meritve
+    HAL_ADC_Start(hadc);
+    if (HAL_ADC_PollForConversion(hadc, 10) == HAL_OK)
+    {
+        raw_value = HAL_ADC_GetValue(hadc);
+    }
+    HAL_ADC_Stop(hadc);
+
+    // 3. Primerjava vrednosti (16-bitni ADC: 0 do 65535)
+    // Če je napetost bližje 3.3V (nad cca 2.5V), vrnemo true
+    if (raw_value > 50000)
+    {
+        return true;  // Pin je HIGH
+    }
+    else
+    {
+        return false; // Pin je LOW (povezan na GND ali pull-down)
+    }
+}*/
+
 /* USER CODE BEGIN 4 */
 
 /**
@@ -2547,6 +2615,7 @@ void MX_ADC_Init_AnalogPins(void)
  */
 void configure_analog_pins(void)
 {
+
 	MX_ADC1_Init();
 	MX_ADC2_Init();
 	MX_ADC3_Init();
@@ -2554,9 +2623,11 @@ void configure_analog_pins(void)
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
     // Enable GPIO clocks
-    __HAL_RCC_GPIOC_CLK_ENABLE();  // For PC0, PC2_C, PC3_C
-    __HAL_RCC_GPIOF_CLK_ENABLE();  // For PF8
-    __HAL_RCC_GPIOA_CLK_ENABLE();  // For PA0_C, PA1_C
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+	__HAL_RCC_GPIOF_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+	__HAL_RCC_SYSCFG_CLK_ENABLE();
 
     // Configure PC0 as analog (A0)
     GPIO_InitStruct.Pin = GPIO_PIN_0;
@@ -2586,6 +2657,23 @@ void configure_analog_pins(void)
     // Enable PA1_C special function
     SYSCFG->PMCR |= SYSCFG_PMCR_PA1SO;
 */
+
+
+
+        // 2. Nastavitev PF8 (ki že deluje)
+        GPIO_InitStruct.Pin = GPIO_PIN_8;
+        GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+        GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+        HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
+
+
+        // PF8 uporablja EXTI9_5_IRQn
+        HAL_NVIC_SetPriority(EXTI9_5_IRQn, 4, 0);
+        HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+
     // Configure PC2_C as analog (A4)
     GPIO_InitStruct.Pin = GPIO_PIN_2;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
@@ -2611,7 +2699,8 @@ void configure_analog_pins(void)
         .name = "A0"
     };
 
-    analog_pins[1] = (analog_pin_config_t){
+    /*
+     analog_pins[1] = (analog_pin_config_t){
         .pin_number = 1,
         .adc_channel = ADC_CHANNEL_7,
         .hadc = &hadc3,  // Using ADC3 for PF8 (ADC3_IN7)
@@ -2637,7 +2726,7 @@ void configure_analog_pins(void)
         .gpio_port = GPIOA,
         .name = "A3"
     };
-
+*/
     analog_pins[4] = (analog_pin_config_t){
         .pin_number = 4,
         .adc_channel = ADC_CHANNEL_0,
@@ -2655,6 +2744,34 @@ void configure_analog_pins(void)
         .gpio_port = GPIOC,
         .name = "A5"
     };
+
+
+
+    // 2. Zapri analogna stikala, da povežeš PA0_C in PA1_C z ADC3 perifero
+        HAL_SYSCFG_AnalogSwitchConfig(SYSCFG_SWITCH_PA0, SYSCFG_SWITCH_PA0_CLOSE);
+        HAL_SYSCFG_AnalogSwitchConfig(SYSCFG_SWITCH_PA1, SYSCFG_SWITCH_PA1_CLOSE);
+
+        // 3. Konfiguracija tvoje obstoječe strukture za PA0_C (Indeks 4)
+        analog_pins[2] = (analog_pin_config_t){
+            .pin_number = 0,
+            .adc_channel = ADC_CHANNEL_0,
+            .hadc = &hadc3,
+            .gpio_pin = GPIO_PIN_0, // Za referenco, čeprav delamo preko ADC
+            .gpio_port = GPIOA,
+            .name = "PA0_C"
+        };
+
+        // 4. Konfiguracija tvoje obstoječe strukture za PA1_C (Indeks 5)
+        analog_pins[3] = (analog_pin_config_t){
+            .pin_number = 1,
+            .adc_channel = ADC_CHANNEL_1,
+            .hadc = &hadc3,
+            .gpio_pin = GPIO_PIN_1,
+            .gpio_port = GPIOA,
+            .name = "PA1_C"
+        };
+
+
 }
 
 /**
@@ -4032,6 +4149,8 @@ void calibrate_all_motors(void)
 		HAL_Delay(500); /* short pause between motors */
 	}
 
+
+
 	serial_print_string("CALIBRATION: complete.\r\n");
 
 	for (uint8_t m = 0; m <= 2; m++) {
@@ -4554,6 +4673,8 @@ void execute_robot_movement(void)
     // Končni izpis ob uspešnem prihodu v točko
     serial_print_string("\r\nINFO: Premik uspesno zakljucen. Dosezena koncna tocka.\r\n");
     uart_print_current_targets();
+
+    premik_done=1;
 }
 
 void pospravi_robota(void)
@@ -4842,6 +4963,9 @@ static void MX_USART3_UART_Init(void) {
     uart3_command_ready = 0;
     /* USER CODE END USART3_Init 1 */
 
+
+
+    /*
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
     // TX pin (PB10)
@@ -4859,6 +4983,7 @@ static void MX_USART3_UART_Init(void) {
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+     */
 
     huart3.Instance = USART3;
     huart3.Init.BaudRate = 115200;
@@ -4892,171 +5017,197 @@ static void MX_USART3_UART_Init(void) {
  */
 void USART3_IRQHandler(void)
 {
-	static uint32_t old_target_x=0;
-	static uint32_t old_target_o=0;
-	static uint32_t old_target_y=0;
+	// 1. Preberemo register za stanje (ISR - Interrupt and Status Register)
+	    //uint32_t isr_reg = USART3->ISR;
 
-    // Preveri, ali je interrupt od RXNE (prejet znak)
-    if((__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) != RESET) &&
-       (__HAL_UART_GET_IT_SOURCE(&huart3, UART_IT_RXNE) != RESET))
-    {
-        // Preberemo prejeti znak iz registra
-        uint8_t received_char = (uint8_t)(huart3.Instance->RDR & 0xFF);
-
-        // --- ECHO BACK ---
-        // Takoj pošljemo prejeti znak nazaj po UART, da uporabnik vidi, kaj tipka
-        // Pri '\r' pošljemo še '\n', da v terminalu skoči v novo vrstico
-        HAL_UART_Transmit(&huart3, &received_char, 1, 10);
-        if (received_char == '\r') {
-            uint8_t nl = '\n';
-            HAL_UART_Transmit(&huart3, &nl, 1, 10);
-        }
-
-        // Preveri, ali je prejet konec vrstice
-        if(received_char == '\n' || received_char == '\r')
-        {
-            if(uart3_rx_index > 0)
-            {
-                // Zaključi string z null terminatorjem
-                uart3_rx_buffer[uart3_rx_index] = '\0';
-
-                uart3_command_ready = 1;
-                uart3_new_data = 1;
+	    // 2. Če je prekinitev sprožil prejet znak (RXNE - Read Data Register Not Empty)
+	    //if (isr_reg & USART_ISR_RXNE_RXFNE)
+	    //{
+	        // NUJNO: Branje registra RDR avtomatsko počisti RXNE zastavico!
+	     //   volatile uint8_t received_char = (uint8_t)(USART3->RDR & 0xFF);
 
 
-                // --- OBDELAVA UKAZOV ZA ROBOTA (Ignorira velike/male črke) ---
-                if(strncasecmp((char*)uart3_rx_buffer, "x=", 2) == 0)
-                {//po določitvi željene orientacija določimo x
-                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+	    	static uint32_t old_target_x=0;
+	    	static uint32_t old_target_o=0;
+	    	static uint32_t old_target_y=0;
 
-                    //float temp_target= val-cos((90-target_o)*PI/180)*izteg;//lokacija vozicka
-                    float temp_target= val;
+	        // Preveri, ali je interrupt od RXNE (prejet znak)
+	        if((__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) != RESET) &&
+	           (__HAL_UART_GET_IT_SOURCE(&huart3, UART_IT_RXNE) != RESET))
+	        {
+	            // Preberemo prejeti znak iz registra
+	            uint8_t received_char = (uint8_t)(huart3.Instance->RDR & 0xFF);
 
-                    if(temp_target >= robot_bbox.min_x && temp_target <= robot_bbox.max_x)
-                    	{
+	            // --- ECHO BACK ---
+	            // Takoj pošljemo prejeti znak nazaj po UART, da uporabnik vidi, kaj tipka
+	            // Pri '\r' pošljemo še '\n', da v terminalu skoči v novo vrstico
+	            HAL_UART_Transmit(&huart3, &received_char, 1, 10);
+	            if (received_char == '\r') {
+	                uint8_t nl = '\n';
+	                HAL_UART_Transmit(&huart3, &nl, 1, 10);
+	            }
 
-                    	target_x = temp_target;
-                    	//old_target_x=target_x;
+	            // Preveri, ali je prejet konec vrstice
+	            if(received_char == '\n' || received_char == '\r')
+	            {
+	                if(uart3_rx_index > 0)
+	                {
+	                    // Zaključi string z null terminatorjem
+	                    uart3_rx_buffer[uart3_rx_index] = '\0';
 
-                        uart_print_current_targets();
+	                    uart3_command_ready = 1;
+	                    uart3_new_data = 1;
 
-                    	}
 
-                	else
-                	{
-                        char err[] = "\r\nERROR: X izven Bounding Boxa!\r\n";
-                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                	}
-                }
-                else if(strncasecmp((char*)uart3_rx_buffer, "y=", 2) == 0)
-                {//po določitvi željene točke x določimo točko y
-                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+	                    // --- OBDELAVA UKAZOV ZA ROBOTA (Ignorira velike/male črke) ---
+	                    if(strncasecmp((char*)uart3_rx_buffer, "x=", 2) == 0)
+	                    {//po določitvi željene orientacija določimo x
+	                        int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
 
-                    /*
-                    float distance = sqrt(pow(val+90,2)+pow(target_x,2));
-                    if (distance>max_izteg)
-                    {
-                    	char err[] = "\r\nERROR: Pri trenutnih pogojih je y komponenta predalec!\r\n";
-						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                    }
-                    */
+	                        //float temp_target= val-cos((90-target_o)*PI/180)*izteg;//lokacija vozicka
+	                        float temp_target= val;
 
-                    float temp_target=val+motors[2].offset;
-                    float x_component=(temp_target-0)/tan((90-target_o)*PI/180);
+	                        if(temp_target >= robot_bbox.min_x && temp_target <= robot_bbox.max_x)
+	                        	{
 
-                    if(val < 0)
-                    {
-                        char err[] = "\r\nERROR: Y mora biti pozitiven!\r\n";
-                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                    }
-                    else if((x_component<robot_bbox.min_x) || (x_component>robot_bbox.max_x))
-                    {
-                    	char err[] = "\r\nERROR: Y izven Bounding Boxa (x component)!\r\n";
-						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                    }
-                    else if(temp_target >= robot_bbox.min_y && temp_target <= robot_bbox.max_y)
-                    {
+	                        	target_x = temp_target;
+	                        	//old_target_x=target_x;
 
-                        target_y = temp_target;
-                        //old_target_y=target_y;
+	                            uart_print_current_targets();
 
-                        uart_print_current_targets();
+	                        	}
 
-                    }
-                    else
-                    {
-                        char err[] = "\r\nERROR: Y izven Bounding Boxa!\r\n";
-                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                    }
-                }
-                else if(strncasecmp((char*)uart3_rx_buffer, "O=", 2) == 0)
-                {//orientacijo določimo prvo
-                    int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
+	                    	else
+	                    	{
+	                            char err[] = "\r\nERROR: X izven Bounding Boxa!\r\n";
+	                            HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+	                    	}
+	                    }
+	                    else if(strncasecmp((char*)uart3_rx_buffer, "y=", 2) == 0)
+	                    {//po določitvi željene točke x določimo točko y
+	                        int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
 
-                    //float temp_x= target_x-cos((90-val)*PI/180)*izteg;
-                    //float temp_y= target_y-sin((90-val)*PI/180)*izteg;//90 JE OFFSET
+	                        /*
+	                        float distance = sqrt(pow(val+90,2)+pow(target_x,2));
+	                        if (distance>max_izteg)
+	                        {
+	                        	char err[] = "\r\nERROR: Pri trenutnih pogojih je y komponenta predalec!\r\n";
+	    						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+	                        }
+	                        */
 
-                    if((val >= -30 && val <= 30)) {/*&& (temp_y>robot_bbox.min_y && temp_y<robot_bbox.max_y) && (temp_x>robot_bbox.min_x && temp_x<robot_bbox.max_x)*/
-                        target_o = val;
-                        //target_x = old_target_x-cos((90-target_o)*PI/180)*izteg;
-                        //target_y = sin((90-target_o)*PI/180)*izteg;
+	                        float temp_target=val+motors[2].offset+igla_sklop_offset;
+	                        float x_component=(temp_target-0)/tan((90-target_o)*PI/180);
 
-                        uart_print_current_targets();
+	                        if(val < 0)
+	                        {
+	                            char err[] = "\r\nERROR: Y mora biti pozitiven!\r\n";
+	                            HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+	                        }
+	                        else if((x_component<robot_bbox.min_x) || (x_component>robot_bbox.max_x))
+	                        {
+	                        	char err[] = "\r\nERROR: Y izven Bounding Boxa (x component)!\r\n";
+	    						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+	                        }
+	                        else if(temp_target >= robot_bbox.min_y && temp_target <= robot_bbox.max_y)
+	                        {
 
-                    }
-                    else
-                    {
-                        char err[] = "\r\nERROR: Orientacija izven dovoljenega obmocja (+/- 30 st.)!\r\n";
-                        HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-                    }
-                }
-                else if(strcasecmp((char*)uart3_rx_buffer, "go") == 0)
-                {
-                    char msg[] = "\r\nEXEC: Zacetek premika robota...\r\n";
-                    HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+	                            target_y = temp_target;
+	                            //old_target_y=target_y;
 
-                    // Izvedba premika
-                    execute_robot_movement();
-                }
-                else if(strcasecmp((char*)uart3_rx_buffer, "exit") == 0)
-                {
-                    char msg[] = "\r\nEXIT: Pospravljam robota...\r\n";
-                    HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+	                            uart_print_current_targets();
 
-                    // Izvedba premika
-                    pospravi_robota();
-                }
-                else
-                {
-                    // Stara regulacija tlaka (opcijsko)
-                    target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
-                    char echo[64];
-                    snprintf(echo, sizeof(echo), "\r\nPritisk set: %.2f\r\n", target_pressure);
-                    HAL_UART_Transmit(&huart3, (uint8_t*)echo, strlen(echo), 100);
-                }
+	                        }
+	                        else
+	                        {
+	                            char err[] = "\r\nERROR: Y izven Bounding Boxa!\r\n";
+	                            HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+	                        }
+	                    }
+	                    else if(strncasecmp((char*)uart3_rx_buffer, "O=", 2) == 0)
+	                    {//orientacijo določimo prvo
+	                        int32_t val = (int32_t)atoi((char*)uart3_rx_buffer + 2);
 
-                // Reset bufferja
-                uart3_rx_index = 0;
-                memset((void*)uart3_rx_buffer, 0, sizeof(uart3_rx_buffer));
-            }
-        }
-        else
-        {
-            // Če znak ni konec vrstice in ni Backspace, ga dodaj v buffer
-            if (received_char != '\b' && uart3_rx_index < (sizeof(uart3_rx_buffer) - 1))
-            {
-                uart3_rx_buffer[uart3_rx_index++] = received_char;
-            }
-            // Podpora za Backspace (brisanje znaka v terminalu)
-            else if (received_char == '\b' && uart3_rx_index > 0)
-            {
-                uart3_rx_index--;
-            }
-        }
+	                        //float temp_x= target_x-cos((90-val)*PI/180)*izteg;
+	                        //float temp_y= target_y-sin((90-val)*PI/180)*izteg;//90 JE OFFSET
 
-        // Počisti flag za RXNE
-        __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE);
-    }
+	                        if((val >= -30 && val <= 30)) {/*&& (temp_y>robot_bbox.min_y && temp_y<robot_bbox.max_y) && (temp_x>robot_bbox.min_x && temp_x<robot_bbox.max_x)*/
+	                            target_o = val;
+	                            //target_x = old_target_x-cos((90-target_o)*PI/180)*izteg;
+	                            //target_y = sin((90-target_o)*PI/180)*izteg;
+
+	                            uart_print_current_targets();
+
+	                        }
+	                        else
+	                        {
+	                            char err[] = "\r\nERROR: Orientacija izven dovoljenega obmocja (+/- 30 st.)!\r\n";
+	                            HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+	                        }
+	                    }
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "go") == 0)
+	                    {
+	                        char msg[] = "\r\nEXEC: Zacetek premika robota...\r\n";
+	                        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	                        // Izvedba premika
+	                        execute_robot_movement();
+	                    }
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "exit") == 0)
+	                    {
+	                        char msg[] = "\r\nEXIT: Pospravljam robota...\r\n";
+	                        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+	                        // Izvedba premika
+	                        pospravi_robota();
+	                    }
+	                    else
+	                    {
+	                        // Stara regulacija tlaka (opcijsko)
+	                        target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
+	                        char echo[64];
+	                        snprintf(echo, sizeof(echo), "\r\nPritisk set: %.2f\r\n", target_pressure);
+	                        HAL_UART_Transmit(&huart3, (uint8_t*)echo, strlen(echo), 100);
+	                    }
+
+	                    // Reset bufferja
+	                    uart3_rx_index = 0;
+	                    memset((void*)uart3_rx_buffer, 0, sizeof(uart3_rx_buffer));
+	                }
+	            }
+	            else
+	            {
+	                // Če znak ni konec vrstice in ni Backspace, ga dodaj v buffer
+	                if (received_char != '\b' && uart3_rx_index < (sizeof(uart3_rx_buffer) - 1))
+	                {
+	                    uart3_rx_buffer[uart3_rx_index++] = received_char;
+	                }
+	                // Podpora za Backspace (brisanje znaka v terminalu)
+	                else if (received_char == '\b' && uart3_rx_index > 0)
+	                {
+	                    uart3_rx_index--;
+	                }
+	            }
+
+	            // Počisti flag za RXNE
+	            __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE);
+	        }
+	    //}
+
+	    // 3. NUJNO ZA STM32H7: Preverjanje in čiščenje napak (Overrun, Framing, Noise)
+	    // Če pride do napake (npr. Overrun - ORE), RXNE prekinitev zmrzne in nenehno sproža handler!
+	    //if (isr_reg & (USART_ISR_ORE | USART_ISR_NE | USART_ISR_FE | USART_ISR_PE))
+	    //{
+	        // Počistimo vse napake z vpisom v ICR (Interrupt Flag Clear Register)
+	    //    USART3->ICR = USART_ICR_ORECF | USART_ICR_NECF | USART_ICR_FECF | USART_ICR_PECF;
+	    //}
+
+
+
+
+
+
+
 }
 
 
@@ -5219,6 +5370,14 @@ void EXTI15_10_IRQHandler(void)
         __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_15);
         HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
     }
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_10) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_10);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_10);
+    }
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_11) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_11);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_11);
+    }
 }
 
 
@@ -5228,92 +5387,149 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     static uint32_t last_interrupt_time = 0;
     uint32_t current_time = HAL_GetTick();
 
-    // Debouncing - ignore interrupts within 50ms
-    if((current_time - last_interrupt_time > 50)) {
-        last_interrupt_time = current_time;
+    /*
+    _Bool pin_PF8  = (HAL_GPIO_ReadPin(GPIOF, GPIO_PIN_8)  == GPIO_PIN_SET);
+	_Bool pin_PB10 = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == GPIO_PIN_SET);
+	_Bool pin_PB11 = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == GPIO_PIN_SET);
+	// KORAK 1: Če so pritisnjene vse tri tipke hkrati -> Vstop v Manual Mode
+	    if (pin_PF8 && pin_PB10 && pin_PB11)
+	    {
+	        stop_all_motors();
+	        manual_mode = true;
+	        manual_motor_idx = 0; // Ponastavimo na prvi motor
 
-        switch(GPIO_Pin) {
-            case GPIO_PIN_3://motors[0].end_switch_pin:
-				// Motor 0 Switch 1 (PE3)
-            	if(read_switch(0))
-            	{
-					stop_motor(0);
-					if (motors[0].direction=motors[0].direction_plus)
-					{
-						motors[0].position = motors[0].max_position;
-						motors[0].allowed_direction=motors[0].direction_minus;
-					}
-					else if (motors[0].direction=motors[0].direction_minus)
-					{
-						motors[0].position = 0;
-						motors[0].allowed_direction=motors[0].direction_plus;
-					}
-					motors[0].running = false;
-					//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
-					motors[0].end_switch_triggered=0;
-            	}
-            //	break;
-            //case GPIO_PIN_15:
-            	if (read_switch(2))
-				{
-					stop_motor(2);
-					if (motors[2].direction=motors[2].direction_plus)
-					{
-						motors[2].position = motors[2].max_position;
-						motors[2].allowed_direction=motors[2].direction_minus;
-					}
-					else if (motors[2].direction=motors[2].direction_minus)
-					{
-						motors[2].position = 0;
-						motors[2].allowed_direction=motors[2].direction_plus;
-					}
-					motors[2].running = false;
-					//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
-					motors[2].end_switch_triggered=0;
-				}
-                break;
+	        char msg[] = "\r\n[MANUAL] Vstop v rocni nacin! Vsi motorji zaustavljeni.\r\n";
+	        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 10);
+	        return; // Prekinemo nadaljnjo obdelavo posameznih klikov v tem ciklu
+	    }
 
-            case GPIO_PIN_2://motors[1].end_switch_pin:
-                // Motor 0 (PH15)
-            	if(read_switch(1))
-            	{
-					stop_motor(1);
-					if (motors[1].direction=motors[1].direction_plus)
-					{
-						motors[1].position = motors[1].max_position;
-						motors[1].allowed_direction=motors[1].direction_minus;
-					}
-					else if (motors[1].direction=motors[1].direction_minus)
-					{
-						motors[1].position = 0;
-						motors[1].allowed_direction=motors[1].direction_plus;
-					}
-					motors[1].running = false;
-					//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
-					motors[1].end_switch_triggered=0;
-            	}
-                break;
+	    // KORAK 2: Ukazi se izvršijo ŠELE, ko smo že v "manual mode"
+	    if (manual_mode)
+	    {
+	        // PF8 -> Izbira motorja (vsak klik poveča indeks)
+	        if (GPIO_Pin == GPIO_PIN_8 && pin_PF8)
+	        {
+	            stop_motor(manual_motor_idx); // Za vsak primer ustavimo prejšnjega
+	            manual_motor_idx = (manual_motor_idx + 1) % num_of_motors; // num_of_motors je definiran kot 4
 
+	            char msg[50];
+	            snprintf(msg, sizeof(msg), "[MANUAL] Izbran motor indeks: %d\r\n", manual_motor_idx);
+	            HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 10);
+	        }
 
-            case GPIO_PIN_14:
-            	if(read_switch(3))
-            	{
-            		DC_Motor_Update(0);//POPRAVI!!!
-            	}
-/*
-            case GPIO_PIN_4://motors[2].end_switch_pin:
-                // Motor 1 (PB4)
+	        // PA0 -> Premik motorja v MINUS smer
+	        else if (GPIO_Pin == GPIO_PIN_10 && pin_PB10)
+	        {
+	            direction_change(manual_motor_idx, 0); // 0 oz. false predstavlja minus smer glede na vaš motor_struct_t
+	            run_motor(manual_motor_idx);
 
-                break;
+	            char msg[] = "[MANUAL] Premik v MINUS smer\r\n";
+	            HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 10);
+	        }
+
+	        // PA1 -> Premik motorja v PLUS smer
+	        else if (GPIO_Pin == GPIO_PIN_11 && pin_PB11)
+	        {
+	            direction_change(manual_motor_idx, 1); // 1 oz. true predstavlja plus smer
+	            run_motor(manual_motor_idx);
+
+	            char msg[] = "[MANUAL] Premik v PLUS smer\r\n";
+	            HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 10);
+	        }
+
+	        if (!pin_PB10 && !pin_PB11 && manual_mode) {
+	            stop_motor(manual_motor_idx);
+	        }
+	    }
+	    else{
 */
-            default:
-                // Unknown pin - this shouldn't happen
-                //char msg[50];
-                //snprintf(msg, sizeof(msg), "Unknown GPIO: %d\r\n", GPIO_Pin);
-                //uart_transmit(msg);
-                break;
-        }
-    }
+			// Debouncing - ignore interrupts within 50ms
+			if((current_time - last_interrupt_time > 50)) {
+				last_interrupt_time = current_time;
+
+				switch(GPIO_Pin) {
+					case GPIO_PIN_3://motors[0].end_switch_pin:
+						// Motor 0 Switch 1 (PE3)
+						if(read_switch(0))
+						{
+							stop_motor(0);
+							if (motors[0].direction=motors[0].direction_plus)
+							{
+								motors[0].position = motors[0].max_position;
+								motors[0].allowed_direction=motors[0].direction_minus;
+							}
+							else if (motors[0].direction=motors[0].direction_minus)
+							{
+								motors[0].position = 0;
+								motors[0].allowed_direction=motors[0].direction_plus;
+							}
+							motors[0].running = false;
+							//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
+							motors[0].end_switch_triggered=0;
+						}
+					//	break;
+					//case GPIO_PIN_15:
+						if (read_switch(2))
+						{
+							stop_motor(2);
+							if (motors[2].direction=motors[2].direction_plus)
+							{
+								motors[2].position = motors[2].max_position;
+								motors[2].allowed_direction=motors[2].direction_minus;
+							}
+							else if (motors[2].direction=motors[2].direction_minus)
+							{
+								motors[2].position = 0;
+								motors[2].allowed_direction=motors[2].direction_plus;
+							}
+							motors[2].running = false;
+							//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
+							motors[2].end_switch_triggered=0;
+						}
+						break;
+
+					case GPIO_PIN_2://motors[1].end_switch_pin:
+						// Motor 0 (PH15)
+						if(read_switch(1))
+						{
+							stop_motor(1);
+							if (motors[1].direction=motors[1].direction_plus)
+							{
+								motors[1].position = motors[1].max_position;
+								motors[1].allowed_direction=motors[1].direction_minus;
+							}
+							else if (motors[1].direction=motors[1].direction_minus)
+							{
+								motors[1].position = 0;
+								motors[1].allowed_direction=motors[1].direction_plus;
+							}
+							motors[1].running = false;
+							//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
+							motors[1].end_switch_triggered=0;
+						}
+						break;
+
+
+					case GPIO_PIN_14:
+						if(read_switch(3))
+						{
+							DC_Motor_Set_Speed(0);//POPRAVI!!!
+						}
+		/*
+					case GPIO_PIN_4://motors[2].end_switch_pin:
+						// Motor 1 (PB4)
+
+						break;
+		*/
+					default:
+						// Unknown pin - this shouldn't happen
+						//char msg[50];
+						//snprintf(msg, sizeof(msg), "Unknown GPIO: %d\r\n", GPIO_Pin);
+						//uart_transmit(msg);
+						break;
+					}
+				}
+	   // }
 }
 
 /**
@@ -5390,18 +5606,24 @@ void DC_Motor_Update(uint16_t distance_mm) {
                Uporabimo linearno interpolacijo med varnim minimumom in maksimumom. */
             int16_t calculated_speed;
 
-            if (distance_mm >= DC_DIST_MAX_MM) {
+            //if (distance_mm >= DC_DIST_MAX_MM) {
                 /* Če smo izven regulacijskega območja (zelo daleč), gremo s polno hitrostjo */
-                calculated_speed = 950;
-            } else {
+            //    calculated_speed = 950;
+            //} else
+            	if(distance_mm>(DC_DIST_MIN_MM+30)) {
                 /* Linearna prilagoditev hitrosti med 200 (min hitrost za premik) in 950 (max) */
-                float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
-                calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
+                //float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
+                //calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
+            	calculated_speed=900;
             }
+            	else
+            	{
+            		calculated_speed=200;
+            	}
 
             /* Varnostna omejitev, da ne preseže maksimalnega ARR časovnika (999) */
-            if (calculated_speed > 950) calculated_speed = 950;
-            if (calculated_speed < 200) calculated_speed = 200;
+            //if (calculated_speed > 950) calculated_speed = 950;
+            //if (calculated_speed < 200) calculated_speed = 200;
 
             /* Nastavimo hitrost za vožnjo naprej (pozitivna vrednost) */
             DC_Motor_Set_Speed(calculated_speed);
@@ -5425,11 +5647,12 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 //dc_current_state = DC_STATE_REGULATED;
                 zagon_izvedbe = false;
                 serial_print_string("Umaknjen na varno razdaljo.\r\n");
+                premik_done=0;
                 break;
             }
 
             /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            DC_Motor_Set_Speed(-500);
+            DC_Motor_Set_Speed(-900);
             break;
         }
 
