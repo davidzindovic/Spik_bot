@@ -941,8 +941,8 @@ int main(void) {
 
 		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
 		    serial_print_string("Test: Motor naprej...\r\n");
-		    DC_Motor_Set_Speed(600);
-		    HAL_Delay(500); // Drži 3 sekunde
+		    DC_Motor_Set_Speed(500);
+		    HAL_Delay(3000); // Drži 3 sekunde
 
 		    // Ustavi motor
 		    serial_print_string("Test: Motor STOP...\r\n");
@@ -951,8 +951,8 @@ int main(void) {
 
 		    // Prisilno pošljemo ukaz za vrtenje NAZAJ (hitrost -600)
 		    serial_print_string("Test: Motor nazaj...\r\n");
-		    DC_Motor_Set_Speed(-600);
-		    HAL_Delay(1000); // Drži 3 sekunde
+		    DC_Motor_Set_Speed(-500);
+		    HAL_Delay(3000); // Drži 3 sekunde
 
 		    // Ustavi motor
 		    DC_Motor_Set_Speed(0);
@@ -2525,29 +2525,31 @@ void DC_Motor_Set_Speed(int16_t speed) {
     // 2. Handle absolute STOP condition
     // Setting CCR to 1000 (ARR + 1) ensures the complementary channel (CH3N)
     // stays completely and continuously LOW (0% Duty Cycle).
-    if (speed == 0) {
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, 1000);
+    if (speed >= 0) {
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)speed);
         return;
     }
 
     // 3. Direction & Duty Cycle Logic
-    if (speed > 0) {
+    //if (speed > 0) {
         /* FORWARD DIRECTION */
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // PB4 LOW
+    //    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // PB4 LOW
 
         // Maps speed 1..999 to CCR 998..0 (which yields 0% to 100% duty cycle on CH3N)
-        uint32_t duty = 999 - (uint32_t)speed;
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
-    }
+    //    uint32_t duty = 999 - (uint32_t)speed;
+     //   __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
+    //}
     else {
         /* REVERSE DIRECTION */
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);   // PB4 HIGH
 
         // Convert negative speed to positive magnitude
-        uint32_t magnitude = (uint32_t)(-speed);
-        uint32_t duty = 999 - magnitude;
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
+        //uint32_t magnitude = (uint32_t)(-speed);
+        //uint32_t duty = 999 - magnitude;
+        int16_t inverse_speed = 999 - (-speed);
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t) inverse_speed);
+       // __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
     }
 }
 
