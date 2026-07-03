@@ -346,6 +346,7 @@ void EXTI2_IRQHandler(void);
 void EXTI15_10_IRQHandler(void);
 void EXTI1_IRQHandler(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm);
 //void USART_write(int ch);
 
 //void UART_Write_String(char *p);
@@ -485,6 +486,7 @@ float current_o=0;
 float izteg = 0;
 float max_izteg=105;
 _Bool premik_done=0;
+_Bool lin_motor_running=0;
 
 float igla_sklop_offset=150;//v mm
 
@@ -642,7 +644,7 @@ int main(void) {
 		VL53L0X_Diagnose();
 		MX_TIM6_Init();
 		MX_TIM8_Init();
-		//DC_Motor_Init();
+		DC_Motor_Init();
 	} else {
 		serial_print_string("Senzorja na 0x52 ni. Preskakujem init, da preprecim HardFault.\r\n");
 	}
@@ -922,12 +924,12 @@ int main(void) {
 
 
 
-    HAL_Delay(10);
+    HAL_Delay(100);
 
-    DC_Motor_Init();
-	DC_Motor_Set_Speed(0);
 
-	//calibrate_all_motors();
+
+    DC_Motor_Set_Speed(0);
+	calibrate_all_motors();
 
     char menu[] =
             "\r\n==================================================\r\n"
@@ -944,8 +946,6 @@ int main(void) {
 
 	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
 	uart_print_current_targets();
-
-	//DC_Motor_Set_Speed(-600);
 
 	uint16_t trenutna_razdalja=2;
 	while (1) {
@@ -969,7 +969,7 @@ int main(void) {
 
 
 
-/* //tof
+ //tof
 		//while(1){
  		            if (vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)
  		            {
@@ -989,7 +989,7 @@ int main(void) {
 
 			   // }
 
-*/
+
 
 
 		//serial_print_uint16(read_analog_pin(2));
@@ -1017,7 +1017,7 @@ int main(void) {
 
 
 
-
+/*
  //dc motor test
  		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
 		    serial_print_string("Test: Motor naprej...\r\n");
@@ -1037,7 +1037,7 @@ int main(void) {
 		    // Ustavi motor
 		    DC_Motor_Set_Speed(0);
 		    HAL_Delay(500);
-
+*/
 
 
 		/* USER CODE BEGIN 3 */
@@ -1464,18 +1464,17 @@ static void MX_TIM8_Init(void)
     /* Note: GPIO Initialization for PH15 (AF3) should be called here or inside HAL_TIM_PWM_MspInit */
 }
 
+/*
 void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
 {
     if(htim_pwm->Instance == TIM8)
     {
-        /* Enable Peripheral Clocks */
         __HAL_RCC_TIM8_CLK_ENABLE();
         __HAL_RCC_GPIOH_CLK_ENABLE();
 
-        /* PH15 GPIO configuration happens here if using strict CubeMX structure */
     }
 }
-
+*/
 
 
 
@@ -2482,23 +2481,23 @@ static void MX_GPIO_Init(void) {
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 	*/
 
+	/*
 	GPIO_InitStruct.Pin = GPIO_PIN_4;
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;   // Push-Pull output
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-	/* Set direction pin to LOW at startup (default forward) */
+
 	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 
-	/* ---- Configure PWM Pin (PH15 for TIM8_CH3N) ---- */
 	GPIO_InitStruct.Pin = GPIO_PIN_15;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	GPIO_InitStruct.Alternate = GPIO_AF3_TIM8;     // AF3 maps TIM8 to Port H
 	HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
-
+*/
 
 	/* USER CODE END MX_GPIO_Init_2 */
 }
@@ -4430,6 +4429,18 @@ void TIM8_BRK_TIM12_IRQHandler(void)
     HAL_TIM_IRQHandler(&htim12);
 }
 
+void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
+{
+    if(htim_pwm->Instance == TIM8)
+    {
+        /* Enable Peripheral Clocks */
+        __HAL_RCC_TIM8_CLK_ENABLE();
+        __HAL_RCC_GPIOH_CLK_ENABLE();
+
+        /* PH15 GPIO configuration happens here if using strict CubeMX structure */
+    }
+}
+
 static void MPU_Config(void)
 {
   MPU_Region_InitTypeDef MPU_InitStruct = {0};
@@ -5515,6 +5526,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 						{
 							DC_Motor_Set_Speed(0);//POPRAVI!!!
 						}
+						break;
 		/*
 					case GPIO_PIN_4://motors[2].end_switch_pin:
 						// Motor 1 (PB4)
@@ -5544,36 +5556,41 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
  *                 Positive values = forward, negative = reverse, 0 = stop.
  */
 void DC_Motor_Set_Speed(int16_t speed) {
-    // 1. Bound the input to our max ARR value (999)
+
+	if (speed==0 && lin_motor_running)
+	{
+		HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_3);
+		return;
+	}
+	else if (speed!=0 && !lin_motor_running)
+	{
+		//zastarta timer:
+		//HAL_TIM_Base_Start(&htim8);
+		//HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+		//HAL_TIM_Base_Start_IT(&htim8);
+		//*htim8->Instance->DIER |= TIM_DIER_UIE; // force it
+		HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+		lin_motor_running = 1;
+	}
+
     if (speed > 999)  speed = 999;
     if (speed < -999) speed = -999;
 
-    // 2. Handle absolute STOP condition
-    // Setting CCR to 1000 (ARR + 1) ensures the complementary channel (CH3N)
-    // stays completely and continuously LOW (0% Duty Cycle).
-    if (speed == 0) {
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, 1000);
+
+    if (speed >= 0) {
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)speed);
         return;
     }
 
-    // 3. Direction & Duty Cycle Logic
-    if (speed > 0) {
-        /* FORWARD DIRECTION */
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // PB4 LOW
 
-        // Maps speed 1..999 to CCR 998..0 (which yields 0% to 100% duty cycle on CH3N)
-        uint32_t duty = 999 - (uint32_t)speed;
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
-    }
     else {
         /* REVERSE DIRECTION */
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);   // PB4 HIGH
 
-        // Convert negative speed to positive magnitude
-        uint32_t magnitude = (uint32_t)(-speed);
-        uint32_t duty = 999 - magnitude;
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, duty);
+        int16_t inverse_speed = 999 - (-speed);
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t) inverse_speed);
+
     }
 }
 
@@ -5665,8 +5682,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
 void DC_Motor_Init(void) {
     /* 1. VKLOP UR ZA TIM13 IN PORT A (Kritično za H7!) */
     __HAL_RCC_TIM8_CLK_ENABLE();  // <-- TA VRSTICA JE MANJKALA!
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOF_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOH_CLK_ENABLE();
 
     // Kratek sistemski premor, da H7 uskladi registre ur (strojna specifika H7)
         __DSB();
@@ -5706,12 +5723,13 @@ void DC_Motor_Init(void) {
     oc.Pulse      = 0; // Začne z ustavljenim motorjem
     oc.OCPolarity = TIM_OCPOLARITY_HIGH;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
-    if (HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_1) != HAL_OK) {
+    if (HAL_TIM_PWM_ConfigChannel(&htim8, &oc, TIM_CHANNEL_3) != HAL_OK) {
         Error_Handler();
     }
 
     /* 6. Zagon strojnega PWM-ja */
     HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+    lin_motor_running=1;
 
     serial_print_string("DC motor init (TIM13 ure popravljene) OK\r\n");
 }
