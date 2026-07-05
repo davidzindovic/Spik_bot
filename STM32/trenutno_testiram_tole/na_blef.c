@@ -472,7 +472,7 @@ volatile BoundingBox_t robot_bbox = {
     .min_x = -530/2,
     .max_x = 530/2,
     .min_y = 90,     // Y je lahko samo pozitiven
-    .max_y = 90+105
+    .max_y = 90+105+150
 };
 
 // Željene ciljne koordinate (nastavljene preko UART)
@@ -644,7 +644,7 @@ int main(void) {
 		VL53L0X_Diagnose();
 		MX_TIM6_Init();
 		MX_TIM8_Init();
-		DC_Motor_Init();
+		//DC_Motor_Init();
 	} else {
 		serial_print_string("Senzorja na 0x52 ni. Preskakujem init, da preprecim HardFault.\r\n");
 	}
@@ -927,7 +927,7 @@ int main(void) {
     HAL_Delay(100);
 
 
-
+	DC_Motor_Init();
     DC_Motor_Set_Speed(0);
 	calibrate_all_motors();
 
@@ -3117,7 +3117,7 @@ void move_to_starting_position(uint8_t motor_number)//POPRAVI (DA CALLAŠ END EF
 
 }
 
-/**
+/** ne rabim
   * @brief  Moves the end effector (needle) to the given coordinates,
 			taking in the account the desired orientation.
   *	@param	x: x coordinate of end effector position.
