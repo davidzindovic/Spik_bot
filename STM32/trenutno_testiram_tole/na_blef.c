@@ -300,7 +300,7 @@ void stop_all_motors(void);
 void direction_change(uint8_t motor_number, _Bool direction);
 void reset_motors(void);
 void move_to_starting_position(uint8_t motor_number);
-_Bool move_effector(uint32_t x, uint32_t y, uint32_t orientation);
+//_Bool move_effector(uint32_t x, uint32_t y, uint32_t orientation);
 void update_global_coordinates(void);
 _Bool read_switch(uint8_t motor_number);
 void run_motor(uint8_t motor_number);
@@ -927,7 +927,7 @@ int main(void) {
     HAL_Delay(100);
 
 
-	DC_Motor_Init();
+	DC_Motor_Init(); //dodaj pull down upor
     DC_Motor_Set_Speed(0);
 	calibrate_all_motors();
 
@@ -968,7 +968,7 @@ int main(void) {
 		//serial_print_string("URAVNOVEŠENO!\r\n");
 
 
-
+/*
  //tof
 		//while(1){
  		            if (vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)
@@ -988,7 +988,7 @@ int main(void) {
 
 
 			   // }
-
+*/
 
 
 
@@ -3117,113 +3117,7 @@ void move_to_starting_position(uint8_t motor_number)//POPRAVI (DA CALLAŠ END EF
 
 }
 
-/** ne rabim
-  * @brief  Moves the end effector (needle) to the given coordinates,
-			taking in the account the desired orientation.
-  *	@param	x: x coordinate of end effector position.
-  * @param  y: x coordinate of end effector position.
-  * @param  orientation: orientation (in degrees) with 0° being
-			parralel to the pulley rail. Mathematically positive direction needed
-  * @retval false: the desired point cannot be reached under the desired orientation
-  * 		true: the desired point has been reached under the desired orientation
-  */
-_Bool move_effector(uint32_t target_x, uint32_t target_y, uint32_t target_orientation)
-{//koordinatno izhodišče zgoraj levo [0 do x) (tloris) ali pa na vrhu na sredini [-x do +x]
-	update_global_coordinates();
 
-	stop_all_motors();
-
-	//ce neke tocke ni mozno doseci pod doloceno orientacijo vrnemo false
-
-	if (target_y<(motors[2].offset)) //PAZI, VERJETNO RABIŠ DEG2RAD
-	{	//PRENIZKO ZA TO ORIENTACIJO
-		return false;
-	}
-	else if (target_y>((motors[2].max_position/motors[2].unit_conversion+motors[2].offset)*sin(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
-	{	//PREVISOKO, OUT OF BOUNDS
-		return false;
-	}
-
-	//pri x koordinati moramo gledati pri pogojih minimalen/maksimalen izteg glede na orientiranost
-	// (če je točka levo ali desno od vozička)
-
-	if (target_orientation<90)
-	{//levo od vozička?
-
-		if (target_x<((motors[2].max_position/motors[2].unit_conversion+motors[2].offset)*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
-		{
-			return false;
-		}
-		if (target_x>(motors[2].offset*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
-		{
-			return false;
-		}
-	}
-	else if ((target_orientation>=90) && (target_orientation<180))
-	{//desno od vozička?
-
-		if (target_x<(motors[2].offset*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
-		{
-			return false;
-		}
-		if (target_x>((motors[2].max_position/motors[2].unit_conversion+motors[2].offset)*cos(target_orientation))) //PAZI, VERJETNO RABIŠ DEG2RAD
-		{
-			return false;
-		}
-	}
-
-
-	//Doseže pravilno orientacijo:
-	if(target_orientation!=effector_orientation)
-	{
-		if(target_orientation>effector_orientation)
-		{
-			motors[1].direction=motors[1].direction_plus;
-			start_motor(1);
-		}
-		else
-		{
-			motors[1].direction=motors[1].direction_minus;
-			start_motor(1);
-		}
-
-		while(target_orientation!=effector_orientation){update_global_coordinates();}
-		stop_motor(1);
-	}
-
-	if(target_x!=effector_x || target_y!=effector_y)
-	{
-		//y: orientacija že delno naštima y, samo že izteg navojne palice popravi
-		if (target_y>effector_y)
-		{
-			motors[2].direction=motors[2].direction_plus;
-			start_motor(2);
-		}
-		else if (target_y<effector_y)
-		{
-			motors[2].direction=motors[2].direction_minus;
-			start_motor(2);
-		}
-		while(target_y!=effector_y){update_global_coordinates();} //popravljamo globalne koordinate
-		stop_motor(2);
-
-		//x: orientacija že delno naštima x, samo še jermen da popravi
-		if (target_x>effector_x)
-		{
-			motors[0].direction=motors[0].direction_plus;
-			start_motor(0);
-		}
-		else if (target_x<effector_x)
-		{
-			motors[0].direction=motors[0].direction_plus;
-			start_motor(0);
-		}
-		while(target_x!=effector_x){update_global_coordinates();} //popravljamo globalne koordinate
-		stop_motor(0);
-	}
-
-	return true;
-}
 
 /**
   * @brief  Updates the global end effector coordinate from the known struct
