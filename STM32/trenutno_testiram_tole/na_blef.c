@@ -233,6 +233,13 @@ uint16_t elapsed_1st, elapsed_2nd, elapsed_3rd;
 uint8_t time_str1[60];
 uint8_t time_str2[40];
 
+/*
+int position_m2=0;
+int dir_m2=0;
+int position_m3=0;
+int dir_m3=0;
+*/
+
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim15;
 extern TIM_HandleTypeDef htim3;
@@ -993,10 +1000,59 @@ int main(void) {
 */
 
 
+		/*
+		_Bool sw1=read_switch(0);
+		_Bool sw2=read_switch(2);
+		_Bool sw3=read_switch(1);
+
+
+
+								if(sw1&&sw2&&sw3)
+								{
+									direction_change(0,!motors[0].direction);
+									direction_change(1,!motors[1].direction);
+									direction_change(2,!motors[2].direction);
+								}
+
+								else{
+
+
+
+										if(sw1)
+										{
+											if (!motors[0].running)run_motor(0);
+										}
+										else if(!sw1)
+										{
+											if(motors[0].running)stop_motor(0);
+										}
+
+										if(sw2)
+										{
+											if (!motors[2].running)run_motor(2);
+										}
+										else if(!sw2)
+										{
+											if(motors[2].running)stop_motor(2);
+										}
+
+										if(sw3)
+										{
+											if (!motors[1].running)run_motor(1);
+										}
+										else if(!sw3)
+										{
+											if(motors[1].running)stop_motor(1);
+										}
+
+								}
 
 		//serial_print_uint16(read_analog_pin(2));
 		//serial_print_uint16(read_analog_pin(3));
 		//serial_print_string("\r\n\n");
+
+*/
+
 
 
 
@@ -1546,7 +1602,7 @@ static void MX_TIM1_Init(void)
   //htim1.Instance->CR1 |= TIM_CR1_CEN;    // Enable timer
 
   htim1.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
-  HAL_NVIC_SetPriority(TIM1_UP_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(TIM1_UP_IRQn, 3, 0);
   HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
 
   HAL_TIM_MspPostInit(&htim1);
@@ -1621,7 +1677,7 @@ static void MX_TIM15_Init(void)
   htim15.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
   //HAL_TIM_RegisterCallback(motors[2].timer, HAL_TIM_PERIOD_ELAPSED_CB_ID, HAL_TIM_PeriodElapsedCallback);
 
-  HAL_NVIC_SetPriority(TIM15_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(TIM15_IRQn, 3, 0);
   HAL_NVIC_EnableIRQ(TIM15_IRQn);
 
   HAL_TIM_MspPostInit(&htim15);
@@ -3176,6 +3232,37 @@ _Bool read_switch(uint8_t motor_number)
   */
 void run_motor(uint8_t motor_number)
 {
+
+	/*
+	if(motor_number==2)
+	{
+	__HAL_RCC_TIM1_FORCE_RESET();
+	asm("nop"); asm("nop");
+	__HAL_RCC_TIM1_RELEASE_RESET();
+	MX_TIM1_Init();
+	HAL_NVIC_ClearPendingIRQ(TIM1_CC_IRQn);
+HAL_NVIC_ClearPendingIRQ(TIM1_UP_IRQn);
+HAL_NVIC_EnableIRQ(TIM1_CC_IRQn);
+HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
+HAL_TIM_PWM_Start_IT(&htim1, TIM_CHANNEL_1);
+	}
+
+
+		if(motor_number==1)
+	{
+	__HAL_RCC_TIM15_FORCE_RESET();
+	asm("nop"); asm("nop");
+	__HAL_RCC_TIM15_RELEASE_RESET();
+	MX_TIM15_Init();
+HAL_NVIC_ClearPendingIRQ(TIM15_IRQn);
+//HAL_NVIC_EnableIRQ(TIM15_CC_IRQn);
+//HAL_NVIC_EnableIRQ(TIM15_UP_IRQn);
+HAL_TIM_PWM_Start_IT(&htim15, TIM_CHANNEL_2);
+	}
+*/
+
+
+
     // Stop PWM first
     //HAL_TIM_PWM_Stop(motors[motor_number].timer, motors[motor_number].timer_channel);
 	//motors[motor_number].running=false;
@@ -3239,8 +3326,12 @@ void run_motor(uint8_t motor_number)
         skip_nvic:;
         */
 
+		//__HAL_TIM_MOE_ENABLE(motors[motor_number].timer);
+		//motors[motor_number].timer->State = HAL_TIM_STATE_READY;
+
 		HAL_TIM_Base_Start(motors[motor_number].timer);
-		HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
+		//HAL_TIM_PWM_Start(motors[motor_number].timer, motors[motor_number].timer_channel);
+		HAL_TIM_PWM_Start_IT(motors[motor_number].timer, motors[motor_number].timer_channel);
 		HAL_TIM_Base_Start_IT(motors[motor_number].timer);
 		motors[motor_number].timer->Instance->DIER |= TIM_DIER_UIE; // force it
 
@@ -3880,6 +3971,78 @@ void test_tipke_na_roke()
 
 }
 
+void test_tipke_na_roke2()
+{
+	static _Bool initialized=0;
+
+	if (!initialized)
+	{
+
+	}
+
+
+	const uint8_t stevilka_tipka_zelena_1=0; //E3, D8 (zgoraj)
+	const uint8_t stevilka_tipka_zelena_2=1; //H15, D9 (zgoraj)
+	const uint8_t stevilka_tipka_rdeca_1=3;  //B4, D10 (zgoraj)
+	const uint8_t stevilka_tipka_rdeca_2=2;  //I2, D12 (zgoraj)
+
+	//pobere stabilizirane vrednosti tipk, bere "end switche" motorjev
+	//samo po en trenutno v funkciji, kasneje bosta 2 (upam)
+	_Bool stanje_tipka_zelena_1 = read_switch(stevilka_tipka_zelena_1);
+	_Bool stanje_tipka_zelena_2 = read_switch(stevilka_tipka_zelena_2);
+	_Bool stanje_tipka_rdeca_1 = read_switch(stevilka_tipka_rdeca_1);
+	_Bool stanje_tipka_rdeca_2 = read_switch(stevilka_tipka_rdeca_2);
+
+	static _Bool stanje_tipka_rdeca_1_prej=0;
+	static _Bool stanje_tipka_rdeca_2_prej=0;
+
+	const uint8_t stevilka_motorja=2;
+
+	//static uint32_t speed=10000;
+
+	// če spustimo tipko naprej (in motor laufa) ustavi motor
+	if(!stanje_tipka_zelena_1 && motors[stevilka_motorja].running && !stanje_tipka_zelena_2)
+	{
+		stop_motor(stevilka_motorja);
+	}
+	//tipka naprej (če držiš tipko in motor ne laufa, ga zalaufa)
+	else if(stanje_tipka_zelena_1 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_2)
+	{
+		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_plus);
+		run_motor(stevilka_motorja);
+	}
+	//tipka nazaj (če držiš tipko in motor ne laufa, ga zalaufa)
+	else if(stanje_tipka_zelena_2 && !motors[stevilka_motorja].running && !stanje_tipka_zelena_1)
+	{
+		direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+		run_motor(stevilka_motorja);
+	}
+
+
+	if(stanje_tipka_rdeca_1 && !stanje_tipka_rdeca_1_prej && !stanje_tipka_zelena_1 && !stanje_tipka_zelena_2)
+	{
+		if (motors[stevilka_motorja].frequency<50000)
+		{
+			motors[stevilka_motorja].frequency+=10000;
+		}
+		//funkcija za izpis stanja update na ekranu?
+	}
+	else if(stanje_tipka_rdeca_2 && !stanje_tipka_rdeca_2_prej && !stanje_tipka_zelena_1 && !stanje_tipka_zelena_2)
+	{
+		if (motors[stevilka_motorja].frequency>10000)
+		{
+			motors[stevilka_motorja].frequency-=10000;
+		}
+		else if (motors[stevilka_motorja].frequency>1000)
+		{
+			motors[stevilka_motorja].frequency-=1000;
+		}
+		//funkcija za izpis stanja update na ekranu?
+	}
+
+	stanje_tipka_rdeca_1_prej=stanje_tipka_rdeca_1;
+	stanje_tipka_rdeca_2_prej=stanje_tipka_rdeca_2;
+}
 
 /**
   * @brief  Function for moving the segment to the end switch in the desired direction.
@@ -4270,11 +4433,70 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 }*/
 
+
+
+void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM1) {
+
+    	        if (motors[2].running == true)
+    	        {
+    	            if (motors[2].direction == motors[2].direction_plus && motors[2].position<motors[2].max_position)
+    	            {
+    	                motors[2].position += 1;
+    	            }
+    	            else if (motors[2].direction == motors[2].direction_minus && motors[2].position>0)
+    				{
+    	                motors[2].position -= 1;
+    	            }
+
+    	            effector_orientation = motors[2].position / mapFloat(motors[2].unit_conversion, 0, 1, 0, 1); // oz. vaša pretvorba stopinj
+
+    	            // DOSEŽEN CILJ
+    	            if (!motors[2].reset_requested && (motors[2].position == motors[2].target_position))
+    	            {
+    	                stop_motor(2);
+    	            }
+    	        }
+
+    }
+
+
+
+
+    if (htim->Instance == TIM15) {
+    	        if (motors[1].running == true)
+    	        {
+    	            if (motors[1].direction == motors[1].direction_plus && motors[1].position<motors[1].max_position)
+    	            {
+    	                motors[1].position += 1;
+    	            }
+    	            else if (motors[1].direction == motors[1].direction_minus && motors[1].position>0)
+    				{
+    	                motors[1].position -= 1;
+    	            }
+
+    	            effector_y = motors[1].position / motors[1].unit_conversion;
+
+    	            // DOSEŽEN CILJ
+    	            if (!motors[1].reset_requested && (motors[1].position == motors[1].target_position))
+    	            {
+    	                stop_motor(1);
+    	            }
+    	        }
+
+
+    }
+}
+
+
+
 /**
   * @brief  Makes the timer IRQ handler readable for the specific timer.
   * @param  None
   * @retval None
   */
+
 void TIM1_UP_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim1);
@@ -4283,6 +4505,25 @@ void TIM1_UP_IRQHandler(void)
 		motors[2].end_switch_triggered=0;
 		motors[2].allowed_direction=2;
 	}
+    if (motors[2].running == true)
+    {
+        if (motors[2].direction == motors[2].direction_plus && motors[2].position<motors[2].max_position)
+        {
+            motors[2].position += 1;
+        }
+        else if (motors[2].direction == motors[2].direction_minus && motors[2].position>0)
+		{
+            motors[2].position -= 1;
+        }
+
+        effector_orientation = motors[2].position / mapFloat(motors[2].unit_conversion, 0, 1, 0, 1); // oz. vaša pretvorba stopinj
+
+        // DOSEŽEN CILJ
+        if (!motors[2].reset_requested && (motors[2].position == motors[2].target_position))
+        {
+            stop_motor(2);
+        }
+    }
 }
 
 /**
@@ -4290,6 +4531,8 @@ void TIM1_UP_IRQHandler(void)
   * @param  None
   * @retval None
   */
+
+
 void TIM15_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim15);
@@ -4298,6 +4541,25 @@ void TIM15_IRQHandler(void)
 		motors[1].end_switch_triggered=0;
 		motors[1].allowed_direction=2;
 	}
+    if (motors[1].running == true)
+    {
+        if (motors[1].direction == motors[1].direction_plus && motors[1].position<motors[1].max_position)
+        {
+            motors[1].position += 1;
+        }
+        else if (motors[1].direction == motors[1].direction_minus && motors[1].position>0)
+		{
+            motors[1].position -= 1;
+        }
+
+        effector_y = motors[1].position / motors[1].unit_conversion;
+
+        // DOSEŽEN CILJ
+        if (!motors[1].reset_requested && (motors[1].position == motors[1].target_position))
+        {
+            stop_motor(1);
+        }
+    }
 }
 
 /**
@@ -4524,10 +4786,14 @@ void execute_robot_movement(void)
     {
         if (motors[m].target_position > motors[m].position) {
             direction_change(m, motors[m].direction_plus);
-        } else if (motors[m].target_position < motors[m].position) {
+        }
+        else if (motors[m].target_position < motors[m].position) {
             direction_change(m, motors[m].direction_minus);
+
         }
     }
+
+
 
     // 3. SOČASNI ZAGON: Motor 0 in Motor 1 (X in O)
     if (motors[0].position != motors[0].target_position) run_motor(0);
@@ -4543,14 +4809,24 @@ void execute_robot_movement(void)
             return;
         }
 
+
         // Periodični izpis trenutne lege vrha robota
         if (HAL_GetTick() - last_print_tick >= print_interval) {
             uart_print_current_targets();
             last_print_tick = HAL_GetTick();
         }
 
-        if((motors[0].position>motors[0].target_position && motors[0].direction==motors[0].direction_plus)||(motors[0].position<motors[0].target_position && motors[0].direction==motors[0].direction_minus))stop_motor(0);
-        if((motors[1].position>motors[1].target_position && motors[1].direction==motors[1].direction_plus)||(motors[1].position<motors[1].target_position && motors[1].direction==motors[1].direction_minus))stop_motor(1);
+
+
+        if((motors[0].position>motors[0].target_position && motors[0].direction==motors[0].direction_plus)||(motors[0].position<motors[0].target_position && motors[0].direction==motors[0].direction_minus))
+        	{
+        		stop_motor(0);
+        	}
+
+        if((motors[1].position>motors[1].target_position && motors[1].direction==motors[1].direction_plus)||(motors[1].position<motors[1].target_position && motors[1].direction==motors[1].direction_minus))
+        	{
+        		stop_motor(1);
+        	}
 
     }
 
@@ -5298,6 +5574,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     static uint32_t last_interrupt_time = 0;
     uint32_t current_time = HAL_GetTick();
 
+
+
     /*
     _Bool pin_PF8  = (HAL_GPIO_ReadPin(GPIOF, GPIO_PIN_8)  == GPIO_PIN_SET);
 	_Bool pin_PB10 = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == GPIO_PIN_SET);
@@ -5358,7 +5636,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			if((current_time - last_interrupt_time > 50)) {
 				last_interrupt_time = current_time;
 
+
 				switch(GPIO_Pin) {
+
 					case GPIO_PIN_3://motors[0].end_switch_pin:
 						// Motor 0 Switch 1 (PE3)
 						if(read_switch(0))
@@ -5376,7 +5656,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							}
 							motors[0].running = false;
 							//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
-							motors[0].end_switch_triggered=0;
+							motors[0].end_switch_triggered=1;
 						}
 					//	break;
 					//case GPIO_PIN_15:
@@ -5395,7 +5675,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							}
 							motors[2].running = false;
 							//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
-							motors[2].end_switch_triggered=0;
+							motors[2].end_switch_triggered=1;
 						}
 						break;
 
@@ -5416,7 +5696,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							}
 							motors[1].running = false;
 							//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
-							motors[1].end_switch_triggered=0;
+							motors[1].end_switch_triggered=1;
 						}
 						break;
 
@@ -5427,6 +5707,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							DC_Motor_Set_Speed(0);//POPRAVI!!!
 						}
 						break;
+
 		/*
 					case GPIO_PIN_4://motors[2].end_switch_pin:
 						// Motor 1 (PB4)
