@@ -530,10 +530,12 @@ void uart_print_current_targets(void) {
     current_y=izteg*sin((90-current_o)*PI/180);
     current_x=izteg*cos((90-current_o)*PI/180)+motors[0].position/motors[0].unit_conversion-motors[0].travel_length/2;
 
+    volatile int32_t print_target_y=target_y+motors[2].offset+igla_sklop_offset;
+
     // Izpis v terminal
     snprintf(response, sizeof(response),
              "\r\n[STATUS] Cilj: X=%d, Y=%d, O=%d \r\n[STATUS] Trenutna lega: X=%.2f mm, Y=%.2f mm, O=%.2f st.\r\n[STATUS] Delujoci motorji: 0:%d | 1:%d | 2:%d\r\n",
-             target_x, target_y, target_o,
+             target_x, print_target_y, target_o,
              current_x, current_y, current_o,
 			 motors[0].running, motors[1].running, motors[2].running);
 
@@ -4138,7 +4140,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         }
     }
 
-    if (htim->Instance == TIM6) {
+    else if (htim->Instance == TIM6) {
             vl53_data_ready  = 1;
     }
 }
@@ -4276,10 +4278,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void TIM1_UP_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim1);
-    if((motors[1].num_steps_for_switch_release<motors[1].position && motors[1].position<(motors[1].max_position-motors[1].num_steps_for_switch_release))&&(motors[1].end_switch_triggered)&&(!read_switch(1)))
+    if((motors[2].num_steps_for_switch_release<motors[2].position && motors[2].position<(motors[2].max_position-motors[2].num_steps_for_switch_release))&&(motors[2].end_switch_triggered)&&(!read_switch(2)))
 	{
-		motors[1].end_switch_triggered=0;
-		motors[1].allowed_direction=2;
+		motors[2].end_switch_triggered=0;
+		motors[2].allowed_direction=2;
 	}
 }
 
@@ -4291,10 +4293,10 @@ void TIM1_UP_IRQHandler(void)
 void TIM15_IRQHandler(void)
 {
     HAL_TIM_IRQHandler(&htim15);
-	if((motors[2].num_steps_for_switch_release<motors[2].position && motors[2].position<(motors[2].max_position-motors[2].num_steps_for_switch_release))&&(motors[2].end_switch_triggered)&&(!read_switch(2)))
+	if((motors[1].num_steps_for_switch_release<motors[1].position && motors[1].position<(motors[1].max_position-motors[1].num_steps_for_switch_release))&&(motors[1].end_switch_triggered)&&(!read_switch(1)))
 	{
-		motors[2].end_switch_triggered=0;
-		motors[2].allowed_direction=2;
+		motors[1].end_switch_triggered=0;
+		motors[1].allowed_direction=2;
 	}
 }
 
@@ -4501,7 +4503,9 @@ void execute_robot_movement(void)
     //target_x,target_y,target_o=tocka!!! ločeno se spremeni v premik motorja
     motors[0].target_position = (int32_t)((target_x-cos((90-target_o)*PI/180)*izteg) * motors[0].unit_conversion+motors[0].max_position/2);
     motors[1].target_position = (int32_t)(target_o * motors[1].unit_conversion+motors[1].max_position/2);
-    motors[2].target_position = (int32_t)((((target_y-motors[2].offset)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion);
+    //motors[2].target_position = (int32_t)((((target_y-motors[2].offset)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion);
+    motors[2].target_position = (int32_t)((((target_y)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion+motors[2].home_position);
+
 
     // Varnostna omejitev (Saturation), da ne prebijemo kalibracijskih meja
     /*
@@ -5017,7 +5021,9 @@ void USART3_IRQHandler(void)
 	                        else if(temp_target >= robot_bbox.min_y && temp_target <= robot_bbox.max_y)
 	                        {
 
-	                            target_y = temp_target;
+	                            //target_y = temp_target;
+	                        	target_y=val;
+
 	                            //old_target_y=target_y;
 
 	                            uart_print_current_targets();
