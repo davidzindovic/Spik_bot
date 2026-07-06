@@ -135,9 +135,6 @@ typedef struct {
 #define DC_IN2_PORT         GPIOB
 #define DC_IN2_PIN          GPIO_PIN_4
 
-#define DC_BTN_PORT         GPIOA
-#define DC_BTN_PIN          GPIO_PIN_1          /* A3 – EXTI1, active LOW */
-
 #define DC_TIM_PERIOD       999U    /* ARR  → 1000 steps resolution              */
 #define DC_TIM_PRESCALER    199U    /* 200 MHz / 200 / 1000 = 1 kHz PWM freq     */
 /* USER CODE END PD */
@@ -571,7 +568,7 @@ int main(void) {
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 
 	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);  /* highest priority */
-	HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 8, 0);  /* lower than SysTick */
+	HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 4, 0);  /* lower than SysTick */
 
 
 	uint32_t RNG_PTR[2];
@@ -675,7 +672,7 @@ int main(void) {
 	MX_TIM15_Init();
 	MX_TIM3_Init();
 	MX_TIM12_Init();
-	HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_3);
+	//HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_3);
 
 	// Nastavi časovnike na višjo prioriteto (npr. 3), da lahko prekinjajo UART
 	HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); //?
@@ -933,9 +930,7 @@ int main(void) {
 
 
 
-    HAL_Delay(100);
-
-
+    HAL_Delay(10);
 	DC_Motor_Init(); //dodaj pull down upor
     DC_Motor_Set_Speed(0);
 	calibrate_all_motors();
@@ -957,6 +952,7 @@ int main(void) {
 	uart_print_current_targets();
 
 	uint16_t trenutna_razdalja=2;
+	premik_done=1;
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -977,28 +973,28 @@ int main(void) {
 		//serial_print_string("URAVNOVEŠENO!\r\n");
 
 
-/*
- //tof
+
+ /*//tof
 		//while(1){
  		            if (vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)
  		            {
 		                vl53_data_ready = 0;
 		                trenutna_razdalja = VL53L0X_ReadDistance();
 
-						DC_Motor_Update(trenutna_razdalja);
-		                //char debug_msg[64];
-		                //snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
-		                //serial_print_string(debug_msg);
+						//DC_Motor_Update(trenutna_razdalja);
+		                char debug_msg[64];
+		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
+		                serial_print_string(debug_msg);
  		            }
 		                else if(trenutna_razdalja==0 || trenutna_razdalja>65000)
 		                {//če zgubi podatke od senzorja ustavi dc motor
-		                	DC_Motor_Set_Speed(0);
+		                	//DC_Motor_Set_Speed(0);
 		                }
 
 
 			   // }
-*/
 
+*/
 
 		/*
 		_Bool sw1=read_switch(0);
@@ -1080,12 +1076,12 @@ int main(void) {
  		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
 		    serial_print_string("Test: Motor naprej...\r\n");
 		    DC_Motor_Set_Speed(600);
-		    HAL_Delay(500); // Drži 3 sekunde
+		    HAL_Delay(1000); // Drži 3 sekunde
 
 		    // Ustavi motor
 		    serial_print_string("Test: Motor STOP...\r\n");
 		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(500); // Čakaj 1 sekundo
+		    HAL_Delay(3000); // Čakaj 1 sekundo
 
 		    // Prisilno pošljemo ukaz za vrtenje NAZAJ (hitrost -600)
 		    serial_print_string("Test: Motor nazaj...\r\n");
@@ -1093,8 +1089,9 @@ int main(void) {
 		    HAL_Delay(1000); // Drži 3 sekunde
 
 		    // Ustavi motor
+		    serial_print_string("Test: Motor STOP...\r\n");
 		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(500);
+		    HAL_Delay(3000);
 */
 
 
@@ -1729,7 +1726,7 @@ static void MX_TIM3_Init(void)
   }
 
   htim3.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
-  HAL_NVIC_SetPriority(TIM3_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(TIM3_IRQn, 3, 0);
   HAL_NVIC_EnableIRQ(TIM3_IRQn);
 
   HAL_TIM_MspPostInit(&htim3);
@@ -1780,7 +1777,7 @@ static void MX_TIM12_Init(void)
   //htim12.Instance->DIER |= TIM_DIER_UIE;  // Enable update interrupt
 
 
-  HAL_NVIC_SetPriority(TIM8_BRK_TIM12_IRQn, 6, 0);
+  HAL_NVIC_SetPriority(TIM8_BRK_TIM12_IRQn, 3, 0);
   HAL_NVIC_EnableIRQ(TIM8_BRK_TIM12_IRQn);
 
   HAL_TIM_MspPostInit(&htim12);
@@ -2727,7 +2724,7 @@ void configure_analog_pins(void)
 
 
         // PF8 uporablja EXTI9_5_IRQn
-        HAL_NVIC_SetPriority(EXTI9_5_IRQn, 4, 0);
+        HAL_NVIC_SetPriority(EXTI9_5_IRQn, 3, 0);
         HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 
@@ -3816,7 +3813,7 @@ static void MX_TIM6_Init(void) {
 
     if (HAL_TIM_Base_Init(&htim6) != HAL_OK) Error_Handler();
 
-    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 8, 0);
+    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 4, 0);
     HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
 
     HAL_TIM_Base_Start_IT(&htim6);   /* start immediately */
@@ -5738,18 +5735,41 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
  */
 void DC_Motor_Set_Speed(int16_t speed) {
 
+
+		if (speed > 999)  speed = 999;
+	    if (speed < -999) speed = -999;
+
+	    if (speed >= 0) {
+	        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+	        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)speed);
+	        return;
+	    }
+
+	    else {
+	        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);   // PB4 HIGH
+
+	        int16_t inverse_speed = 999 - (-speed);
+	        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t) inverse_speed);
+	    }
+
+
+
+
+
+
+	/*
 	if (speed==0 && lin_motor_running)
 	{
 		HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_3);
 		return;
 	}
-	else if (speed!=0 && !lin_motor_running)
+	else if ((speed>0 || speed<0) && !lin_motor_running)
 	{
 		//zastarta timer:
 		//HAL_TIM_Base_Start(&htim8);
 		//HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
 		//HAL_TIM_Base_Start_IT(&htim8);
-		//*htim8->Instance->DIER |= TIM_DIER_UIE; // force it
+		//htim8.Instance->DIER |= TIM_DIER_UIE; // force it
 		HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
 		lin_motor_running = 1;
 	}
@@ -5766,13 +5786,14 @@ void DC_Motor_Set_Speed(int16_t speed) {
 
 
     else {
-        /* REVERSE DIRECTION */
+
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);   // PB4 HIGH
 
-        int16_t inverse_speed = 999 - (-speed);
-        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t) inverse_speed);
+        uint32_t inverse_speed = 999 - (-speed);
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, (uint32_t)(-speed));
 
     }
+    */
 }
 
 
@@ -5909,10 +5930,10 @@ void DC_Motor_Init(void) {
     }
 
     /* 6. Zagon strojnega PWM-ja */
-    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_3);
+    HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_3);
     lin_motor_running=1;
 
-    serial_print_string("DC motor init (TIM13 ure popravljene) OK\r\n");
+    serial_print_string("DC motor init.\r\n");
 }
 
 
