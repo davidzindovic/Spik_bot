@@ -988,6 +988,7 @@ int main(void) {
 	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
 	//uart_print_current_targets();
 
+	//test_motor(3);
 
 	//premik_done=1;
 	while (1) {
@@ -1058,7 +1059,7 @@ int main(void) {
 
 if (manual_mode_flag==1)
 {
-	robot_control_manually();
+	robot_control_manually();//interupti stikal, 1 za rewirat
 }
 //--------------------------END-------------------------------------
 
@@ -5676,55 +5677,57 @@ void configure_end_switch_interrupts(void)
 	    //GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
 	    //GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
 
-	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PB4
+	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PI2
 
-	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PB4
+	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct); // PD3
 
-	    GPIO_InitStruct.Pin = GPIO_PIN_8;  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct); // PB4
+	    GPIO_InitStruct.Pin = GPIO_PIN_8;  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct); // PF8
 
-	    /*
+
 	    // Now manually configure EXTI for each pin
 
-	    // PE3 - EXTI3 (Motor 0 Switch 1)
+	    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI2_Msk;
+	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PI;
+
+	    // PD3 -> EXTI3 (Če želite rajši PE3, zamenjajte _PD z _PE)
 	    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI3_Msk;
-	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PE;
+	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI3_PD;
 
-	    // PH15 - EXTI15 (Motor 0 Switch 2)
-	    SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI15_Msk;
-	    SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI15_PH;
-
-	    // PB4 - EXTI4 (Motor 1 Switch 1)
-	    SYSCFG->EXTICR[1] &= ~SYSCFG_EXTICR2_EXTI4_Msk;
-	    SYSCFG->EXTICR[1] |= SYSCFG_EXTICR2_EXTI4_PB;
+	    // PF8 -> EXTI8 (Vpišemo v EXTICR[2], ker pokriva pine 8-11)
+	    SYSCFG->EXTICR[2] &= ~SYSCFG_EXTICR3_EXTI8_Msk;
+	    SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI8_PF;
 
 
-	    // Enable rising edge trigger for ALL lines
-	    EXTI->RTSR1 |= (1 << 3) | (1 << 4) | (1 << 15);
+	    // Omogoči Rising edge trigger za linije 2, 3 in 8
+	    EXTI->RTSR1 |= (1 << 2) | (1 << 3) | (1 << 8);
 
-	    // Enable interrupt mask for ALL lines
-	    EXTI->IMR1 |= (1 << 3) | (1 << 4) | (1 << 15);
+	    // Izklopi Falling edge trigger (za vsak slučaj, da je čisto)
+	    EXTI->FTSR1 &= ~((1 << 2) | (1 << 3) | (1 << 8));
 
-	    // Clear any pending interrupts
-	    EXTI->PR1 = (1 << 3) | (1 << 4) | (1 << 15);
+	    // Počisti morebitne čakajoče (pending) prekinitve pred vklopom maske
+	    EXTI->PR1 = (1 << 2) | (1 << 3) | (1 << 8);
+
+	    // Omogoči interrupt masko (Interrupt Mask Register) za linije 2, 3 in 8
+	    EXTI->IMR1 |= (1 << 2) | (1 << 3) | (1 << 8);
 
 
 	    // Clear any pending interrupts
 		//__HAL_GPIO_EXTI_CLEAR_FLAG(GPIO_PIN_13 | GPIO_PIN_3 | GPIO_PIN_15 | GPIO_PIN_4 | GPIO_PIN_2);
-*/
 
-	    /*
+
+
 	    HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
 	    HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
 	    HAL_NVIC_SetPriority(EXTI2_IRQn, 3, 0);
 	    HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
-	    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
-	    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+	    //HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
+	    //HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 	    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 3, 0);
 	    HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-		*/
+
 
 		//EXTI->PR1 = (1 << 3) | (1 << 4) | (1 << 15);
 
@@ -5860,15 +5863,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 					case GPIO_PIN_3://motors[0].end_switch_pin:
 						// Motor 0 Switch 1 (PE3)
-						if(read_switch(0))
-						{
+						/*
 							stop_motor(0);
-							if (motors[0].direction=motors[0].direction_plus)
+							if (motors[0].direction==motors[0].direction_plus)
 							{
 								motors[0].position = motors[0].max_position;
 								motors[0].allowed_direction=motors[0].direction_minus;
 							}
-							else if (motors[0].direction=motors[0].direction_minus)
+							else if (motors[0].direction==motors[0].direction_minus)
 							{
 								motors[0].position = 0;
 								motors[0].allowed_direction=motors[0].direction_plus;
@@ -5876,18 +5878,17 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							motors[0].running = false;
 							//uart_transmit("M0: Switch (PE3) - STOPPED\r\n");
 							motors[0].end_switch_triggered=1;
-						}
+							*/
 					//	break;
 					//case GPIO_PIN_15:
-						if (read_switch(2))
-						{
+
 							stop_motor(2);
-							if (motors[2].direction=motors[2].direction_plus)
+							if (motors[2].direction==motors[2].direction_plus)
 							{
 								motors[2].position = motors[2].max_position;
 								motors[2].allowed_direction=motors[2].direction_minus;
 							}
-							else if (motors[2].direction=motors[2].direction_minus)
+							else if (motors[2].direction==motors[2].direction_minus)
 							{
 								motors[2].position = 0;
 								motors[2].allowed_direction=motors[2].direction_plus;
@@ -5895,20 +5896,18 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							motors[2].running = false;
 							//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
 							motors[2].end_switch_triggered=1;
-						}
+
 						break;
 
 					case GPIO_PIN_2://motors[1].end_switch_pin:
-						// Motor 0 (PH15)
-						if(read_switch(1))
-						{
+
 							stop_motor(1);
-							if (motors[1].direction=motors[1].direction_plus)
+							if (motors[1].direction==motors[1].direction_plus)
 							{
 								motors[1].position = motors[1].max_position;
 								motors[1].allowed_direction=motors[1].direction_minus;
 							}
-							else if (motors[1].direction=motors[1].direction_minus)
+							else if (motors[1].direction==motors[1].direction_minus)
 							{
 								motors[1].position = 0;
 								motors[1].allowed_direction=motors[1].direction_plus;
@@ -5916,15 +5915,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							motors[1].running = false;
 							//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
 							motors[1].end_switch_triggered=1;
-						}
+
 						break;
 
 
 					case GPIO_PIN_8:
-						if(read_switch(3))
-						{
 							DC_Motor_Set_Speed(0);//POPRAVI!!!
-						}
+
 						break;
 
 		/*
