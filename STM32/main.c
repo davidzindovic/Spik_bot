@@ -5673,9 +5673,8 @@ void configure_end_switch_interrupts(void)
 	    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
 	    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 
-	    GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct); // PE3
-	    //GPIO_InitStruct.Pin = GPIO_PIN_15; HAL_GPIO_Init(GPIOH, &GPIO_InitStruct); // PH15
-	    //GPIO_InitStruct.Pin = GPIO_PIN_4;  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct); // PB4
+	    //GPIO_InitStruct.Pin = GPIO_PIN_3;  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct); // PE3
+	    GPIO_InitStruct.Pin = GPIO_PIN_13;  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct); // Pc13
 
 	    GPIO_InitStruct.Pin = GPIO_PIN_2;  HAL_GPIO_Init(GPIOI, &GPIO_InitStruct); // PI2
 
@@ -5686,6 +5685,7 @@ void configure_end_switch_interrupts(void)
 
 	    // Now manually configure EXTI for each pin
 
+/*
 	    SYSCFG->EXTICR[0] &= ~SYSCFG_EXTICR1_EXTI2_Msk;
 	    SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI2_PI;
 
@@ -5697,37 +5697,40 @@ void configure_end_switch_interrupts(void)
 	    SYSCFG->EXTICR[2] &= ~SYSCFG_EXTICR3_EXTI8_Msk;
 	    SYSCFG->EXTICR[2] |= SYSCFG_EXTICR3_EXTI8_PF;
 
-
-	    // Omogoči Rising edge trigger za linije 2, 3 in 8
-	    EXTI->RTSR1 |= (1 << 2) | (1 << 3) | (1 << 8);
-
-	    // Izklopi Falling edge trigger (za vsak slučaj, da je čisto)
-	    EXTI->FTSR1 &= ~((1 << 2) | (1 << 3) | (1 << 8));
-
-	    // Počisti morebitne čakajoče (pending) prekinitve pred vklopom maske
-	    EXTI->PR1 = (1 << 2) | (1 << 3) | (1 << 8);
-
-	    // Omogoči interrupt masko (Interrupt Mask Register) za linije 2, 3 in 8
-	    EXTI->IMR1 |= (1 << 2) | (1 << 3) | (1 << 8);
+	    // PC13 -> EXTI13 (Vpišemo v EXTICR[3], ker pokriva pine 12-15)
+		SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI13_Msk;
+		SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PC;
 
 
-	    // Clear any pending interrupts
-		//__HAL_GPIO_EXTI_CLEAR_FLAG(GPIO_PIN_13 | GPIO_PIN_3 | GPIO_PIN_15 | GPIO_PIN_4 | GPIO_PIN_2);
+		// Omogoči Rising edge trigger za linije 2, 3, 8 in 13
+		EXTI->RTSR1 |= (1 << 2) | (1 << 3) | (1 << 8) | (1 << 13);
+
+		// Izklopi Falling edge trigger
+		EXTI->FTSR1 &= ~((1 << 2) | (1 << 3) | (1 << 8) | (1 << 13));
+
+		// Počisti morebitne čakajoče (pending) prekinitve pred vklopom maske
+		EXTI->PR1 = (1 << 2) | (1 << 3) | (1 << 8) | (1 << 13);
+
+		// Omogoči interrupt masko (Interrupt Mask Register) za linije 2, 3, 8 in 13
+		//IMR1_ODREZAN_KOMENTAR // Če tvoj MCU uporablja starejši STM32 HAL, je to lahko le EXTI->IMR
+		EXTI->IMR1 |= (1 << 2) | (1 << 3) | (1 << 8) | (1 << 13);
 
 
+		// Nastavitve NVIC (Prekinitvenega kontrolerja)
 
-	    HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
-	    HAL_NVIC_EnableIRQ(EXTI3_IRQn);
+		HAL_NVIC_SetPriority(EXTI2_IRQn, 3, 0);
+		HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
-	    HAL_NVIC_SetPriority(EXTI2_IRQn, 3, 0);
-	    HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+		HAL_NVIC_SetPriority(EXTI3_IRQn, 3, 0);
+		HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
-	    //HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
-	    //HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+		HAL_NVIC_SetPriority(EXTI9_5_IRQn, 3, 0);
+		HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
-	    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 3, 0);
-	    HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-
+		// Omogočeno za PC13 (spada pod skupno prekinitev od 10 do 15)
+		HAL_NVIC_SetPriority(EXTI15_10_IRQn, 3, 0);
+		HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+*/
 
 		//EXTI->PR1 = (1 << 3) | (1 << 4) | (1 << 15);
 
@@ -5775,18 +5778,11 @@ void EXTI14_IRQHandler(void)
 
 void EXTI15_10_IRQHandler(void)
 {
-    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_15);
-        HAL_GPIO_EXTI_Callback(GPIO_PIN_15);
+    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_13) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_13);
+        HAL_GPIO_EXTI_Callback(GPIO_PIN_13);
     }
-    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_10) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_10);
-        HAL_GPIO_EXTI_Callback(GPIO_PIN_10);
-    }
-    if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_11) != RESET) {
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_11);
-        HAL_GPIO_EXTI_Callback(GPIO_PIN_11);
-    }
+
 }
 
 
@@ -5854,9 +5850,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	    }
 	    else{
 */
+
 			// Debouncing - ignore interrupts within 50ms
-			if((current_time - last_interrupt_time > 50)) {
+			if((current_time - last_interrupt_time > 50)&&0) {
 				last_interrupt_time = current_time;
+
 
 
 				switch(GPIO_Pin) {
@@ -5882,6 +5880,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 					//	break;
 					//case GPIO_PIN_15:
 
+
+						if(!manual_mode_flag)
+						{
 							stop_motor(2);
 							if (motors[2].direction==motors[2].direction_plus)
 							{
@@ -5896,11 +5897,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							motors[2].running = false;
 							//uart_transmit("M2: Switch (PB4) - STOPPED\r\n");
 							motors[2].end_switch_triggered=1;
+						}
 
 						break;
 
 					case GPIO_PIN_2://motors[1].end_switch_pin:
 
+						if(!manual_mode_flag)
+						{
 							stop_motor(1);
 							if (motors[1].direction==motors[1].direction_plus)
 							{
@@ -5915,12 +5919,36 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 							motors[1].running = false;
 							//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
 							motors[1].end_switch_triggered=1;
-
+						}
 						break;
 
+					case GPIO_PIN_13://motors[1].end_switch_pin:
+
+							if(!manual_mode_flag)
+							{
+								stop_motor(0);
+								if (motors[0].direction==motors[0].direction_plus)
+								{
+									motors[0].position = motors[0].max_position;
+									motors[0].allowed_direction=motors[0].direction_minus;
+								}
+								else if (motors[0].direction==motors[0].direction_minus)
+								{
+									motors[0].position = 0;
+									motors[0].allowed_direction=motors[0].direction_plus;
+								}
+								motors[0].running = false;
+								//uart_transmit("M1: Switch (PH15) - STOPPED\r\n");
+								motors[0].end_switch_triggered=1;
+							}
+						break;
 
 					case GPIO_PIN_8:
+
+						if(!manual_mode_flag)
+						{
 							DC_Motor_Set_Speed(0);//POPRAVI!!!
+						}
 
 						break;
 
