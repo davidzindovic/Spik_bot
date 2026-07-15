@@ -5,7 +5,7 @@ import time
 # ==============================================================================
 # 1. NASTAVITEV HUGGING FACE ŽETONA (TOKEN)
 # ==============================================================================
-# Tukaj namesto spodnjega niza vpiši svoj dejanski Hugging Face token:
+# Za prenos javnega CLIPSeg modela token načeloma ni nujen, je pa priporočljiv:
 os.environ["HF_TOKEN"] = "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"
 
 # ==============================================================================
@@ -40,11 +40,14 @@ finally:
     import serial
 
 try:
-    from lang_sam import LangSAM
+    import torch
+    from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 except:
-    os.system('python -m pip install lang-sam')
+    print("[DEBUG] Nameščam transformers in torch...")
+    os.system('python -m pip install transformers torch torchvision')
 finally:
-    from lang_sam import LangSAM
+    import torch
+    from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 # ==============================================================================
 # 3. NASTAVITVE PROGRAMA
@@ -67,12 +70,9 @@ try:
     print("[DEBUG] Inicializacija RealSense kamere...")
     pipeline = rs.pipeline()
     config = rs.config()
-
-    # Nastavitev barvnega in globinskega toka (D455)
     config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
     config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
 
-    # Začetek zajemanja
     profile = pipeline.start(config)
     align_to = rs.stream.color
     align = rs.align(align_to)
@@ -82,56 +82,67 @@ except Exception as e:
     print(f"[DEBUG] NAPAKA pri inicializaciji kamere: {e}")
     sys.exit(1)
 
-# --- Nalaganje LangSAM modela ---
+# --- Nalaganje CLIPSeg modela ---
 try:
-    print("[DEBUG] Nalagam LangSAM model...")
-    model = LangSAM()
-    print("[DEBUG] LangSAM model uspešno naložen.")
+    print("[DEBUG] Nalagam CLIPSeg model...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"[DEBUG] Uporabljam napravo: {device.upper()}")
+    
+    processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+    model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
+    model.to(device)
+    print("[DEBUG] CLIPSeg model uspešno naložen.")
 except Exception as e:
     print(f"[DEBUG] NAPAKA pri nalaganju modela (Preveri HF_TOKEN ali spletno povezavo): {e}")
     sys.exit(1)
 
 
 def run_segmentation(color_image, depth_image):
-    """Izvede LangSAM segmentacijo za 'tree trunk' na podani sliki, izračuna koordinate in jih pošlje na STM32."""
-    print("\n[DEBUG] Poganjam LangSAM segmentacijo (iskanje 'tree trunk')...")
+    """Izvede CLIPSeg segmentacijo za 'tree trunk' na podani sliki."""
+    print("\n[DEBUG] Poganjam CLIPSeg segmentacijo (iskanje 'tree trunk')...")
     
-    # Pretvori BGR v RGB za LangSAM model
+    # Pretvori BGR v RGB
     rgb_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
     
-    # Segmentacija s SAM modelom
-    masks, boxes, phrases, logits = model.predict(rgb_image, "tree trunk")
+    # Priprava vhodnih podatkov za model
+    inputs = processor(text=["tree trunk"], images=[rgb_image], padding="max_length", return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+    
+    with torch.no_grad():
+        outputs = model(**inputs)
+    
+    # Pridobivanje napovedi (logits) in sprememba velikosti na ločljivost slike (1280x720)
+    logits = outputs.logits.unsqueeze(1) # [1, 1, H_model, W_model]
+    preds = torch.nn.functional.interpolate(
+        logits,
+        size=(720, 1280),
+        mode="bilinear"
+    )
+    
+    # Pretvorba verjetnosti v binarno masko (prag 0.35 - prilagodi po potrebi)
+    probs = torch.sigmoid(preds[0][0])
+    mask = (probs > 0.35).cpu().numpy().astype(bool)
 
-    if len(masks) == 0:
-        print("[DEBUG] Ključna beseda 'tree trunk' ni bila zaznana na sliki.")
-        return None
-
-    # Vzamemo prvo zaznano masko (najbolj zanesljivo)
-    mask = masks[0].numpy().astype(bool)
-
-    # Globinski podatki znotraj maske (izven maske nastavimo globino na 0)
+    # Globinski podatki znotraj maske
     masked_depth = np.where(mask, depth_image, 0)
-
-    # Poiščemo minimalno globino, ki je večja od 0 (najbližja točka debla)
     valid_depths = masked_depth[masked_depth > 0]
 
     if len(valid_depths) > 0:
         min_depth_raw = np.min(valid_depths)
         
-        # Najdemo piksel koordinate (u, v) te najbližje točke
+        # Piksel koordinate (u, v) najbližje točke debla
         y_indices, x_indices = np.where(masked_depth == min_depth_raw)
-        u, v = x_indices[0], y_indices[0]  # Vzamemo prvo najdeno točko z min globino
+        u, v = x_indices[0], y_indices[0]
 
-        # Pretvorba globinske vrednosti v metre (upoštevamo merilo kamere)
+        # Pretvorba globine v metre
         depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
         depth_in_meters = min_depth_raw * depth_scale
 
-        # Deprojekcija 2D piksla v 3D prostor (referenčni sistem kamere)
+        # Deprojekcija v 3D prostor kamere
         rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
         
-        # --- Prilagoditev koordinatnega sistema po navodilih ---
-        # Y je naravnost od kamere (RealSense Z_cam)
-        # X+ je levo od kamere, X- je desno (negiramo RealSense X_cam)
+        # --- Prilagoditev koordinatnega sistema ---
+        # Y je naravnost, X+ je levo, X- je desno
         X_coord = -rs_coords[0]
         Y_coord = rs_coords[2]
 
@@ -142,25 +153,23 @@ def run_segmentation(color_image, depth_image):
             rect = cv2.minAreaRect(largest_contour)
             raw_angle = rect[2]
             
-            # Normalizacija kota glede na vertikalno os
             width, height = rect[1]
             if width < height:
                 calculated_angle = raw_angle
             else:
                 calculated_angle = raw_angle - 90 if raw_angle > 0 else raw_angle + 90
             
-            # Omejitev kota na interval [-30, 30] stopinj
+            # Omejitev orientacije na interval [-30, 30] stopinj
             orientation = float(np.clip(calculated_angle, -30.0, 30.0))
         else:
             orientation = 0.0
 
-        # --- Vizualizacija rezultatov ---
+        # --- Vizualizacija ---
         vis_img = color_image.copy()
         if contours:
             cv2.drawContours(vis_img, contours, -1, (0, 255, 0), 2)
         cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
         
-        # Izpis podatkov na sliko
         text_x = f"X: {X_coord:.3f} m (L+/R-)"
         text_y = f"Y: {Y_coord:.3f} m (Naprej)"
         text_o = f"O: {orientation:.2f} deg ([-30, 30])"
@@ -170,32 +179,24 @@ def run_segmentation(color_image, depth_image):
         cv2.putText(vis_img, text_y, (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(vis_img, text_o, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # --- Pošiljanje podatkov preko serijske povezave ---
+        # --- Pošiljanje na STM32 ---
         if ser and ser.is_open:
             cmd_x = f"X={X_coord:.3f}\r\n"
             cmd_y = f"Y={Y_coord:.3f}\r\n"
             cmd_o = f"O={orientation:.2f}\r\n"
 
             print(f"[DEBUG] Pošiljam podatke na STM32:")
-            print(f"  Koda: {cmd_x.strip()}")
             ser.write(cmd_x.encode())
             time.sleep(0.1)
-
-            print(f"  Koda: {cmd_y.strip()}")
             ser.write(cmd_y.encode())
             time.sleep(0.1)
-
-            print(f"  Koda: {cmd_o.strip()}")
             ser.write(cmd_o.encode())
             time.sleep(0.1)
-
-            print("  Koda: GO")
             ser.write("GO\r\n".encode())
+            print("[DEBUG] Ukazi poslani.")
         else:
-            print("[DEBUG] Serijska vrata niso odprta. Izračunani podatki:")
-            print(f"  X (levo/desno): {X_coord:.3f} m")
-            print(f"  Y (naravnost): {Y_coord:.3f} m")
-            print(f"  Orientacija (kot): {orientation:.2f}°")
+            print("[DEBUG] Serijska vrata zaprta. Izračunani podatki:")
+            print(f"  X (L+/R-): {X_coord:.3f} m | Y (Naprej): {Y_coord:.3f} m | O: {orientation:.2f}°")
 
         return vis_img
     else:
@@ -206,14 +207,12 @@ def run_segmentation(color_image, depth_image):
 try:
     if DEVELOPMENT:
         print("\n=== DEVELOPMENT MODE ACTIVATED ===")
-        print("-> Ustvarjam OpenCV okno...")
         cv2.namedWindow("RealSense - Live Stream", cv2.WINDOW_NORMAL)
         cv2.startWindowThread()
 
         print("-> Pritisni 's' za segmentacijo 'tree trunk' | 'q' za izhod\n")
 
         while True:
-            # Zajemi naslednji par sličic v živo
             frames = pipeline.wait_for_frames()
             aligned_frames = align.process(frames)
             
@@ -223,40 +222,34 @@ try:
             if not color_frame or not depth_frame:
                 continue
 
-            # Pretvorba v numpy polja
             color_image = np.asanyarray(color_frame.get_data())
             depth_image = np.asanyarray(depth_frame.get_data())
 
-            # Barvanje globinskega toka (JET paleta)
+            # Barvni globinski zemljevid
             depth_colormap = cv2.applyColorMap(
                 cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
             )
 
-            # Združimo sliki vodoravno (Live Color | Live Depth)
+            # Združitev v eno okno
             live_view = np.hstack((color_image, depth_colormap))
 
-            # Izris navodil neposredno na živi video prenos
             cv2.putText(live_view, "LIVE COLOR", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             cv2.putText(live_view, "LIVE DEPTH MAP (JET)", (1310, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             cv2.putText(live_view, "Pritisni 's' za segmentacijo | 'q' za izhod", (30, 700), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            # Prikaz skupnega okna
             cv2.imshow("RealSense - Live Stream", live_view)
 
-            # Čakanje na tipko (osveževanje 1ms)
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord('q'):
-                print("[DEBUG] Zapiram prenos v živo...")
+                print("[DEBUG] Zapiram program...")
                 break
             elif key == ord('s'):
-                print("[DEBUG] Sprožam segmentacijo...")
                 vis_result = run_segmentation(color_image, depth_image)
                 
                 if vis_result is not None:
-                    # Prikažemo rezultat in počakamo na pritisk poljubne tipke
                     cv2.imshow("RealSense - Live Stream", vis_result)
-                    print("\nPrikazan je rezultat segmentacije. Pritisni poljubno tipko za vrnitev v live stream...")
+                    print("\nPrikazan je rezultat. Pritisni poljubno tipko za vrnitev v live stream...")
                     cv2.waitKey(0)
                 else:
                     print("\nSegmentacija ni uspela, vračam se v live stream...")
@@ -278,7 +271,6 @@ try:
             run_segmentation(color_image, depth_image)
 
 finally:
-    # Varno zapiranje virov ob izhodu
     print("[DEBUG] Zapiram kamero, serijska vrata in okna...")
     pipeline.stop()
     cv2.destroyAllWindows()
