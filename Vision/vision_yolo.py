@@ -41,7 +41,7 @@ finally:
 # ==============================================================================
 # NASTAVITVE
 # ==============================================================================
-DEVELOPMENT = True  # Nastavi na False za produkcijski zagon brez vizualizacije
+DEVELOPMENT = True  # Če je True, prikazuje živi stream in čaka na pritisk tipke 's'
 SERIAL_PORT = 'COM3' 
 BAUD_RATE = 115200
 # ==============================================================================
@@ -74,30 +74,11 @@ intrinsics = profile.get_stream(rs.stream.color).as_video_stream_profile().get_i
 
 # --- Nalaganje YOLO segmentacijskega modela ---
 print("Nalagam YOLO11 segmentacijski model...")
-# Uporabimo lahek segmentacijski model za izjemno hitro delovanje
 model = YOLO("yolo11s-seg.pt") 
 
-try:
-    # Pustimo kameri 30 sličic, da se prilagodi svetlobi (Auto-Exposure)
-    for _ in range(30):
-        pipeline.wait_for_frames()
-
-    print("Zajemam sliko...")
-    frames = pipeline.wait_for_frames()
-    aligned_frames = align.process(frames)
-    
-    color_frame = aligned_frames.get_color_frame()
-    depth_frame = aligned_frames.get_depth_frame()
-
-    if not color_frame or not depth_frame:
-        raise RuntimeError("Ni mogoče pridobiti podatkov iz kamere.")
-
-    # Pretvorba v numpy polja
-    color_image = np.asanyarray(color_frame.get_data())
-    depth_image = np.asanyarray(depth_frame.get_data())
-
-    # --- Predikcija z YOLO ---
-    print("Poganjam YOLO segmentacijo...")
+def run_segmentation(color_image, depth_image):
+    """Izvede YOLO segmentacijo na podani sliki in vrne rezultate ter izrisano sliko."""
+    print("\nPoganjam YOLO segmentacijo na shranjeni sliki...")
     results = model.predict(source=color_image, conf=0.25, verbose=False)
     
     has_mask = False
@@ -120,115 +101,179 @@ try:
 
     if not has_mask:
         print("Na sliki ni bil zaznan noben primeren objekt za segmentacijo.")
-    else:
-        # Globinski podatki znotraj maske (izven maske nastavimo globino na 0)
-        masked_depth = np.where(mask, depth_image, 0)
+        return None
 
-        # Poiščemo minimalno globino, ki je večja od 0 (najbližja točka debla)
-        valid_depths = masked_depth[masked_depth > 0]
+    # Globinski podatki znotraj maske (izven maske nastavimo globino na 0)
+    masked_depth = np.where(mask, depth_image, 0)
 
-        if len(valid_depths) > 0:
-            min_depth_raw = np.min(valid_depths)
+    # Poiščemo minimalno globino, ki je večja od 0 (najbližja točka debla)
+    valid_depths = masked_depth[masked_depth > 0]
+
+    if len(valid_depths) > 0:
+        min_depth_raw = np.min(valid_depths)
+        
+        # Najdemo piksel koordinate (u, v) te najbližje točke
+        y_indices, x_indices = np.where(masked_depth == min_depth_raw)
+        u, v = x_indices[0], y_indices[0]  # Vzamemo prvo najdeno točko z min globino
+
+        # Pretvorba globinske vrednosti v metre (upoštevamo merilo kamere)
+        depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
+        depth_in_meters = min_depth_raw * depth_scale
+
+        # Deprojekcija 2D piksla v 3D prostor (referenčni sistem kamere)
+        rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
+        
+        # --- Prilagoditev koordinatnega sistema po navodilih ---
+        # Y je naravnost od kamere (RealSense Z_cam)
+        # X+ je levo od kamere, X- je desno (negiramo RealSense X_cam)
+        X_coord = -rs_coords[0]
+        Y_coord = rs_coords[2]
+
+        # --- Izračun orientacije (O) ---
+        contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+            rect = cv2.minAreaRect(largest_contour)
+            raw_angle = rect[2]
             
-            # Najdemo piksel koordinate (u, v) te najbližje točke
-            y_indices, x_indices = np.where(masked_depth == min_depth_raw)
-            u, v = x_indices[0], y_indices[0]  # Vzamemo prvo najdeno točko z min globino
-
-            # Pretvorba globinske vrednosti v metre (upoštevamo merilo kamere)
-            depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-            depth_in_meters = min_depth_raw * depth_scale
-
-            # Deprojekcija 2D piksla v 3D prostor (referenčni sistem kamere)
-            rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
+            # Normalizacija kota, da dobimo odklon od navpičnice (0 stopinj)
+            width, height = rect[1]
+            if width < height:
+                calculated_angle = raw_angle
+            else:
+                calculated_angle = raw_angle - 90 if raw_angle > 0 else raw_angle + 90
             
-            # --- Prilagoditev koordinatnega sistema po navodilih ---
-            # Y je naravnost od kamere (RealSense Z_cam)
-            # X+ je levo od kamere, X- je desno (negiramo RealSense X_cam)
-            X_coord = -rs_coords[0]
-            Y_coord = rs_coords[2]
-
-            # --- Izračun orientacije (O) ---
-            contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if contours:
-                largest_contour = max(contours, key=cv2.contourArea)
-                rect = cv2.minAreaRect(largest_contour)
-                raw_angle = rect[2]
-                
-                # Normalizacija kota, da dobimo odklon od navpičnice (0 stopinj)
-                width, height = rect[1]
-                if width < height:
-                    calculated_angle = raw_angle
-                else:
-                    calculated_angle = raw_angle - 90 if raw_angle > 0 else raw_angle + 90
-                
-                # Omejitev kota na interval [-30, 30] stopinj
-                orientation = float(np.clip(calculated_angle, -30.0, 30.0))
-            else:
-                orientation = 0.0
-
-            # --- Vizualizacija (DEVELOPMENT flag) ---
-            if DEVELOPMENT:
-                # Ustvarimo kopijo barvne slike za risanje vizualnih elementov
-                vis_img = color_image.copy()
-                
-                # Narišemo konturo zaznanega debla (zelena barva)
-                cv2.drawContours(vis_img, contours, -1, (0, 255, 0), 2)
-                
-                # Označimo točko vboda (rdeč poln krog)
-                cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
-                
-                # Izris izračunanih podatkov v zgornji levi kot slike
-                text_x = f"X: {X_coord:.3f} m (L+/R-)"
-                text_y = f"Y: {Y_coord:.3f} m (Naprej)"
-                text_o = f"O: {orientation:.2f} deg ([-30, 30])"
-                
-                # Podlaga za besedilo, da bo lažje berljivo
-                cv2.rectangle(vis_img, (10, 10), (320, 110), (0, 0, 0), -1)
-                
-                cv2.putText(vis_img, text_x, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                cv2.putText(vis_img, text_y, (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                cv2.putText(vis_img, text_o, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                
-                # Prikaz slike v oknu
-                cv2.imshow("Development View - YOLO11 & Vbodna tocka", vis_img)
-                print("\nPrikazujem sliko. Pritisni poljubno tipko na sliki za nadaljevanje...")
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
-
-            # --- Pošiljanje podatkov preko serijske povezave ---
-            if ser and ser.is_open:
-                # Formatiranje podatkov na 3 oz. 2 decimalni mesti
-                cmd_x = f"X={X_coord:.3f}\r\n"
-                cmd_y = f"Y={Y_coord:.3f}\r\n"
-                cmd_o = f"O={orientation:.2f}\r\n"
-
-                print(f"\nPošiljam podatke na STM32:")
-                print(f"Koda: {cmd_x.strip()}")
-                ser.write(cmd_x.encode())
-                time.sleep(0.1)  # Kratek premor med ukazi za STM32
-
-                print(f"Koda: {cmd_y.strip()}")
-                ser.write(cmd_y.encode())
-                time.sleep(0.1)
-
-                print(f"Koda: {cmd_o.strip()}")
-                ser.write(cmd_o.encode())
-                time.sleep(0.1)
-
-                print("Koda: GO")
-                ser.write("GO\r\n".encode())
-            else:
-                print("\nSerijska vrata niso odprta. Izpis izračunanih podatkov:")
-                print(f"X (levo/desno): {X_coord:.3f} m")
-                print(f"Y (naravnost): {Y_coord:.3f} m")
-                print(f"Orientacija (kot): {orientation:.2f}°")
-
+            # Omejitev kota na interval [-30, 30] stopinj
+            orientation = float(np.clip(calculated_angle, -30.0, 30.0))
         else:
-            print("Znotraj maske ni veljavnih globinskih podatkov (morda preblizu/izven območja senzorja).")
+            orientation = 0.0
+
+        # --- Vizualizacija rezultatov ---
+        vis_img = color_image.copy()
+        if contours:
+            cv2.drawContours(vis_img, contours, -1, (0, 255, 0), 2)
+        cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
+        
+        # Izpis izračunanih podatkov
+        text_x = f"X: {X_coord:.3f} m (L+/R-)"
+        text_y = f"Y: {Y_coord:.3f} m (Naprej)"
+        text_o = f"O: {orientation:.2f} deg ([-30, 30])"
+        
+        cv2.rectangle(vis_img, (10, 10), (320, 110), (0, 0, 0), -1)
+        cv2.putText(vis_img, text_x, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(vis_img, text_y, (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(vis_img, text_o, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # --- Pošiljanje podatkov preko serijske povezave ---
+        if ser and ser.is_open:
+            cmd_x = f"X={X_coord:.3f}\r\n"
+            cmd_y = f"Y={Y_coord:.3f}\r\n"
+            cmd_o = f"O={orientation:.2f}\r\n"
+
+            print(f"Pošiljam podatke na STM32:")
+            print(f"  Koda: {cmd_x.strip()}")
+            ser.write(cmd_x.encode())
+            time.sleep(0.1)
+
+            print(f"  Koda: {cmd_y.strip()}")
+            ser.write(cmd_y.encode())
+            time.sleep(0.1)
+
+            print(f"  Koda: {cmd_o.strip()}")
+            ser.write(cmd_o.encode())
+            time.sleep(0.1)
+
+            print("  Koda: GO")
+            ser.write("GO\r\n".encode())
+        else:
+            print("Serijska vrata niso odprta. Izračunani podatki:")
+            print(f"  X (levo/desno): {X_coord:.3f} m")
+            print(f"  Y (naravnost): {Y_coord:.3f} m")
+            print(f"  Orientacija (kot): {orientation:.2f}°")
+
+        return vis_img
+    else:
+        print("Znotraj maske ni veljavnih globinskih podatkov.")
+        return None
+
+try:
+    if DEVELOPMENT:
+        print("\n=== DEVELOPMENT MODE ===")
+        print("Tipka 's': Shrani trenutno sliko in zažene segmentacijo.")
+        print("Tipka 'q': Prekini in zapri program.\n")
+
+        # Ustvarimo okno, ki se lahko poljubno prilagaja velikosti
+        cv2.namedWindow("RealSense - Live Stream", cv2.WINDOW_NORMAL)
+
+        while True:
+            # Zajemi naslednji par sličic v živo
+            frames = pipeline.wait_for_frames()
+            aligned_frames = align.process(frames)
+            
+            color_frame = aligned_frames.get_color_frame()
+            depth_frame = aligned_frames.get_depth_frame()
+
+            if not color_frame or not depth_frame:
+                continue
+
+            # Pretvorba v numpy polja
+            color_image = np.asanyarray(color_frame.get_data())
+            depth_image = np.asanyarray(depth_frame.get_data())
+
+            # Barvanje globinskega toka, da bo vizualno razumljiv človeku (JET paleta)
+            depth_colormap = cv2.applyColorMap(
+                cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
+            )
+
+            # Združimo sliki vodoravno (Live Color | Live Depth)
+            # Ker sta obe resolucije 1280x720, ju lahko preprosto združimo
+            live_view = np.hstack((color_image, depth_colormap))
+
+            # Izris navodil neposredno na živi video prenos
+            cv2.putText(live_view, "LIVE COLOR", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(live_view, "LIVE DEPTH MAP (JET)", (1310, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(live_view, "Pritisni 's' za segmentacijo | 'q' za izhod", (30, 700), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+            # Prikaz skupnega okna
+            cv2.imshow("RealSense - Live Stream", live_view)
+
+            # Čakamo na pritisk tipke v živem prenosu
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == ord('q'):  # 'q' za izhod
+                break
+            elif key == ord('s'):  # 's' za zajem in segmentacijo
+                # Skrijemo živi prenos in poženemo segmentacijo na tej specifični sličici
+                vis_result = run_segmentation(color_image, depth_image)
+                
+                if vis_result is not None:
+                    # Prikažemo statični rezultat segmentacije
+                    cv2.imshow("RealSense - Live Stream", vis_result)
+                    print("\nPrikazan je rezultat modela. Pritisni poljubno tipko za vrnitev v live stream...")
+                    cv2.waitKey(0)
+                else:
+                    print("\nSegmentacija ni uspela, vračam se v live stream...")
+
+    else:
+        # PRODUKCIJSKI NAČIN (enako kot prej, brez vizualne zanke)
+        print("Zagon v produkcijskem načinu...")
+        for _ in range(30):
+            pipeline.wait_for_frames()
+
+        frames = pipeline.wait_for_frames()
+        aligned_frames = align.process(frames)
+        color_frame = aligned_frames.get_color_frame()
+        depth_frame = aligned_frames.get_depth_frame()
+
+        if color_frame and depth_frame:
+            color_image = np.asanyarray(color_frame.get_data())
+            depth_image = np.asanyarray(depth_frame.get_data())
+            run_segmentation(color_image, depth_image)
 
 finally:
     # Varno zapiranje virov
     pipeline.stop()
+    cv2.destroyAllWindows()
     if ser and ser.is_open:
         ser.close()
     print("Program zaključen.")
