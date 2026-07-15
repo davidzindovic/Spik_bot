@@ -5,7 +5,7 @@ import time
 # ==============================================================================
 # 1. NASTAVITEV HUGGING FACE ŽETONA (TOKEN)
 # ==============================================================================
-os.environ["HF_TOKEN"] = "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"
+os.environ["HF_TOKEN"] = "token"
 
 # ==============================================================================
 # 2. SAMODEJNA NAMESTITEV IN UVOZ KNJIŽNIC
