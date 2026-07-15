@@ -72,20 +72,25 @@ align = rs.align(align_to)
 # Pridobitev intrinzičnih parametrov kamere (za pretvorbo pikslov v metre)
 intrinsics = profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
 
-# --- Nalaganje YOLO segmentacijskega modela ---
-print("Nalagam YOLO11 segmentacijski model...")
-model = YOLO("yolo11s-seg.pt") 
+# --- Nalaganje YOLO-World modela in prilagoditev za "tree trunk" ---
+print("Nalagam YOLO-World model...")
+# Naložimo model, ki podpira poljubne tekstovne poizvedbe v realnem času
+model = YOLO("yolov8s-world.pt") 
+
+# Nastavimo iskalni razred na "tree trunk" (drevesno deblo)
+print("Prilagajam model za detekcijo: 'tree trunk'...")
+model.set_classes(["tree trunk"])
 
 def run_segmentation(color_image, depth_image):
-    """Izvede YOLO segmentacijo na podani sliki in vrne rezultate ter izrisano sliko."""
-    print("\nPoganjam YOLO segmentacijo na shranjeni sliki...")
+    """Izvede YOLO-World segmentacijo za 'tree trunk' na podani sliki."""
+    print("\nPoganjam YOLO-World segmentacijo (iskanje 'tree trunk')...")
     results = model.predict(source=color_image, conf=0.25, verbose=False)
     
     has_mask = False
     if len(results) > 0 and results[0].masks is not None:
         masks_data = results[0].masks.data
         if len(masks_data) > 0:
-            # Izberemo največjo zaznano masko na sliki (predvidevamo, da je to deblo)
+            # Vzamemo največjo zaznano masko debla
             largest_mask_idx = 0
             max_area = 0
             for idx, m in enumerate(masks_data):
@@ -94,38 +99,38 @@ def run_segmentation(color_image, depth_image):
                     max_area = area
                     largest_mask_idx = idx
 
-            # Masko pretvorimo v primerno ločljivost slike (1280x720) in bool format
+            # Masko pretvorimo v ločljivost slike (1280x720) in bool format
             mask = masks_data[largest_mask_idx].cpu().numpy().astype(bool)
             mask = cv2.resize(mask.astype(np.uint8), (1280, 720)).astype(bool)
             has_mask = True
 
     if not has_mask:
-        print("Na sliki ni bil zaznan noben primeren objekt za segmentacijo.")
+        print("Deblo ('tree trunk') na sliki ni bilo zaznano.")
         return None
 
-    # Globinski podatki znotraj maske (izven maske nastavimo globino na 0)
+    # Globinski podatki znotraj maske debla
     masked_depth = np.where(mask, depth_image, 0)
 
-    # Poiščemo minimalno globino, ki je večja od 0 (najbližja točka debla)
+    # Poiščemo minimalno globino (najbližjo točko debla)
     valid_depths = masked_depth[masked_depth > 0]
 
     if len(valid_depths) > 0:
         min_depth_raw = np.min(valid_depths)
         
-        # Najdemo piksel koordinate (u, v) te najbližje točke
+        # Piksel koordinate (u, v) najbližje točke
         y_indices, x_indices = np.where(masked_depth == min_depth_raw)
-        u, v = x_indices[0], y_indices[0]  # Vzamemo prvo najdeno točko z min globino
+        u, v = x_indices[0], y_indices[0]
 
-        # Pretvorba globinske vrednosti v metre (upoštevamo merilo kamere)
+        # Pretvorba globinske vrednosti v metre
         depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
         depth_in_meters = min_depth_raw * depth_scale
 
-        # Deprojekcija 2D piksla v 3D prostor (referenčni sistem kamere)
+        # Deprojekcija 2D piksla v 3D prostor kamere
         rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
         
-        # --- Prilagoditev koordinatnega sistema po navodilih ---
-        # Y je naravnost od kamere (RealSense Z_cam)
-        # X+ je levo od kamere, X- je desno (negiramo RealSense X_cam)
+        # --- Prilagoditev koordinatnega sistema ---
+        # Y je naravnost (Z_cam)
+        # X+ je levo, X- je desno (-X_cam)
         X_coord = -rs_coords[0]
         Y_coord = rs_coords[2]
 
@@ -136,7 +141,7 @@ def run_segmentation(color_image, depth_image):
             rect = cv2.minAreaRect(largest_contour)
             raw_angle = rect[2]
             
-            # Normalizacija kota, da dobimo odklon od navpičnice (0 stopinj)
+            # Normalizacija kota glede na vertikalno os debla
             width, height = rect[1]
             if width < height:
                 calculated_angle = raw_angle
@@ -148,13 +153,13 @@ def run_segmentation(color_image, depth_image):
         else:
             orientation = 0.0
 
-        # --- Vizualizacija rezultatov ---
+        # --- Vizualizacija ---
         vis_img = color_image.copy()
         if contours:
             cv2.drawContours(vis_img, contours, -1, (0, 255, 0), 2)
         cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
         
-        # Izpis izračunanih podatkov
+        # Izpis izračunanih podatkov na zaslon
         text_x = f"X: {X_coord:.3f} m (L+/R-)"
         text_y = f"Y: {Y_coord:.3f} m (Naprej)"
         text_o = f"O: {orientation:.2f} deg ([-30, 30])"
@@ -164,7 +169,7 @@ def run_segmentation(color_image, depth_image):
         cv2.putText(vis_img, text_y, (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(vis_img, text_o, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # --- Pošiljanje podatkov preko serijske povezave ---
+        # --- Pošiljanje podatkov na STM32 ---
         if ser and ser.is_open:
             cmd_x = f"X={X_coord:.3f}\r\n"
             cmd_y = f"Y={Y_coord:.3f}\r\n"
@@ -202,11 +207,10 @@ try:
         print("Tipka 's': Shrani trenutno sliko in zažene segmentacijo.")
         print("Tipka 'q': Prekini in zapri program.\n")
 
-        # Ustvarimo okno, ki se lahko poljubno prilagaja velikosti
         cv2.namedWindow("RealSense - Live Stream", cv2.WINDOW_NORMAL)
 
         while True:
-            # Zajemi naslednji par sličic v živo
+            # Zajemi sličice v realnem času
             frames = pipeline.wait_for_frames()
             aligned_frames = align.process(frames)
             
@@ -220,34 +224,31 @@ try:
             color_image = np.asanyarray(color_frame.get_data())
             depth_image = np.asanyarray(depth_frame.get_data())
 
-            # Barvanje globinskega toka, da bo vizualno razumljiv človeku (JET paleta)
+            # Ustvari barvni prikaz globine (JET) za lažjo človeško orientacijo
             depth_colormap = cv2.applyColorMap(
                 cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
             )
 
             # Združimo sliki vodoravno (Live Color | Live Depth)
-            # Ker sta obe resolucije 1280x720, ju lahko preprosto združimo
             live_view = np.hstack((color_image, depth_colormap))
 
-            # Izris navodil neposredno na živi video prenos
+            # Izris navodil na živi prenos
             cv2.putText(live_view, "LIVE COLOR", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             cv2.putText(live_view, "LIVE DEPTH MAP (JET)", (1310, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            cv2.putText(live_view, "Pritisni 's' za segmentacijo | 'q' za izhod", (30, 700), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.putText(live_view, "Pritisni 's' za segmentacijo 'tree trunk' | 'q' za izhod", (30, 700), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            # Prikaz skupnega okna
             cv2.imshow("RealSense - Live Stream", live_view)
 
-            # Čakamo na pritisk tipke v živem prenosu
+            # Čakamo na tipko
             key = cv2.waitKey(1) & 0xFF
 
-            if key == ord('q'):  # 'q' za izhod
+            if key == ord('q'):
                 break
-            elif key == ord('s'):  # 's' za zajem in segmentacijo
-                # Skrijemo živi prenos in poženemo segmentacijo na tej specifični sličici
+            elif key == ord('s'):
+                # Zaustavi live stream in sproži segmentacijo na trenutnem kadru
                 vis_result = run_segmentation(color_image, depth_image)
                 
                 if vis_result is not None:
-                    # Prikažemo statični rezultat segmentacije
                     cv2.imshow("RealSense - Live Stream", vis_result)
                     print("\nPrikazan je rezultat modela. Pritisni poljubno tipko za vrnitev v live stream...")
                     cv2.waitKey(0)
@@ -255,7 +256,7 @@ try:
                     print("\nSegmentacija ni uspela, vračam se v live stream...")
 
     else:
-        # PRODUKCIJSKI NAČIN (enako kot prej, brez vizualne zanke)
+        # PRODUKCIJSKI NAČIN
         print("Zagon v produkcijskem načinu...")
         for _ in range(30):
             pipeline.wait_for_frames()
