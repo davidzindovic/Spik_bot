@@ -1,49 +1,48 @@
-#import pyrealsense2 as rs
-#import numpy as np
-#import cv2
-#import serial
+import os
 import time
-#from lang_sam import LangSAM
 
-  try:
-      import pyrealsense2 as rs
-  except:
-      os.system('python -m pip install pyrealsense2')
-  finally:
-      import pyrealsense2 as rs
+try:
+    import pyrealsense2 as rs
+except:
+    os.system('python -m pip install pyrealsense2')
+finally:
+    import pyrealsense2 as rs
 
-  try:
-      import numpy as np
-  except:
-      os.system('python -m pip install numpy')
-  finally:
-      import numpy as np
+try:
+    import numpy as np
+except:
+    os.system('python -m pip install numpy')
+finally:
+    import numpy as np
 
-  try:
-      import cv2
-  except:
-      os.system('python -m pip install opencv-python')
-  finally:
-      import cv2
+try:
+    import cv2
+except:
+    os.system('python -m pip install opencv-python')
+finally:
+    import cv2
 
-  try:
-      import serial
-  except:
-      os.system('python -m pip install pyserial')
-  finally:
-      import serial
+try:
+    import serial
+except:
+    os.system('python -m pip install pyserial')
+finally:
+    import serial
 
-  try:
-      from lang_sam import LangSAM
-  except:
-      os.system('python -m pip install lang-sam')
-  finally:
-      from lang_sam import LangSAM
+try:
+    from lang_sam import LangSAM
+except:
+    os.system('python -m pip install lang-sam')
+finally:
+    from lang_sam import LangSAM
 
-# --- Nastavitve serijske komunikacije ---
-# Prilagodi vrata (COM port) glede na tvojo STM32 napravo (npr. 'COM3' na Windows ali '/dev/ttyACM0' na Linuxu)
+# ==============================================================================
+# NASTAVITVE
+# ==============================================================================
+DEVELOPMENT = True  # Nastavi na False za produkcijski zagon brez vizualizacije
 SERIAL_PORT = 'COM3' 
 BAUD_RATE = 115200
+# ==============================================================================
 
 try:
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
@@ -103,7 +102,7 @@ try:
     if len(masks) == 0:
         print("Ključna beseda 'tree trunk' ni bila zaznana.")
     else:
-        # Vzamemo prvo zaznano masko (najbolj zanesljivo)
+        # Vzamemo prvo zaznano masko
         mask = masks[0].numpy().astype(bool)
 
         # Globinski podatki znotraj maske (izven maske nastavimo globino na 0)
@@ -123,24 +122,70 @@ try:
             depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
             depth_in_meters = min_depth_raw * depth_scale
 
-            # Deprojekcija 2D piksla v 3D prostor (X, Y, Z v metrih glede na kamero)
-            point_3d = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
-            X_coord, Y_coord, Z_coord = point_3d
+            # Deprojekcija 2D piksla v 3D prostor (referenčni sistem kamere)
+            # rs_coords: [X_cam, Y_cam, Z_cam]
+            rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
+            
+            # --- Prilagoditev koordinatnega sistema po navodilih ---
+            # Naravnost od kamere je sedaj Y (kar je pri RealSense Z_cam)
+            # X+ je levo od kamere, X- je desno (RealSense ima privzeto X+ desno, zato negiramo X_cam)
+            X_coord = -rs_coords[0]
+            Y_coord = rs_coords[2]
 
             # --- Izračun orientacije (O) ---
-            # Kot orientacije debla bomo določili s pomočjo nagnjenosti zaznane maske (glavna os)
             contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if contours:
                 largest_contour = max(contours, key=cv2.contourArea)
-                # minAreaRect vrne ((center_x, center_y), (width, height), angle)
+                # minAreaRect vrne kot med -90 in 0 stopinj (odvisno od OpenCV različice lahko tudi 0-90)
                 rect = cv2.minAreaRect(largest_contour)
-                orientation = rect[2]  # Kot orientacije v stopinjah
+                raw_angle = rect[2]
+                
+                # Normalizacija kota, da dobimo odklon od navpičnice (0 stopinj)
+                # minAreaRect kot določa glede na vodoravno os najširše stranice.
+                # Če je višina večja od širine, popravimo kot, da dobimo odklon od vertikale.
+                width, height = rect[1]
+                if width < height:
+                    calculated_angle = raw_angle
+                else:
+                    calculated_angle = raw_angle - 90 if raw_angle > 0 else raw_angle + 90
+                
+                # Omejitev kota na interval [-30, 30] stopinj
+                orientation = float(np.clip(calculated_angle, -30.0, 30.0))
             else:
                 orientation = 0.0
 
+            # --- Vizualizacija (DEVELOPMENT flag) ---
+            if DEVELOPMENT:
+                # Ustvarimo kopijo barvne slike za risanje vizualnih elementov
+                vis_img = color_image.copy()
+                
+                # Narišemo konturo zaznanega debla (zelena barva)
+                cv2.drawContours(vis_img, contours, -1, (0, 255, 0), 2)
+                
+                # Označimo točko vboda (rdeč poln krog)
+                cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
+                
+                # Izris izračunanih podatkov v zgornji levi kot slike
+                text_x = f"X: {X_coord:.3f} m (L+/R-)"
+                text_y = f"Y: {Y_coord:.3f} m (Naprej)"
+                text_o = f"O: {orientation:.2f} deg ([-30, 30])"
+                
+                # Podlaga za besedilo, da bo lažje berljivo
+                cv2.rectangle(vis_img, (10, 10), (320, 110), (0, 0, 0), -1)
+                
+                cv2.putText(vis_img, text_x, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(vis_img, text_y, (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(vis_img, text_o, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                
+                # Prikaz slike v oknu
+                cv2.imshow("Development View - SAM & Vbodna tocka", vis_img)
+                print("\nPrikazujem sliko. Pritisni poljubno tipko na sliki za nadaljevanje...")
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+
             # --- Pošiljanje podatkov preko serijske povezave ---
             if ser and ser.is_open:
-                # Formatiranje podatkov na 3 decimalna mesta
+                # Formatiranje podatkov
                 cmd_x = f"X={X_coord:.3f}\r\n"
                 cmd_y = f"Y={Y_coord:.3f}\r\n"
                 cmd_o = f"O={orientation:.2f}\r\n"
@@ -148,7 +193,7 @@ try:
                 print(f"\nPošiljam podatke na STM32:")
                 print(f"Koda: {cmd_x.strip()}")
                 ser.write(cmd_x.encode())
-                time.sleep(0.1) # Kratek premor med ukazi, da STM32 lažje procesira
+                time.sleep(0.1)
 
                 print(f"Koda: {cmd_y.strip()}")
                 ser.write(cmd_y.encode())
@@ -162,9 +207,8 @@ try:
                 ser.write("GO\r\n".encode())
             else:
                 print("\nSerijska vrata niso odprta. Izpis izračunanih podatkov:")
-                print(f"X (metri): {X_coord:.3f}")
-                print(f"Y (metri): {Y_coord:.3f}")
-                print(f"Z (globina v metrih): {Z_coord:.3f}")
+                print(f"X (levo/desno): {X_coord:.3f} m")
+                print(f"Y (naravnost): {Y_coord:.3f} m")
                 print(f"Orientacija (kot): {orientation:.2f}°")
 
         else:
