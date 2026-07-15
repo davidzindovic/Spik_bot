@@ -6,7 +6,7 @@ import time
 # 1. NASTAVITEV HUGGING FACE ŽETONA (TOKEN)
 # ==============================================================================
 # Tukaj namesto spodnjega niza vpiši svoj dejanski Hugging Face token:
-os.environ["HF_TOKEN"] = "VPISI_SVOJ_HF_TOKEN_TUKAJ"
+os.environ["HF_TOKEN"] = "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"
 
 # ==============================================================================
 # 2. SAMODEJNA NAMESTITEV IN UVOZ KNJIŽNIC
