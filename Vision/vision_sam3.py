@@ -5,8 +5,7 @@ import time
 # ==============================================================================
 # 1. NASTAVITEV HUGGING FACE ŽETONA (TOKEN)
 # ==============================================================================
-# Za prenos javnega CLIPSeg modela token načeloma ni nujen, je pa priporočljiv:
-os.environ["HF_TOKEN"] = "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"
+os.environ["HF_TOKEN"] = "VPISI_SVOJ_HF_TOKEN_TUKAJ"
 
 # ==============================================================================
 # 2. SAMODEJNA NAMESTITEV IN UVOZ KNJIŽNIC
@@ -53,7 +52,7 @@ finally:
 # 3. NASTAVITVE PROGRAMA
 # ==============================================================================
 DEVELOPMENT = True  # True: živi stream s tipko 's' za segmentacijo | False: enojni zajem (produkcija)
-SERIAL_PORT = 'COM3' 
+SERIAL_PORT = '/dev/ttyACM0'  # OPOMBA: Na Linuxu je COM3 običajno '/dev/ttyACM0' ali '/dev/ttyUSB0'
 BAUD_RATE = 115200
 # ==============================================================================
 
@@ -63,7 +62,13 @@ try:
     print(f"[DEBUG] Povezava uspešno vzpostavljena na {SERIAL_PORT}")
 except Exception as e:
     print(f"[DEBUG] Opozorilo pri povezovanju na serijska vrata: {e}")
-    ser = None
+    print("[DEBUG] Poskušam se povezati na alternativna vrata /dev/ttyUSB0...")
+    try:
+        ser = serial.Serial('/dev/ttyUSB0', BAUD_RATE, timeout=1)
+        print("[DEBUG] Uspešno povezan na /dev/ttyUSB0")
+    except:
+        print("[DEBUG] Serijska vrata niso na voljo. Program bo tekel brez pošiljanja na STM32.")
+        ser = None
 
 # --- Nastavitve RealSense Kamere ---
 try:
@@ -82,18 +87,34 @@ except Exception as e:
     print(f"[DEBUG] NAPAKA pri inicializaciji kamere: {e}")
     sys.exit(1)
 
-# --- Nalaganje CLIPSeg modela ---
+# --- Varna detekcija CUDA in nalaganje CLIPSeg modela ---
 try:
-    print("[DEBUG] Nalagam CLIPSeg model...")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[DEBUG] Uporabljam napravo: {device.upper()}")
+    print("[DEBUG] Analiziram napravo za poganjanje modela...")
+    device = "cpu"
     
+    if torch.cuda.is_available():
+        try:
+            # Poskusimo inicializirati CUDA s kratkim testom
+            # Če gonilniki na Linuxu niso usklajeni, se bo tukaj sprožila napaka
+            test_tensor = torch.zeros(1).cuda()
+            device = "cuda"
+            print("[DEBUG] CUDA je na voljo in deluje pravilno!")
+        except Exception as cuda_err:
+            print(f"[DEBUG] Opozorilo: CUDA javlja težave ({cuda_err}).")
+            print("[DEBUG] Prisilno preklapljam na CPU za stabilno delovanje.")
+            device = "cpu"
+    else:
+        print("[DEBUG] CUDA grafična kartica ni zaznana. Uporabljam CPU.")
+        
+    print(f"[DEBUG] Izbrana naprava: {device.upper()}")
+    
+    print("[DEBUG] Nalagam CLIPSeg model...")
     processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
     model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
     model.to(device)
     print("[DEBUG] CLIPSeg model uspešno naložen.")
 except Exception as e:
-    print(f"[DEBUG] NAPAKA pri nalaganju modela (Preveri HF_TOKEN ali spletno povezavo): {e}")
+    print(f"[DEBUG] NAPAKA pri nalaganju modela: {e}")
     sys.exit(1)
 
 
@@ -104,22 +125,21 @@ def run_segmentation(color_image, depth_image):
     # Pretvori BGR v RGB
     rgb_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
     
-    # Priprava vhodnih podatkov za model
+    # Priprava vhodnih podatkov
     inputs = processor(text=["tree trunk"], images=[rgb_image], padding="max_length", return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     
     with torch.no_grad():
         outputs = model(**inputs)
     
-    # Pridobivanje napovedi (logits) in sprememba velikosti na ločljivost slike (1280x720)
-    logits = outputs.logits.unsqueeze(1) # [1, 1, H_model, W_model]
+    # Prilagoditev ločljivosti na 1280x720
+    logits = outputs.logits.unsqueeze(1)
     preds = torch.nn.functional.interpolate(
         logits,
         size=(720, 1280),
         mode="bilinear"
     )
     
-    # Pretvorba verjetnosti v binarno masko (prag 0.35 - prilagodi po potrebi)
     probs = torch.sigmoid(preds[0][0])
     mask = (probs > 0.35).cpu().numpy().astype(bool)
 
@@ -130,19 +150,16 @@ def run_segmentation(color_image, depth_image):
     if len(valid_depths) > 0:
         min_depth_raw = np.min(valid_depths)
         
-        # Piksel koordinate (u, v) najbližje točke debla
         y_indices, x_indices = np.where(masked_depth == min_depth_raw)
         u, v = x_indices[0], y_indices[0]
 
-        # Pretvorba globine v metre
         depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
         depth_in_meters = min_depth_raw * depth_scale
 
-        # Deprojekcija v 3D prostor kamere
         rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
         
         # --- Prilagoditev koordinatnega sistema ---
-        # Y je naravnost, X+ je levo, X- je desno
+        # Y naravnost, X+ levo, X- desno
         X_coord = -rs_coords[0]
         Y_coord = rs_coords[2]
 
@@ -159,7 +176,6 @@ def run_segmentation(color_image, depth_image):
             else:
                 calculated_angle = raw_angle - 90 if raw_angle > 0 else raw_angle + 90
             
-            # Omejitev orientacije na interval [-30, 30] stopinj
             orientation = float(np.clip(calculated_angle, -30.0, 30.0))
         else:
             orientation = 0.0
@@ -193,10 +209,10 @@ def run_segmentation(color_image, depth_image):
             ser.write(cmd_o.encode())
             time.sleep(0.1)
             ser.write("GO\r\n".encode())
-            print("[DEBUG] Ukazi poslani.")
+            print("[DEBUG] Ukazi uspešno poslani.")
         else:
-            print("[DEBUG] Serijska vrata zaprta. Izračunani podatki:")
-            print(f"  X (L+/R-): {X_coord:.3f} m | Y (Naprej): {Y_coord:.3f} m | O: {orientation:.2f}°")
+            print("[DEBUG] Serijska vrata niso povezana. Rezultati:")
+            print(f"  X: {X_coord:.3f} m | Y: {Y_coord:.3f} m | O: {orientation:.2f}°")
 
         return vis_img
     else:
@@ -225,12 +241,12 @@ try:
             color_image = np.asanyarray(color_frame.get_data())
             depth_image = np.asanyarray(depth_frame.get_data())
 
-            # Barvni globinski zemljevid
+            # Barvni prikaz globine
             depth_colormap = cv2.applyColorMap(
                 cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
             )
 
-            # Združitev v eno okno
+            # Združitev slik v eno okno
             live_view = np.hstack((color_image, depth_colormap))
 
             cv2.putText(live_view, "LIVE COLOR", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
@@ -242,17 +258,16 @@ try:
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord('q'):
-                print("[DEBUG] Zapiram program...")
                 break
             elif key == ord('s'):
                 vis_result = run_segmentation(color_image, depth_image)
                 
                 if vis_result is not None:
                     cv2.imshow("RealSense - Live Stream", vis_result)
-                    print("\nPrikazan je rezultat. Pritisni poljubno tipko za vrnitev v live stream...")
+                    print("\nPrikazan je rezultat. Pritisni poljubno tipko za vrnitev v prenos...")
                     cv2.waitKey(0)
                 else:
-                    print("\nSegmentacija ni uspela, vračam se v live stream...")
+                    print("\nSegmentacija ni uspela.")
 
     else:
         # PRODUKCIJSKI NAČIN
@@ -271,7 +286,7 @@ try:
             run_segmentation(color_image, depth_image)
 
 finally:
-    print("[DEBUG] Zapiram kamero, serijska vrata in okna...")
+    print("[DEBUG] Zapiram vire...")
     pipeline.stop()
     cv2.destroyAllWindows()
     if ser and ser.is_open:
