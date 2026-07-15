@@ -3,12 +3,17 @@ import sys
 import time
 
 # ==============================================================================
-# 1. NASTAVITEV HUGGING FACE ŽETONA (TOKEN)
+# VARNOSTNI POPRAVEK ZA LINUX (Preprečitev OSError: libcudart.so.11.0)
 # ==============================================================================
+# Če sistem nima pravilno nastavljene CUDA poti, bomo PyTorch prisilili,
+# da uporabi procesor (CPU) in se izognili sesutju ob uvozu knjižnic.
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+# Nastavitev Hugging Face žetona
 os.environ["HF_TOKEN"] = "VPISI_SVOJ_HF_TOKEN_TUKAJ"
 
 # ==============================================================================
-# 2. SAMODEJNA NAMESTITEV IN UVOZ KNJIŽNIC
+# SAMODEJNA NAMESTITEV IN UVOZ KNJIŽNIC
 # ==============================================================================
 try:
     import pyrealsense2 as rs
@@ -49,10 +54,10 @@ finally:
     from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 # ==============================================================================
-# 3. NASTAVITVE PROGRAMA
+# NASTAVITVE PROGRAMA
 # ==============================================================================
 DEVELOPMENT = True  # True: živi stream s tipko 's' za segmentacijo | False: enojni zajem (produkcija)
-SERIAL_PORT = '/dev/ttyACM0'  # OPOMBA: Na Linuxu je COM3 običajno '/dev/ttyACM0' ali '/dev/ttyUSB0'
+SERIAL_PORT = '/dev/ttyACM0'  # Na Linuxu je običajno /dev/ttyACM0 ali /dev/ttyUSB0
 BAUD_RATE = 115200
 # ==============================================================================
 
@@ -87,26 +92,10 @@ except Exception as e:
     print(f"[DEBUG] NAPAKA pri inicializaciji kamere: {e}")
     sys.exit(1)
 
-# --- Varna detekcija CUDA in nalaganje CLIPSeg modela ---
+# --- Nalaganje CLIPSeg modela ---
 try:
-    print("[DEBUG] Analiziram napravo za poganjanje modela...")
-    device = "cpu"
-    
-    if torch.cuda.is_available():
-        try:
-            # Poskusimo inicializirati CUDA s kratkim testom
-            # Če gonilniki na Linuxu niso usklajeni, se bo tukaj sprožila napaka
-            test_tensor = torch.zeros(1).cuda()
-            device = "cuda"
-            print("[DEBUG] CUDA je na voljo in deluje pravilno!")
-        except Exception as cuda_err:
-            print(f"[DEBUG] Opozorilo: CUDA javlja težave ({cuda_err}).")
-            print("[DEBUG] Prisilno preklapljam na CPU za stabilno delovanje.")
-            device = "cpu"
-    else:
-        print("[DEBUG] CUDA grafična kartica ni zaznana. Uporabljam CPU.")
-        
-    print(f"[DEBUG] Izbrana naprava: {device.upper()}")
+    device = "cpu"  # Zaradi libcudart težav na Linuxu privzeto uporabimo izjemno stabilen CPU
+    print(f"[DEBUG] Izbrana naprava za poganjanje CLIPSeg: {device.upper()}")
     
     print("[DEBUG] Nalagam CLIPSeg model...")
     processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
