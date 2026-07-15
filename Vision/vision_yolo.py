@@ -2,7 +2,7 @@ import os
 import sys
 import time
 
-# --- Samodejna namestitev in uvoz knjižnic ---
+# --- Samodejna namestitev in uvoz knjižnic (brez problematičnega lang-sam / clip) ---
 try:
     import pyrealsense2 as rs
 except ImportError:
@@ -74,16 +74,15 @@ intrinsics = profile.get_stream(rs.stream.color).as_video_stream_profile().get_i
 
 # --- Nalaganje YOLO-World modela in prilagoditev za "tree trunk" ---
 print("Nalagam YOLO-World model...")
-# Naložimo model, ki podpira poljubne tekstovne poizvedbe v realnem času
 model = YOLO("yolov8s-world.pt") 
 
-# Nastavimo iskalni razred na "tree trunk" (drevesno deblo)
+# Eksplicitno nastavimo, da model išče izključno drevesno deblo
 print("Prilagajam model za detekcijo: 'tree trunk'...")
 model.set_classes(["tree trunk"])
 
 def run_segmentation(color_image, depth_image):
-    """Izvede YOLO-World segmentacijo za 'tree trunk' na podani sliki."""
-    print("\nPoganjam YOLO-World segmentacijo (iskanje 'tree trunk')...")
+    """Izvede segmentacijo za 'tree trunk' na podani sliki."""
+    print("\nPoganjam segmentacijo (iskanje 'tree trunk')...")
     results = model.predict(source=color_image, conf=0.25, verbose=False)
     
     has_mask = False
