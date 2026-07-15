@@ -1,62 +1,59 @@
 import os
 import sys
 import time
+import math
 
 # ==============================================================================
-# VARNOSTNI POPRAVEK ZA LINUX (Preprečitev OSError: libcudart.so.11.0)
+# VARNOSTNI POPRAVKI ZA LINUX (CUDA & AUDIO BYPASS)
 # ==============================================================================
-# Če sistem nima pravilno nastavljene CUDA poti, bomo PyTorch prisilili,
-# da uporabi procesor (CPU) in se izognili sesutju ob uvozu knjižnic.
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
-# Nastavitev Hugging Face žetona
 os.environ["HF_TOKEN"] = "VPISI_SVOJ_HF_TOKEN_TUKAJ"
 
+try:
+    import sys
+    sys.modules['torchaudio'] = None
+except Exception:
+    pass
+
 # ==============================================================================
-# SAMODEJNA NAMESTITEV IN UVOZ KNJIŽNIC
+# PREVERJANJE IN UVOZ KNJIŽNIC
 # ==============================================================================
 try:
     import pyrealsense2 as rs
-except:
-    os.system('python -m pip install pyrealsense2')
-finally:
-    import pyrealsense2 as rs
+except ImportError:
+    print("[NAPAKA] Manjka knjižnica 'pyrealsense2'. Namesti jo z: pip install pyrealsense2")
+    sys.exit(1)
 
 try:
     import numpy as np
-except:
-    os.system('python -m pip install numpy')
-finally:
-    import numpy as np
+except ImportError:
+    print("[NAPAKA] Manjka knjižnica 'numpy'. Namesti jo z: pip install numpy")
+    sys.exit(1)
 
 try:
     import cv2
-except:
-    os.system('python -m pip install opencv-python')
-finally:
-    import cv2
+except ImportError:
+    print("[NAPAKA] Manjka knjižnica 'opencv-python'. Namesti jo z: pip install opencv-python")
+    sys.exit(1)
 
 try:
     import serial
-except:
-    os.system('python -m pip install pyserial')
-finally:
-    import serial
+except ImportError:
+    print("[NAPAKA] Manjka knjižnica 'pyserial'. Namesti jo z: pip install pyserial")
+    sys.exit(1)
 
 try:
     import torch
     from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
-except:
-    print("[DEBUG] Nameščam transformers in torch...")
-    os.system('python -m pip install transformers torch torchvision')
-finally:
-    import torch
-    from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
+except ImportError as e:
+    print("\n" + "="*80)
+    print(f"[NAPAKA] Težava pri uvozu PyTorch/Transformers: {e}")
+    sys.exit(1)
 
 # ==============================================================================
 # NASTAVITVE PROGRAMA
 # ==============================================================================
-DEVELOPMENT = True  # True: živi stream s tipko 's' za segmentacijo | False: enojni zajem (produkcija)
+DEVELOPMENT = True  
 SERIAL_PORT = '/dev/ttyACM0'  # Na Linuxu je običajno /dev/ttyACM0 ali /dev/ttyUSB0
 BAUD_RATE = 115200
 # ==============================================================================
@@ -94,7 +91,7 @@ except Exception as e:
 
 # --- Nalaganje CLIPSeg modela ---
 try:
-    device = "cpu"  # Zaradi libcudart težav na Linuxu privzeto uporabimo izjemno stabilen CPU
+    device = "cpu"  
     print(f"[DEBUG] Izbrana naprava za poganjanje CLIPSeg: {device.upper()}")
     
     print("[DEBUG] Nalagam CLIPSeg model...")
@@ -108,7 +105,7 @@ except Exception as e:
 
 
 def run_segmentation(color_image, depth_image):
-    """Izvede CLIPSeg segmentacijo za 'tree trunk' na podani sliki."""
+    """Izvede CLIPSeg segmentacijo, določi središče debla in izračuna radialni kot."""
     print("\n[DEBUG] Poganjam CLIPSeg segmentacijo (iskanje 'tree trunk')...")
     
     # Pretvori BGR v RGB
@@ -132,62 +129,85 @@ def run_segmentation(color_image, depth_image):
     probs = torch.sigmoid(preds[0][0])
     mask = (probs > 0.35).cpu().numpy().astype(bool)
 
-    # Globinski podatki znotraj maske
-    masked_depth = np.where(mask, depth_image, 0)
-    valid_depths = masked_depth[masked_depth > 0]
+    # Poiščemo konture debla
+    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    if len(valid_depths) > 0:
-        min_depth_raw = np.min(valid_depths)
+    if contours:
+        # Vzamemo največjo zaznano konturo (deblo)
+        largest_contour = max(contours, key=cv2.contourArea)
         
-        y_indices, x_indices = np.where(masked_depth == min_depth_raw)
-        u, v = x_indices[0], y_indices[0]
+        # Izračun težišča (momenti) konture za določitev robustnega središča debla
+        M = cv2.moments(largest_contour)
+        if M["m00"] != 0:
+            u = int(M["m10"] / M["m00"])
+            v = int(M["m01"] / M["m00"])
+        else:
+            # Varnostni mehanizem, če momenti vrnejo 0
+            rect = cv2.minAreaRect(largest_contour)
+            u, v = int(rect[0][0]), int(rect[0][1])
 
+        # Preverimo globino v okolici težišča (da se izognemo morebitnemu šumu ali luknjam)
+        # Vzamemo majhno regijo 5x5 piklov okoli središča in izračunamo mediano veljavnih globin
+        half_w = 2
+        depth_roi = depth_image[max(0, v-half_w):min(720, v+half_w+1), max(0, u-half_w):min(1280, u+half_w+1)]
+        valid_roi_depths = depth_roi[depth_roi > 0]
+
+        if len(valid_roi_depths) > 0:
+            depth_raw = np.median(valid_roi_depths)
+        else:
+            # Če v središču ni podatka, poskusimo poiskati najbližjo veljavno točko znotraj celotne maske debla
+            masked_depth = np.where(mask, depth_image, 0)
+            valid_depths = masked_depth[masked_depth > 0]
+            if len(valid_depths) > 0:
+                depth_raw = np.min(valid_depths)
+                # Posodobimo točko na tisto, ki ima to globino
+                y_indices, x_indices = np.where(masked_depth == depth_raw)
+                u, v = x_indices[0], y_indices[0]
+            else:
+                print("[DEBUG] Ni veljavnih globinskih podatkov za deblo.")
+                return None
+
+        # Pretvorba globine v metre
         depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
-        depth_in_meters = min_depth_raw * depth_scale
+        depth_in_meters = depth_raw * depth_scale
 
+        # Deprojekcija slikovne točke (u, v) v realne 3D koordinate (v metrih)
         rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
         
-        # --- Prilagoditev koordinatnega sistema ---
+        # --- Prilagoditev koordinatnega sistema v milimetre ---
         # Y naravnost, X+ levo, X- desno
-        X_coord = -rs_coords[0]
-        Y_coord = rs_coords[2]
+        X_coord_mm = int(round(-rs_coords[0] * 1000))
+        Y_coord_mm = int(round(rs_coords[2] * 1000))
 
-        # --- Izračun orientacije (O) ---
-        contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours:
-            largest_contour = max(contours, key=cv2.contourArea)
-            rect = cv2.minAreaRect(largest_contour)
-            raw_angle = rect[2]
-            
-            width, height = rect[1]
-            if width < height:
-                calculated_angle = raw_angle
-            else:
-                calculated_angle = raw_angle - 90 if raw_angle > 0 else raw_angle + 90
-            
-            orientation = float(np.clip(calculated_angle, -30.0, 30.0))
-        else:
-            orientation = 0.0
+        # --- Izračun RADIALNEGA kota (O) v stopinjah ---
+        # atan2(X, Y) vrne kot v radianih. Ker je Y naprej in X levo/desno, dobimo radialno smer.
+        # Pomnožimo z -1 ali prilagodimo predznak glede na želeno smer (tukaj: X+ levo je pozitivni kot)
+        radial_angle_rad = math.atan2(X_coord_mm, Y_coord_mm)
+        radial_angle_deg = math.degrees(radial_angle_rad)
+        
+        # Omejimo kot na interval [-30.0, 30.0] stopinj
+        orientation = float(np.clip(radial_angle_deg, -30.0, 30.0))
 
-        # --- Vizualizacija ---
+        # --- Vizualizacija (prikaz v mm in stopinjah) ---
         vis_img = color_image.copy()
-        if contours:
-            cv2.drawContours(vis_img, contours, -1, (0, 255, 0), 2)
+        cv2.drawContours(vis_img, [largest_contour], -1, (0, 255, 0), 2)
+        
+        # Označimo zaznano središče debla z rdečim krogcem
         cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
         
-        text_x = f"X: {X_coord:.3f} m (L+/R-)"
-        text_y = f"Y: {Y_coord:.3f} m (Naprej)"
-        text_o = f"O: {orientation:.2f} deg ([-30, 30])"
+        text_x = f"X: {X_coord_mm} mm (L+/R-)"
+        text_y = f"Y: {Y_coord_mm} mm (Naprej)"
+        text_o = f"O: {orientation:.2f} deg (Radial)"
         
         cv2.rectangle(vis_img, (10, 10), (320, 110), (0, 0, 0), -1)
         cv2.putText(vis_img, text_x, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(vis_img, text_y, (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(vis_img, text_o, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # --- Pošiljanje na STM32 ---
+        # --- Pošiljanje na STM32 (vrednosti poslane v mm in radialni stopinjah) ---
         if ser and ser.is_open:
-            cmd_x = f"X={X_coord:.3f}\r\n"
-            cmd_y = f"Y={Y_coord:.3f}\r\n"
+            cmd_x = f"X={X_coord_mm}\r\n"
+            cmd_y = f"Y={Y_coord_mm}\r\n"
             cmd_o = f"O={orientation:.2f}\r\n"
 
             print(f"[DEBUG] Pošiljam podatke na STM32:")
@@ -201,11 +221,11 @@ def run_segmentation(color_image, depth_image):
             print("[DEBUG] Ukazi uspešno poslani.")
         else:
             print("[DEBUG] Serijska vrata niso povezana. Rezultati:")
-            print(f"  X: {X_coord:.3f} m | Y: {Y_coord:.3f} m | O: {orientation:.2f}°")
+            print(f"  X: {X_coord_mm} mm | Y: {Y_coord_mm} mm | O: {orientation:.2f}° (Radial)")
 
         return vis_img
     else:
-        print("[DEBUG] Znotraj maske ni veljavnih globinskih podatkov.")
+        print("[DEBUG] Deblo ni bilo zaznano na sliki.")
         return None
 
 
