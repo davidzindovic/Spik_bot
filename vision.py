@@ -30,11 +30,12 @@ finally:
     import serial
 
 try:
-    from lang_sam import LangSAM
-except:
-    os.system('python -m pip install lang-sam')
-finally:
-    from lang_sam import LangSAM
+      from lang_sam import LangSAM
+  except:
+      # Namestitev neposredno iz GitHub repozitorija avtorja
+      os.system('python -m pip install git+https://github.com/luca-medeiros/lang-segment-anything.git')
+  finally:
+      from lang_sam import LangSAM
 
 # ==============================================================================
 # NASTAVITVE
