@@ -1,5 +1,6 @@
 Za upravljanje mobilne platforme preko Python ukazov je potrebno:
 
+- povezati Beckhoff krmilnik na računalnik preko UTP kabla (zgornji priključek na krmilniku)
 - namestiti knjižnico *pyads* s pomočjo ukaza ```pip install pyads```
 - vzpostaviti Route s pomočjo TwinCAT programske opreme (glej poglavje POVEZAVA)
 - spisati kodo s primernimi ukazi za pisanje/branje
