@@ -49,20 +49,20 @@ Pri ukazih za branje in pisanje bodite pozorni, kje lahko dostopate do željene 
 
 ### Vklop motorjev
   ```
-  plc.write_by_name('MAIN.MasterContol.data.mode', 1, pyads.PLCTYPE_LREAL)
-  plc.write_by_name('MAIN.MasterContol.data.masterSwich', 1, pyads.PLCTYPE_LREAL)
+plc.write_by_name('MAIN.MasterContol.data.mode', 1, pyads.PLCTYPE_LREAL)
+plc.write_by_name('MAIN.MasterContol.data.masterSwich', 1, pyads.PLCTYPE_LREAL)
 ```
 ### Zaustavitev koles (vrtenje)
 ```
-    plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[0]', 2, pyads.PLCTYPE_LREAL)
-    plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[1]', 2, pyads.PLCTYPE_LREAL)
-    plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[2]', 2, pyads.PLCTYPE_LREAL)
-    plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[3]', 2, pyads.PLCTYPE_LREAL)
+plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[0]', 2, pyads.PLCTYPE_LREAL)
+plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[1]', 2, pyads.PLCTYPE_LREAL)
+plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[2]', 2, pyads.PLCTYPE_LREAL)
+plc.write_by_name('MAIN.MasterContol.data.modeKolesHub[3]', 2, pyads.PLCTYPE_LREAL)
 ```
 
 ### Vklop steeringa
 ```
-    plc.write_by_name('MAIN.MasterContol.data.steeringMode', 1, pyads.PLCTYPE_LREAL)
+plc.write_by_name('MAIN.MasterContol.data.steeringMode', 1, pyads.PLCTYPE_LREAL)
 ```
 Pozor: kolesa se ob tej komandi poravnajo naravnost
 
