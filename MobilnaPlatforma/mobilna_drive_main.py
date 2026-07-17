@@ -14,6 +14,11 @@ PLC_IP = "192.168.64.200"
 PLC_AMS_ID = "169.254.220.1.1.1"
 
 set_speed = 50
+current_angle=0
+old_current_angle=0
+delta_angle=0.0
+max_angle=15
+rotate_msg=0.0 #to se pošlje v paketu da se inkrementalno zarotira
 
 class SimpleGamepadPygame:
     """Razred za neblokirajoče branje ploščka s pomočjo pygame."""
@@ -151,7 +156,7 @@ class SimpleGamepadPygame:
                 diff_y = abs(self.y_axis - self.prev_y_axis)
                 diff_x = abs(self.x_axis - self.prev_x_axis)
                 
-                if diff_y > 0.15 or diff_x > 0.15:
+                if diff_y > 0.15 or diff_x > 0.1:
                     smer_y = "NAPREJ" if self.y_axis > 0 else "NAZAJ" if self.y_axis < 0 else "STREMI K 0"
                     smer_x = "DESNO" if self.x_axis > 0 else "LEVO" if self.x_axis < 0 else "STREMI K 0"
                     
@@ -162,6 +167,11 @@ class SimpleGamepadPygame:
 
 
 def main():
+    global old_current_angle
+    global current_angle
+    global delta_angle
+    global rotate_msg
+
     pyads.open_port()
     pyads.close_port()
 
@@ -209,6 +219,7 @@ def main():
             # 3. POŠILJANJE OSTALIH PODATKOV (LE OB SPREMEMBAH)
             # ====================================================
             
+
             # Sprememba stanja PLC (Zagon / Stop)
             if gamepad.plc_state != prev_plc_state:
                 try:
@@ -217,6 +228,7 @@ def main():
                         plc.write_by_name('MAIN.MasterContol.data.masterSwich', 1, pyads.PLCTYPE_LREAL)
                         #plc.write_by_name('STEERING.SteeringMODE', 1, pyads.PLCTYPE_INT)
                         plc.write_by_name('MAIN.MasterContol.data.steeringMode', 1, pyads.PLCTYPE_LREAL)
+                        
                         print("START")
                     else:
                         plc.write_by_name('MAIN.MasterContol.data.mode', 0, pyads.PLCTYPE_LREAL)
@@ -250,16 +262,21 @@ def main():
                         0.0, 0.0, 0.0,       # 13-15. dodatna oprema onemogočena
                         1.0                  # 16. steeringMode
                     ]
-                    
+
                     cart_data = [
                         cycle_timestamp,     # 1. timestamp
                         gamepad.y_axis,      # 2. hitrost_ms (hitrost koles)
-                        gamepad.x_axis,      # 3. radij zasuka
+                        #(gamepad.x_axis*0.01),      # 3. radij zasuka
+                        delta_angle,
                         0.0,                 # 4. vrtalnik mode
                         0.0,                 # 5. vrtalnik seq
                         0.0,                 # 6. vrtalnik manual
                         0.0                  # 7. estop Master
                     ]
+
+                    current_angle=gamepad.x_axis*max_angle
+                    delta_angle=current_angle-old_current_angle
+
                 else:
                     # --- Izklop ali aktiviran E-STOP ---
                     master_data = [
@@ -285,7 +302,21 @@ def main():
                 
                 try:
                     plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*(16))
-                    plc.write_by_name("MAIN.CartContol.dataArray", cart_data, pyads.PLCTYPE_LREAL*(7))
+                    
+
+                    plc.write_by_name("MAIN.CartContol.dataArray[0]", cart_data[0], pyads.PLCTYPE_LREAL)
+                    plc.write_by_name("MAIN.CartContol.dataArray[1]", cart_data[1], pyads.PLCTYPE_LREAL)
+                    plc.write_by_name("MAIN.CartContol.dataArray[3]", cart_data[3], pyads.PLCTYPE_LREAL)
+                    plc.write_by_name("MAIN.CartContol.dataArray[4]", cart_data[4], pyads.PLCTYPE_LREAL)
+                    plc.write_by_name("MAIN.CartContol.dataArray[5]", cart_data[5], pyads.PLCTYPE_LREAL)
+                    plc.write_by_name("MAIN.CartContol.dataArray[6]", cart_data[6], pyads.PLCTYPE_LREAL)
+                    
+                    if(abs(delta_angle)>1):
+                        print("Zavijam: ", delta_angle)
+                        plc.write_by_name('STEERING.WHEEL_1_ANG_REF', delta_angle, pyads.PLCTYPE_LREAL)
+                        old_current_angle=current_angle
+                        delta_angle=0
+            
                 except pyads.ADSError as err:
                     print(f"[PLC NAPAKA] Zapis spremembe ni uspel: {err}")
             
