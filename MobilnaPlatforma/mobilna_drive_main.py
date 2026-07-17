@@ -14,11 +14,11 @@ PLC_IP = "192.168.64.200"
 PLC_AMS_ID = "169.254.220.1.1.1"
 
 set_speed = 50
-current_angle=0
-old_current_angle=0
-delta_angle=0.0
-max_angle=15
-rotate_msg=0.0 #to se pošlje v paketu da se inkrementalno zarotira
+current_angle = 0.0
+old_current_angle = 0.0
+delta_angle = 0.0
+max_angle = 30.0
+angle_step = 10  # Za koliko stopinj se spremeni kot ob enem pritisku D-pada
 
 class SimpleGamepadPygame:
     """Razred za neblokirajoče branje ploščka s pomočjo pygame."""
@@ -27,21 +27,19 @@ class SimpleGamepadPygame:
         pygame.joystick.init()
         
         self.joystick = None
-        self.x_axis = 0.0      # Smer (levo / desno)
-        self.y_axis = 0.0      # Hitrost (naprej / nazaj) - Pygame: naprej je običajno negativno, zato bomo obrnili predznak
+        self.x_axis = 0.0      
+        self.y_axis = 0.0      # Hitrost (naprej / nazaj)
         self.e_stop = 0.0      # Varnostni gumb (E-Stop)
         self.drive_mode = 1.0  # Način vožnje (1.0 = Drive, 0.0 = Stop)
         self.plc_state = 0     # 0 = Stop, 1 = Start
         
         # Spremenljivke za zaznavanje sprememb
-        self.prev_x_axis = 0.0
         self.prev_y_axis = 0.0
         self.prev_e_stop = 0.0
         self.prev_drive_mode = 1.0
         
         self.has_changed = False
         
-        # Inicializacija prvega najdenega ploščka
         if pygame.joystick.get_count() > 0:
             self.joystick = pygame.joystick.Joystick(0)
             self.joystick.init()
@@ -56,65 +54,43 @@ class SimpleGamepadPygame:
         print("="*70)
         print(" * LEVI ANALOG (Y os)          : Premikanje NAPREJ (+) / NAZAJ (-)")
         print("                                 -> Krmili hitrost platforme (hitrost_ms)")
-        print(" * LEVI ANALOG (X os)          : Zavijanje LEVO (-) / DESNO (+)")
-        print("                                 -> Krmili radij zasuka platforme")
+        print(" * D-PAD (Levo / Desno)        : Nastavljanje kota koles (ZAKLENJENO STANJE)")
+        print("                                 -> Kot ostane nastavljen, dokler ne pritisneš kontra!")
         print(" * GUMB A (Spodnji gumb - 0)   : Varnostni izklop (E-STOP)")
-        print("                                 -> Aktivira prosti tek koles (estop Master = 1)")
         print(" * GUMB START (Gumb 7 / Menu)  : Preklop delovanja (ZAGON / STOP)")
-        print("                                 -> Omogoči ali onemogoči napajanje motorjev")
         print("="*70 + "\n")
 
     def update_and_log(self):
         """
         Neblokirajoče prebere vse dogodke iz pygame čakalne vrste.
         """
+        global current_angle, old_current_angle, delta_angle
         self.has_changed = False
         
-        # Pygame zahteva klic pump(), da osveži stanje naprav, če ne uporabljamo pygame.event.get()
         pygame.event.pump()
         
         if not self.joystick:
-            # Poskusimo ponovno zaznati plošček, če se je med delom odklopil
             if pygame.joystick.get_count() > 0:
                 self.joystick = pygame.joystick.Joystick(0)
                 self.joystick.init()
                 print(f"[INFO] Plošček ponovno povezan: {self.joystick.get_name()}")
             return
 
-        # --- 1. Branje analognih osi ---
-        # Os 1 je običajno Levi analog Y-os, Os 0 pa Levi analog X-os
-        # OPOMBA: Pygame vrne za Y-os vrednost -1.0 ko potisneš NAPREJ, zato predznak obrnemo (-), da dobimo +1.0 za naprej.
+        # --- 1. Branje analognih osi (Samo Y os za hitrost, X os ignoriramo) ---
         raw_y = -self.joystick.get_axis(1) 
-        raw_x = self.joystick.get_axis(0)
-        
-        # Filtriranje šuma okoli ničle (deadzone)
         y_val = round(raw_y, 3) if abs(raw_y) > 0.05 else 0.0
-        x_val = round(raw_x, 3) if abs(raw_x) > 0.05 else 0.0
         
         if y_val != self.y_axis:
             self.y_axis = y_val
             self.has_changed = True
-            
-        if x_val != self.x_axis:
-            self.x_axis = x_val
-            self.has_changed = True
 
         # --- 2. Branje gumbov ---
-        # Gumb A (običajno gumb index 0)
         a_button_state = float(self.joystick.get_button(0))
         if a_button_state != self.e_stop:
             self.e_stop = a_button_state
             self.has_changed = True
 
-        # Gumb START (običajno gumb index 7, lahko pa preveriš s testnim skriptom)
-        # Za varnost preverimo še gumb 6 (Back) ali 7 (Start)
-        start_pressed = self.joystick.get_button(7)
-        if start_pressed:
-            # Ker želimo preklop (toggle) samo ob ENKRATNEM pritisku (ne pa držanju):
-            # Pygame dogodki so za to boljši.
-            pass
-
-        # Uporabimo dogodke za gumbe (to prepreči, da bi se "Start" sprožil večkrat med držanjem)
+        # --- 3. Procesiranje diskretnih dogodkov (Gumbi in D-pad) ---
         for event in pygame.event.get():
             if event.type == pygame.JOYBUTTONDOWN:
                 if event.button == 7: # Gumb Start
@@ -129,19 +105,32 @@ class SimpleGamepadPygame:
                     self.e_stop = 0.0
                     self.has_changed = True
 
+            # Zaznavanje pritiska na D-PAD (Hat)
+            elif event.type == pygame.JOYHATMOTION:
+                hat_x, hat_y = event.value
+                
+                # KLJUČNA SPREMEMBA: Če je hat_x == 0, pomeni, da je uporabnik spustil D-pad.
+                # V tem primeru ne naredimo NIČ, s čimer zaklenemo trenutni kot!
+                if hat_x != 0:  
+                    new_angle = current_angle + (hat_x * angle_step)
+                    
+                    # Omejitev kota znotraj meja [-max_angle, max_angle]
+                    if ((-max_angle <= new_angle) and (new_angle <= max_angle)):
+                        current_angle = new_angle
+                        delta_angle = current_angle - old_current_angle
+                        self.has_changed = True
+                        print(f"[D-PAD] Spreemba kota: {current_angle}° (Delta za PLC: {delta_angle}°)")
+
         # --- IZPISI DELOVANJA ---
         if self.has_changed:
-            # Izpis ob pritisku/sprostitev E-STOP (Gumb A)
             if self.e_stop != self.prev_e_stop:
                 if self.e_stop == 1.0:
                     print("\n[VLOGA: GUMB A] -> PRITISNJEN E-STOP!")
-                    print("  -> PLC-ju pošiljam signal za varnostni izklop (estop Master = 1.0).")
                     self.plc_state = 0
                 else:
                     print("\n[VLOGA: GUMB A] -> E-STOP SPROŠČEN.")
                 self.prev_e_stop = self.e_stop
 
-            # Izpis ob spremembi načina vožnje (Gumb START)
             if self.drive_mode != self.prev_drive_mode:
                 if self.drive_mode == 1.0:
                     print("\n[VLOGA: GUMB START] -> NAČIN VOŽNJE: ZAGON")
@@ -151,26 +140,18 @@ class SimpleGamepadPygame:
                     self.plc_state = 0
                 self.prev_drive_mode = self.drive_mode
 
-            # Izpis ob premiku joysticka
             if self.drive_mode == 1.0 and self.e_stop == 0.0:
                 diff_y = abs(self.y_axis - self.prev_y_axis)
-                diff_x = abs(self.x_axis - self.prev_x_axis)
-                
-                if diff_y > 0.15 or diff_x > 0.1:
+                if diff_y > 0.15:
                     smer_y = "NAPREJ" if self.y_axis > 0 else "NAZAJ" if self.y_axis < 0 else "STREMI K 0"
-                    smer_x = "DESNO" if self.x_axis > 0 else "LEVO" if self.x_axis < 0 else "STREMI K 0"
-                    
-                    print(f"[VLOGA: JOYSTICK] -> Premik | Hitrost: {self.y_axis:+.2f} m/s ({smer_y}) | Radij: {self.x_axis:+.2f} ({smer_x})")
-                    
+                    print(f"[VLOGA: JOYSTICK] -> Hitrost: {self.y_axis:+.2f} m/s ({smer_y}) | Trenutni kot koles: {current_angle}°")
                     self.prev_y_axis = self.y_axis
-                    self.prev_x_axis = self.x_axis
 
 
 def main():
     global old_current_angle
     global current_angle
     global delta_angle
-    global rotate_msg
 
     pyads.open_port()
     pyads.close_port()
@@ -182,73 +163,62 @@ def main():
         plc.open()
         print("ADS povezava uspešno vzpostavljena.")
         
-        # Inicializacija Pygame krmilnika in izpis navodil
         gamepad = SimpleGamepadPygame()
         gamepad.print_instructions()
         
         cycle_timestamp = 0.0
-        loop_rate = 0.02  # 50 Hz (20 ms)
+        loop_rate = 0.02  # 50 Hz
         
         print("Povezan na:", plc.read_device_info())
         print("Krmiljenje aktivno. Za izhod pritisnite Ctrl+C.")
         
-        # Začetni vpis hitrosti
         plc.write_by_name('MAIN.MasterContol.data.maxSpeedMode', set_speed, pyads.PLCTYPE_LREAL)
 
-        plc_mode=0
-        old_plc_mode=0
+        plc_mode = 0
+        old_plc_mode = 0
         prev_plc_state = -1
 
         while True:
             start_time = time.time()
             
             # ====================================================
-            # 1. WATCHDOG (TIMESTAMP) - POŠILJA SE VSAK CIKEL (20ms)
+            # 1. WATCHDOG (TIMESTAMP)
             # ====================================================
             cycle_timestamp += 1.0
             try:
-                # To se sedaj izvaja zanesljivo brez blokad na 20 ms!
                 plc.write_by_name('MAIN.CartContol.data.timeStamp', cycle_timestamp, pyads.PLCTYPE_LREAL)
             except pyads.ADSError as err:
                 print(f"[PLC WATCHDOG NAPAKA] Napaka pri pošiljanju timestampa: {err}")
         
-            # 2. NEBLOKIRAJOČE posodobi stanje ploščka s Pygame
+            # 2. Osvežitev stanja ploščka
             gamepad.update_and_log()
 
             # ====================================================
-            # 3. POŠILJANJE OSTALIH PODATKOV (LE OB SPREMEMBAH)
+            # 3. POŠILJANJE OSTALIH PODATKOV OB SPREMEMBAH
             # ====================================================
-            
-
-            # Sprememba stanja PLC (Zagon / Stop)
             if gamepad.plc_state != prev_plc_state:
                 try:
                     if gamepad.plc_state == 1:
                         plc.write_by_name('MAIN.MasterContol.data.mode', 1, pyads.PLCTYPE_LREAL)
                         plc.write_by_name('MAIN.MasterContol.data.masterSwich', 1, pyads.PLCTYPE_LREAL)
-                        #plc.write_by_name('STEERING.SteeringMODE', 1, pyads.PLCTYPE_INT)
                         plc.write_by_name('MAIN.MasterContol.data.steeringMode', 1, pyads.PLCTYPE_LREAL)
-                        
                         print("START")
                     else:
                         plc.write_by_name('MAIN.MasterContol.data.mode', 0, pyads.PLCTYPE_LREAL)
                         plc.write_by_name('MAIN.MasterContol.data.masterSwich', 0, pyads.PLCTYPE_LREAL)
                         print("STOP")
-                        pass
                     prev_plc_state = gamepad.plc_state
                 except pyads.ADSError as err:
                     print(f"[PLC NAPAKA] Napaka pri vpisu stanja: {err}")
 
-            # Poljubno branje mode-a s PLC-ja
             try:
                 plc_mode = plc.read_by_name("MAIN.mode", pyads.PLCTYPE_LREAL)
-                if(plc_mode!=old_plc_mode):
-                    print(plc_mode)
-                    old_plc_mode=plc_mode
+                if plc_mode != old_plc_mode:
+                    print("PLC Mode:", plc_mode)
+                    old_plc_mode = plc_mode
             except pyads.ADSError:
                 pass
 
-            # Pošlji premike platforme le, ko se dejansko spremenijo
             if gamepad.has_changed:
                 if gamepad.e_stop == 0.0 and gamepad.drive_mode == 1.0:
                     # --- Normalna vožnja ---
@@ -266,19 +236,13 @@ def main():
                     cart_data = [
                         cycle_timestamp,     # 1. timestamp
                         gamepad.y_axis,      # 2. hitrost_ms (hitrost koles)
-                        #(gamepad.x_axis*0.01),      # 3. radij zasuka
-                        delta_angle,
+                        delta_angle,         # 3. radij zasuka
                         0.0,                 # 4. vrtalnik mode
                         0.0,                 # 5. vrtalnik seq
                         0.0,                 # 6. vrtalnik manual
                         0.0                  # 7. estop Master
                     ]
-
-                    current_angle=gamepad.x_axis*max_angle
-                    delta_angle=current_angle-old_current_angle
-
                 else:
-                    # --- Izklop ali aktiviran E-STOP ---
                     master_data = [
                         cycle_timestamp,     # 1. Števec cikla
                         0.0,                 # 2. masterSwich OFF
@@ -301,9 +265,8 @@ def main():
                     ]
                 
                 try:
-                    plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*(16))
+                    plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
                     
-
                     plc.write_by_name("MAIN.CartContol.dataArray[0]", cart_data[0], pyads.PLCTYPE_LREAL)
                     plc.write_by_name("MAIN.CartContol.dataArray[1]", cart_data[1], pyads.PLCTYPE_LREAL)
                     plc.write_by_name("MAIN.CartContol.dataArray[3]", cart_data[3], pyads.PLCTYPE_LREAL)
@@ -311,16 +274,17 @@ def main():
                     plc.write_by_name("MAIN.CartContol.dataArray[5]", cart_data[5], pyads.PLCTYPE_LREAL)
                     plc.write_by_name("MAIN.CartContol.dataArray[6]", cart_data[6], pyads.PLCTYPE_LREAL)
                     
-                    if(abs(delta_angle)>1):
-                        print("Zavijam: ", delta_angle)
-                        plc.write_by_name('STEERING.WHEEL_1_ANG_REF', delta_angle, pyads.PLCTYPE_LREAL)
-                        old_current_angle=current_angle
-                        delta_angle=0
+                    # Komanda se pošlje samo ob dejanski (znatni) spremembi delte
+                    if abs(delta_angle) >= angle_step:
+                        print(f"Zavijam na PLC -> Pošiljam : {current_angle} (Kot je sedaj zaklenjen na {current_angle}°)")
+                        plc.write_by_name('STEERING.WHEEL_1_ANG_REF', current_angle, pyads.PLCTYPE_LREAL)
+                        #plc.write_by_name("MAIN.CartContol.dataArray[2]", current_angle, pyads.PLCTYPE_LREAL)
+                        old_current_angle = current_angle
+                        delta_angle = 0.0  # Takoj ponastavimo delto, da se ne pošilja večkrat v prazno
             
                 except pyads.ADSError as err:
                     print(f"[PLC NAPAKA] Zapis spremembe ni uspel: {err}")
             
-            # Ohranjanje konstantnih 50 Hz
             elapsed = time.time() - start_time
             time.sleep(max(0.0, loop_rate - elapsed))
             
