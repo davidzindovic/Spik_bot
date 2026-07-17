@@ -6,6 +6,11 @@ import time
 import pygame
 import pyads
 
+
+
+# to do dead man switch speed kolesa se vrtijo po vklopu (sumim estop master podatek na beckhoff side)
+
+
 # ==========================================
 # NASTAVITVE ADS IN PLC
 # ==========================================
@@ -32,6 +37,7 @@ class SimpleGamepadPygame:
         self.e_stop = 0.0      # Varnostni gumb (E-Stop)
         self.drive_mode = 1.0  # Način vožnje (1.0 = Drive, 0.0 = Stop)
         self.plc_state = 0     # 0 = Stop, 1 = Start
+        self.dead_man_pressed = False  # Status Dead Man Switcha (LB / Gumb 4)
         
         # Spremenljivke za zaznavanje sprememb
         self.prev_y_axis = 0.0
@@ -56,6 +62,7 @@ class SimpleGamepadPygame:
         print("                                 -> Krmili hitrost platforme (hitrost_ms)")
         print(" * D-PAD (Levo / Desno)        : Nastavljanje kota koles (ZAKLENJENO STANJE)")
         print("                                 -> Kot ostane nastavljen, dokler ne pritisneš kontra!")
+        print(" * GUMB LB (Zadaj levo - 4)    : DEAD MAN SWITCH (Drži za delovanje, spusti za E-STOP)")
         print(" * GUMB A (Spodnji gumb - 0)   : Varnostni izklop (E-STOP)")
         print(" * GUMB START (Gumb 7 / Menu)  : Preklop delovanja (ZAGON / STOP)")
         print("="*70 + "\n")
@@ -84,11 +91,22 @@ class SimpleGamepadPygame:
             self.y_axis = y_val
             self.has_changed = True
 
-        # --- 2. Branje gumbov ---
-        a_button_state = float(self.joystick.get_button(0))
-        if a_button_state != self.e_stop:
-            self.e_stop = a_button_state
-            self.has_changed = True
+        # Preberemo trenutno realno stanje Dead Man gumba (LB / indeks 4)
+        self.dead_man_pressed = bool(self.joystick.get_button(4))
+        
+
+        # Če je Dead Man switch spuščen, takoj aktiviramo E-STOP
+        if not self.dead_man_pressed:
+            if self.e_stop != 1.0:
+                self.e_stop = 1.0
+                print("Dead man switch spuscen!")
+                self.has_changed = True
+        else:
+            # Če je pritisnjen, se vrnemo na normalno branje fizičnega gumba A
+            a_button_state = float(self.joystick.get_button(0))
+            if a_button_state != self.e_stop:
+                self.e_stop = a_button_state
+                self.has_changed = True
 
         # --- 3. Procesiranje diskretnih dogodkov (Gumbi in D-pad) ---
         for event in pygame.event.get():
@@ -96,12 +114,12 @@ class SimpleGamepadPygame:
                 if event.button == 7: # Gumb Start
                     self.drive_mode = 1.0 if self.drive_mode == 0.0 else 0.0
                     self.has_changed = True
-                elif event.button == 0: # Gumb A
+                elif event.button == 0 and self.dead_man_pressed: # Gumb A
                     self.e_stop = 1.0
                     self.has_changed = True
                     
             elif event.type == pygame.JOYBUTTONUP:
-                if event.button == 0: # Sprostitev Gumba A
+                if event.button == 0 and self.dead_man_pressed: # Sprostitev Gumba A
                     self.e_stop = 0.0
                     self.has_changed = True
 
@@ -111,7 +129,7 @@ class SimpleGamepadPygame:
                 
                 # KLJUČNA SPREMEMBA: Če je hat_x == 0, pomeni, da je uporabnik spustil D-pad.
                 # V tem primeru ne naredimo NIČ, s čimer zaklenemo trenutni kot!
-                if hat_x != 0:  
+                if hat_x != 0 and not self.e_stop:  
                     new_angle = current_angle + (hat_x * angle_step)
                     
                     # Omejitev kota znotraj meja [-max_angle, max_angle]
@@ -121,11 +139,19 @@ class SimpleGamepadPygame:
                         self.has_changed = True
                         print(f"[D-PAD] Spreemba kota: {current_angle}° (Delta za PLC: {delta_angle}°)")
 
+        # Preverimo če je prišlo do sprostitve Dead Man Switcha za takojšnjo proženje
+        if not self.dead_man_pressed:
+            self.e_stop = 1.0
+            self.has_changed = True
+
         # --- IZPISI DELOVANJA ---
         if self.has_changed:
             if self.e_stop != self.prev_e_stop:
                 if self.e_stop == 1.0:
-                    print("\n[VLOGA: GUMB A] -> PRITISNJEN E-STOP!")
+                    if not self.dead_man_pressed:
+                        print("\n[VARNOST] -> DEAD MAN SWITCH SPROŠČEN! Sprožam prisilni E-STOP!")
+                    else:
+                        print("\n[VLOGA: GUMB A] -> PRITISNJEN E-STOP!")
                     self.plc_state = 0
                 else:
                     print("\n[VLOGA: GUMB A] -> E-STOP SPROŠČEN.")
@@ -178,7 +204,10 @@ def main():
         old_plc_mode = 0
         prev_plc_state = -1
 
-        while True:
+        # Glavna kontrolna zanka
+        running = True
+
+        while running:
             start_time = time.time()
             
             # ====================================================
@@ -192,6 +221,7 @@ def main():
         
             # 2. Osvežitev stanja ploščka
             gamepad.update_and_log()
+
 
             # ====================================================
             # 3. POŠILJANJE OSTALIH PODATKOV OB SPREMEMBAH
@@ -219,8 +249,8 @@ def main():
             except pyads.ADSError:
                 pass
 
-            if gamepad.has_changed:
-                if gamepad.e_stop == 0.0 and gamepad.drive_mode == 1.0:
+            if gamepad.has_changed or not running:
+                if gamepad.e_stop == 0 and gamepad.drive_mode == 1.0 and running:
                     # --- Normalna vožnja ---
                     master_data = [
                         cycle_timestamp,     # 1. Števec cikla
@@ -243,6 +273,8 @@ def main():
                         0.0                  # 7. estop Master
                     ]
                 else:
+                    
+                    gamepad.y_axis=0
                     master_data = [
                         cycle_timestamp,     # 1. Števec cikla
                         0.0,                 # 2. masterSwich OFF
@@ -261,10 +293,11 @@ def main():
                         0.0,                 # 4. vrtalnik mode
                         0.0,                 # 5. vrtalnik seq
                         0.0,                 # 6. vrtalnik manual
-                        gamepad.e_stop       # 7. estop Master
+                        1.0                  # 7. estop Master
                     ]
                 
                 try:
+                    print("bb")
                     plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
                     
                     plc.write_by_name("MAIN.CartContol.dataArray[0]", cart_data[0], pyads.PLCTYPE_LREAL)
@@ -275,7 +308,7 @@ def main():
                     plc.write_by_name("MAIN.CartContol.dataArray[6]", cart_data[6], pyads.PLCTYPE_LREAL)
                     
                     # Komanda se pošlje samo ob dejanski (znatni) spremembi delte
-                    if abs(delta_angle) >= angle_step:
+                    if abs(delta_angle) >= angle_step and running and not gamepad.e_stop:
                         print(f"Zavijam na PLC -> Pošiljam : {current_angle} (Kot je sedaj zaklenjen na {current_angle}°)")
                         plc.write_by_name('STEERING.WHEEL_1_ANG_REF', current_angle, pyads.PLCTYPE_LREAL)
                         #plc.write_by_name("MAIN.CartContol.dataArray[2]", current_angle, pyads.PLCTYPE_LREAL)
