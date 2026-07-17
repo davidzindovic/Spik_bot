@@ -1,6 +1,10 @@
+import os
+# Skrijemo pygame pozdravno sporočilo ob uvozu, da ohranimo čist izpis
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+
 import time
+import pygame
 import pyads
-from inputs import get_gamepad, devices
 
 # ==========================================
 # NASTAVITVE ADS IN PLC
@@ -11,92 +15,116 @@ PLC_AMS_ID = "169.254.220.1.1.1"
 
 set_speed = 50
 
-class SimpleGamepad:
-    """Razred za neblokirajoče branje ploščka in sledenje spremembam stanja."""
+class SimpleGamepadPygame:
+    """Razred za neblokirajoče branje ploščka s pomočjo pygame."""
     def __init__(self):
+        pygame.init()
+        pygame.joystick.init()
+        
+        self.joystick = None
         self.x_axis = 0.0      # Smer (levo / desno)
-        self.y_axis = 0.0      # Hitrost (naprej / nazaj)
+        self.y_axis = 0.0      # Hitrost (naprej / nazaj) - Pygame: naprej je običajno negativno, zato bomo obrnili predznak
         self.e_stop = 0.0      # Varnostni gumb (E-Stop)
         self.drive_mode = 1.0  # Način vožnje (1.0 = Drive, 0.0 = Stop)
-        self.plc_state = 0     # 0 = Stop, 1 = Start (premaknjeno v objekt za pravilno delovanje)
+        self.plc_state = 0     # 0 = Stop, 1 = Start
         
-        # Spremenljivke za zaznavanje dejanskih sprememb vhodov
+        # Spremenljivke za zaznavanje sprememb
         self.prev_x_axis = 0.0
         self.prev_y_axis = 0.0
         self.prev_e_stop = 0.0
         self.prev_drive_mode = 1.0
         
-        # Zastavica, ki sporoči glavni zanki, da se je zgodil nov vnos
         self.has_changed = False
-
-        if not devices.gamepads:
-            print("[OPOZORILO] Noben igralni plošček ni zaznan!")
+        
+        # Inicializacija prvega najdenega ploščka
+        if pygame.joystick.get_count() > 0:
+            self.joystick = pygame.joystick.Joystick(0)
+            self.joystick.init()
+            print(f"[INFO] Uspešno zaznan plošček: {self.joystick.get_name()}")
         else:
-            print(f"[INFO] Uspešno zaznan plošček: {devices.gamepads[0]}")
+            print("[OPOZORILO] Noben igralni plošček ni zaznan!")
 
     def print_instructions(self):
         """Izpiše navodila za gumbe ob zagonu."""
         print("\n" + "="*70)
         print("                NAVODILA ZA UPORABO IGRALNEGA PLOŠČKA                 ")
         print("="*70)
-        print(" * LEVI ANALOG (Y os / ABS_Y)  : Premikanje NAPREJ (+) / NAZAJ (-)")
+        print(" * LEVI ANALOG (Y os)          : Premikanje NAPREJ (+) / NAZAJ (-)")
         print("                                 -> Krmili hitrost platforme (hitrost_ms)")
-        print(" * LEVI ANALOG (X os / ABS_X)  : Zavijanje LEVO (-) / DESNO (+)")
+        print(" * LEVI ANALOG (X os)          : Zavijanje LEVO (-) / DESNO (+)")
         print("                                 -> Krmili radij zasuka platforme")
-        print(" * GUMB A (BTN_SOUTH)          : Varnostni izklop (E-STOP)")
+        print(" * GUMB A (Spodnji gumb - 0)   : Varnostni izklop (E-STOP)")
         print("                                 -> Aktivira prosti tek koles (estop Master = 1)")
-        print(" * GUMB START (BTN_START)      : Preklop delovanja (ZAGON / STOP)")
+        print(" * GUMB START (Gumb 7 / Menu)  : Preklop delovanja (ZAGON / STOP)")
         print("                                 -> Omogoči ali onemogoči napajanje motorjev")
         print("="*70 + "\n")
 
     def update_and_log(self):
         """
-        NEBLOKIRAJOČE prebere vse trenutne dogodke ploščka.
-        Če ni novih dogodkov, se takoj zaključi in ne ustavlja zanke.
+        Neblokirajoče prebere vse dogodke iz pygame čakalne vrste.
         """
         self.has_changed = False
-        try:
-            # S to zanko preberemo VSE čakajoče dogodke brez blokiranja programa
-            while True:
-                # get_gamepad() sicer blokira, vendar inputs knjižnica nima direktne 
-                # non-blocking metode, zato jo izvedemo znotraj try-except za hitro branje.
-                events = get_gamepad()
-                for event in events:
-                    # 1. Levi analog Y (naprej/nazaj)
-                    if event.code == 'ABS_Y':
-                        val = round(event.state / 32768.0, 3)
-                        if val != self.y_axis:
-                            self.y_axis = val
-                            self.has_changed = True
-                    
-                    # 2. Levi analog X (levo/desno)
-                    elif event.code == 'ABS_X':
-                        val = round(event.state / 32768.0, 3)
-                        if val != self.x_axis:
-                            self.x_axis = val
-                            self.has_changed = True
-                    
-                    # 3. Gumb A (E-stop)
-                    elif event.code == 'BTN_SOUTH':
-                        val = float(event.state)
-                        if val != self.e_stop:
-                            self.e_stop = val
-                            self.has_changed = True
-                    
-                    # 4. Gumb Start (Zagon/Stop sistema)
-                    elif event.code == 'BTN_START' and event.state == 1:
-                        self.drive_mode = 1.0 if self.drive_mode == 0.0 else 0.0
-                        self.has_changed = True
-                
-                # Če smo uspešno prebrali dogodke, prekinemo notranjo zanko, da gremo naprej
-                break
-        except OSError:
-            # OSError se zgodi, ko v bufferju ni nobenega novega dogodka (gamepad "miruje")
-            pass
-        except Exception:
+        
+        # Pygame zahteva klic pump(), da osveži stanje naprav, če ne uporabljamo pygame.event.get()
+        pygame.event.pump()
+        
+        if not self.joystick:
+            # Poskusimo ponovno zaznati plošček, če se je med delom odklopil
+            if pygame.joystick.get_count() > 0:
+                self.joystick = pygame.joystick.Joystick(0)
+                self.joystick.init()
+                print(f"[INFO] Plošček ponovno povezan: {self.joystick.get_name()}")
+            return
+
+        # --- 1. Branje analognih osi ---
+        # Os 1 je običajno Levi analog Y-os, Os 0 pa Levi analog X-os
+        # OPOMBA: Pygame vrne za Y-os vrednost -1.0 ko potisneš NAPREJ, zato predznak obrnemo (-), da dobimo +1.0 za naprej.
+        raw_y = -self.joystick.get_axis(1) 
+        raw_x = self.joystick.get_axis(0)
+        
+        # Filtriranje šuma okoli ničle (deadzone)
+        y_val = round(raw_y, 3) if abs(raw_y) > 0.05 else 0.0
+        x_val = round(raw_x, 3) if abs(raw_x) > 0.05 else 0.0
+        
+        if y_val != self.y_axis:
+            self.y_axis = y_val
+            self.has_changed = True
+            
+        if x_val != self.x_axis:
+            self.x_axis = x_val
+            self.has_changed = True
+
+        # --- 2. Branje gumbov ---
+        # Gumb A (običajno gumb index 0)
+        a_button_state = float(self.joystick.get_button(0))
+        if a_button_state != self.e_stop:
+            self.e_stop = a_button_state
+            self.has_changed = True
+
+        # Gumb START (običajno gumb index 7, lahko pa preveriš s testnim skriptom)
+        # Za varnost preverimo še gumb 6 (Back) ali 7 (Start)
+        start_pressed = self.joystick.get_button(7)
+        if start_pressed:
+            # Ker želimo preklop (toggle) samo ob ENKRATNEM pritisku (ne pa držanju):
+            # Pygame dogodki so za to boljši.
             pass
 
-        # --- IZPISI IN POSODOBITVE STANJ OB SPREMEMBAH ---
+        # Uporabimo dogodke za gumbe (to prepreči, da bi se "Start" sprožil večkrat med držanjem)
+        for event in pygame.event.get():
+            if event.type == pygame.JOYBUTTONDOWN:
+                if event.button == 7: # Gumb Start
+                    self.drive_mode = 1.0 if self.drive_mode == 0.0 else 0.0
+                    self.has_changed = True
+                elif event.button == 0: # Gumb A
+                    self.e_stop = 1.0
+                    self.has_changed = True
+                    
+            elif event.type == pygame.JOYBUTTONUP:
+                if event.button == 0: # Sprostitev Gumba A
+                    self.e_stop = 0.0
+                    self.has_changed = True
+
+        # --- IZPISI DELOVANJA ---
         if self.has_changed:
             # Izpis ob pritisku/sprostitev E-STOP (Gumb A)
             if self.e_stop != self.prev_e_stop:
@@ -144,7 +172,8 @@ def main():
         plc.open()
         print("ADS povezava uspešno vzpostavljena.")
         
-        gamepad = SimpleGamepad()
+        # Inicializacija Pygame krmilnika in izpis navodil
+        gamepad = SimpleGamepadPygame()
         gamepad.print_instructions()
         
         cycle_timestamp = 0.0
@@ -156,49 +185,58 @@ def main():
         # Začetni vpis hitrosti
         plc.write_by_name('MAIN.MasterContol.data.maxSpeedMode', set_speed, pyads.PLCTYPE_LREAL)
 
-        # Hranimo prejšnje vrednosti za preprečevanje prepisovanja nespremenjenih stanj
+        plc_mode=0
+        old_plc_mode=0
         prev_plc_state = -1
 
         while True:
             start_time = time.time()
             
             # ====================================================
-            # 1. TIMESTAMP (SE VEDNO POŠILJA - VSAK CIKEL NA 20ms)
+            # 1. WATCHDOG (TIMESTAMP) - POŠILJA SE VSAK CIKEL (20ms)
             # ====================================================
             cycle_timestamp += 1.0
             try:
+                # To se sedaj izvaja zanesljivo brez blokad na 20 ms!
                 plc.write_by_name('MAIN.CartContol.data.timeStamp', cycle_timestamp, pyads.PLCTYPE_LREAL)
             except pyads.ADSError as err:
                 print(f"[PLC WATCHDOG NAPAKA] Napaka pri pošiljanju timestampa: {err}")
         
-            # 2. NEBLOKIRAJOČE preberi stanje ploščka
+            # 2. NEBLOKIRAJOČE posodobi stanje ploščka s Pygame
             gamepad.update_and_log()
 
             # ====================================================
-            # 3. POŠILJANJE DRUGIH PODATKOV (LE OB SPREMEMBAH)
+            # 3. POŠILJANJE OSTALIH PODATKOV (LE OB SPREMEMBAH)
             # ====================================================
             
-            # Pošlji PLC stanje le, ko se dejansko spremeni
+            # Sprememba stanja PLC (Zagon / Stop)
             if gamepad.plc_state != prev_plc_state:
                 try:
                     if gamepad.plc_state == 1:
                         plc.write_by_name('MAIN.MasterContol.data.mode', 1, pyads.PLCTYPE_LREAL)
                         plc.write_by_name('MAIN.MasterContol.data.masterSwich', 1, pyads.PLCTYPE_LREAL)
+                        #plc.write_by_name('STEERING.SteeringMODE', 1, pyads.PLCTYPE_INT)
+                        plc.write_by_name('MAIN.MasterContol.data.steeringMode', 1, pyads.PLCTYPE_LREAL)
+                        print("START")
                     else:
                         plc.write_by_name('MAIN.MasterContol.data.mode', 0, pyads.PLCTYPE_LREAL)
                         plc.write_by_name('MAIN.MasterContol.data.masterSwich', 0, pyads.PLCTYPE_LREAL)
+                        print("STOP")
+                        pass
                     prev_plc_state = gamepad.plc_state
                 except pyads.ADSError as err:
                     print(f"[PLC NAPAKA] Napaka pri vpisu stanja: {err}")
 
-            # Preberemo mode iz PLC (za izpis v konzolo)
+            # Poljubno branje mode-a s PLC-ja
             try:
                 plc_mode = plc.read_by_name("MAIN.mode", pyads.PLCTYPE_LREAL)
-                print("PLC Mode:", plc_mode) # Odkomentiraj po potrebi
+                if(plc_mode!=old_plc_mode):
+                    print(plc_mode)
+                    old_plc_mode=plc_mode
             except pyads.ADSError:
                 pass
 
-            # Če se je zgodil nov premik joysticka ali pritisk gumba, pošljemo celoten paket podatkov
+            # Pošlji premike platforme le, ko se dejansko spremenijo
             if gamepad.has_changed:
                 if gamepad.e_stop == 0.0 and gamepad.drive_mode == 1.0:
                     # --- Normalna vožnja ---
@@ -210,7 +248,7 @@ def main():
                         1.0, 1.0, 1.0, 1.0,  # 5-8. hub_motorji pripravljeni
                         1.0, 1.0, 1.0, 1.0,  # 9-12. max_motorji pripravljeni
                         0.0, 0.0, 0.0,       # 13-15. dodatna oprema onemogočena
-                        2.0                  # 16. steeringMode
+                        1.0                  # 16. steeringMode
                     ]
                     
                     cart_data = [
@@ -246,13 +284,12 @@ def main():
                     ]
                 
                 try:
-                    # Pošljemo posodobljene pakete na PLC samo ob spremembi vhoda
                     plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*(16))
                     plc.write_by_name("MAIN.CartContol.dataArray", cart_data, pyads.PLCTYPE_LREAL*(7))
                 except pyads.ADSError as err:
                     print(f"[PLC NAPAKA] Zapis spremembe ni uspel: {err}")
             
-            # Ohranjanje stabilne frekvence zanke na 50 Hz (20 ms)
+            # Ohranjanje konstantnih 50 Hz
             elapsed = time.time() - start_time
             time.sleep(max(0.0, loop_rate - elapsed))
             
@@ -260,7 +297,8 @@ def main():
         print("\n\n[INFO] Konec krmiljenja. Zaustavljam povezavo...")
     finally:
         plc.close()
-        print("[INFO] ADS povezava zaprta. Srečno pot!")
+        pygame.quit()
+        print("[INFO] Povezave uspešno zaprte. Srečno pot!")
 
 if __name__ == "__main__":
     main()
