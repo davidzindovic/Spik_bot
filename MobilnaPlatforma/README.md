@@ -88,3 +88,12 @@ plc.write_by_name('MAIN.CartContol.data.hitrost_ms', set_speed, pyads.PLCTYPE_LR
 timestamp+=1
  plc.write_by_name('MAIN.CartContol.data.timeStamp', timestamp, pyads.PLCTYPE_LREAL)
 ```
+# Ukazi na igralnem ploščku:
+- LB = Dead Man Switch (zadaj levo, blizu D-pada)
+- D-pad = LEVO (zasuk koles v levo), DESNO (zasuk koles v desno) če smo v načinu 1
+- Desni Joystick = NAPREJ (nastavljanje hitrosti naprej), NAZAJ (nastavljanje hitrosti za vzvratno vožnjo)
+- START = preklop med načinoma ZAGON in STOP
+- A = tempomat (ohrani trenutno hitrost, kot bi konstantno držali joystick)
+- Y = način 1 (premikanje naprej nazaj z zavijanjem)
+- X = način 2 (vrtenje na mestu)
+- B = način 5 (stacionarno stanje)
