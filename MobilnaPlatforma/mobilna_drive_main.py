@@ -297,7 +297,6 @@ def main():
                     ]
                 
                 try:
-                    print("bb")
                     plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
                     
                     plc.write_by_name("MAIN.CartContol.dataArray[0]", cart_data[0], pyads.PLCTYPE_LREAL)
