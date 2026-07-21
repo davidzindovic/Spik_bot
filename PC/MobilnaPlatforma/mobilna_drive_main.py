@@ -295,8 +295,8 @@ def main():
                     mode_change_requested=False
                     plc.write_by_name('MAIN.MasterContol.data.steeringMode', gamepad.selected_mode, pyads.PLCTYPE_LREAL)
                 else:
-                    print("Cakam, mode bo:", gamepad.selected_mode)
-                    print("Timestamp:",cycle_timestamp-timestamp_temp)
+                    #print("Cakam, mode bo:", gamepad.selected_mode)
+                    #print("Timestamp:",cycle_timestamp-timestamp_temp)
                     plc.write_by_name('MAIN.CartContol.data.hitrost_ms', 0, pyads.PLCTYPE_LREAL)
                 
 
