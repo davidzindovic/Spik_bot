@@ -154,21 +154,52 @@ except Exception as e:
 def filter_by_distance(color_image, depth_image):
     """
     Na barvni in globinski sliki ohrani SAMO območja, ki imajo potrjeno globino
-    med MIN_DISTANCE_MM in MAX_DISTANCE_MM. Vse ostalo (neznano/preblizu/predaleč) bo ČRNO.
+    med MIN_DISTANCE_MM in MAX_DISTANCE_MM. Vse ostalo bo ČRNO.
     """
     depth_in_mm = depth_image.astype(np.float32) * depth_scale * 1000.0
-
-    # Pigli morajo imeti znan podatek IN biti v razponu [200, 400] mm
     valid_mask = (depth_in_mm >= MIN_DISTANCE_MM) & (depth_in_mm <= MAX_DISTANCE_MM)
 
     filtered_color = color_image.copy()
     filtered_depth = depth_image.copy()
 
-    # Vse, kar ni znotraj veljavne maske, postane črno [0, 0, 0]
     filtered_color[~valid_mask] = 0
     filtered_depth[~valid_mask] = 0
 
     return filtered_color, filtered_depth
+
+
+def save_full_color_image(raw_color_img, contour, u, v, text_lines):
+    """
+    Shrani polno barvno sliko (brez črnih pik) z narisano konturo, točko in meritvami.
+    """
+    folder_name = "slike_segmentacija"
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+
+    # Najdemo naslednje prosto ime slike
+    i = 1
+    while True:
+        file_path = os.path.join(folder_name, f"segmentacija_{i:03d}.png")
+        if not os.path.exists(file_path):
+            break
+        i += 1
+
+    # Narišemo na popolnoma barvno sliko
+    save_img = raw_color_img.copy()
+    if contour is not None:
+        cv2.drawContours(save_img, [contour], -1, (0, 255, 0), 2)
+    
+    cv2.circle(save_img, (u, v), 7, (0, 0, 255), -1)
+
+    # Prikaz besedila
+    cv2.rectangle(save_img, (10, 10), (430, 115), (0, 0, 0), -1)
+    y_pos = 30
+    for line in text_lines:
+        cv2.putText(save_img, line, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
+        y_pos += 25
+
+    cv2.imwrite(file_path, save_img)
+    print(f"[INFO] Polno barvna slika uspešno shranjena v: {file_path}")
 
 
 def send_to_stm32(x, y, z, o):
@@ -257,7 +288,7 @@ def process_single_frame(color_image, depth_frame_raw):
         raw_y_mm = rs_coords[2] * 1000  
         raw_x_mm = -rs_coords[0] * 1000 
 
-        return u, v, raw_x_mm, raw_y_mm, largest_contour, color_filtered
+        return u, v, raw_x_mm, raw_y_mm, largest_contour, color_filtered, color_image
     return None
 
 
@@ -267,6 +298,8 @@ def run_measurement(color_frame=None, depth_frame=None):
         print(f"\n[DEBUG] Povprečenje JE VKLOPLJENO. Zajema se {NUM_SAMPLES} slik ({MIN_DISTANCE_MM}-{MAX_DISTANCE_MM} mm)...")
         x_list, y_list = [], []
         last_vis_img = None
+        last_raw_color = None
+        last_contour = None
         last_u, last_v = 640, 360
 
         for i in range(NUM_SAMPLES):
@@ -282,11 +315,12 @@ def run_measurement(color_frame=None, depth_frame=None):
 
             res = process_single_frame(c_img, d_frame)
             if res is not None:
-                u, v, raw_x, raw_y, contour, filtered_c_img = res
+                u, v, raw_x, raw_y, contour, filtered_c_img, raw_color_img = res
                 x_list.append(raw_x)
                 y_list.append(raw_y)
                 last_vis_img = filtered_c_img.copy()
-                cv2.drawContours(last_vis_img, [contour], -1, (0, 255, 0), 2)
+                last_raw_color = raw_color_img.copy()
+                last_contour = contour
                 last_u, last_v = u, v
 
         if len(x_list) == 0:
@@ -298,6 +332,8 @@ def run_measurement(color_frame=None, depth_frame=None):
         
         u, v = last_u, last_v
         vis_img = last_vis_img
+        raw_color_img = last_raw_color
+        contour = last_contour
         raw_x, raw_y = avg_raw_x, avg_raw_y
         mode_label = f"POVPREČJE ({len(x_list)} slik)"
 
@@ -309,10 +345,13 @@ def run_measurement(color_frame=None, depth_frame=None):
             print(f"[DEBUG] Deblo ni bilo zaznano v območju {MIN_DISTANCE_MM}-{MAX_DISTANCE_MM} mm.")
             return None
             
-        u, v, raw_x, raw_y, contour, filtered_c_img = res
+        u, v, raw_x, raw_y, contour, filtered_c_img, raw_color_img = res
         vis_img = filtered_c_img.copy()
-        cv2.drawContours(vis_img, [contour], -1, (0, 255, 0), 2)
         mode_label = "POSAMEZNA SLIKA"
+
+    # Narišemo obrobo na filtrirano sliko za ekran
+    if contour is not None:
+        cv2.drawContours(vis_img, [contour], -1, (0, 255, 0), 2)
 
     # Kalibracija
     X_coord_mm = int(round((raw_x * X_SCALE) + X_OFFSET_MM))
@@ -324,8 +363,7 @@ def run_measurement(color_frame=None, depth_frame=None):
     radial_angle_deg = math.degrees(radial_angle_rad)
     orientation = float(np.clip(radial_angle_deg, -30.0, 30.0))
 
-    # Prikaz na sliki
-    cv2.line(vis_img, (0, v), (1280, v), (255, 255, 0), 1)
+    # Prikaz na ekranu (brez modre črte!)
     cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
 
     text_x = f"X ({mode_label}): {X_coord_mm} mm"
@@ -333,16 +371,18 @@ def run_measurement(color_frame=None, depth_frame=None):
     text_z = f"Z: {Z_coord_mm} mm"
     text_o = f"O: {orientation:.2f} deg"
 
-    cv2.rectangle(vis_img, (10, 10), (430, 135), (0, 0, 0), -1)
+    cv2.rectangle(vis_img, (10, 10), (550, 135), (0, 0, 0), -1)
     cv2.putText(vis_img, text_x, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
     cv2.putText(vis_img, text_y, (20, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
     cv2.putText(vis_img, text_z, (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 255, 255), 2)
     cv2.putText(vis_img, text_o, (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
 
     if DEVELOPMENT:
-        cv2.putText(vis_img, "[p] Poslji koordinate | [katerakoli druga] Preklici", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+        cv2.putText(vis_img, "[i] Shrani barvno sliko | [p] Poslji | [katerakoli] Preklici", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1)
 
-    return vis_img, (X_coord_mm, Y_coord_mm, Z_coord_mm, orientation)
+    text_lines = [text_x, text_y, text_z, text_o]
+
+    return vis_img, (X_coord_mm, Y_coord_mm, Z_coord_mm, orientation), raw_color_img, contour, u, v, text_lines
 
 
 try:
@@ -389,24 +429,27 @@ try:
                 res = run_measurement(color_frame, depth_frame)
                 
                 if res is not None:
-                    vis_result, coords = res
+                    vis_result, coords, raw_color_img, contour, u, v, text_lines = res
                     cv2.imshow("RealSense - Live Stream", vis_result)
                     
+                    print("\n-> Pritisni 'i' za SHRANJEVANJE polno barvne slike.")
                     print("-> Pritisni 'p' za POSILJANJE koordinat na STM32.")
                     print("-> Pritisni katerokoli drugo tipko za VRNITEV v prenos.")
                     
                     decision_key = cv2.waitKey(0) & 0xFF
                     
-                    if decision_key == ord('p'):
+                    if decision_key == ord('i'):
+                        save_full_color_image(raw_color_img, contour, u, v, text_lines)
+                    elif decision_key == ord('p'):
                         x, y, z, o = coords
                         send_to_stm32(x, y, z, o)
                     else:
-                        print("[DEBUG] Pošiljanje preklicano s strani uporabnika.")
+                        print("[DEBUG] Preklicano s strani uporabnika.")
                 else:
                     print(f"\nSegmentacija/meritev ni uspela (ni zaznanih objektov v zoni {MIN_DISTANCE_MM}-{MAX_DISTANCE_MM} mm).")
 
     else:
-        print("[DEBUG] Zagon v produkcijskum načinu...")
+        print("[DEBUG] Zagon v produkcijskem načinu...")
         for _ in range(10):
             pipeline.wait_for_frames()
 
@@ -418,7 +461,7 @@ try:
         if c_frame and d_frame:
             res = run_measurement(c_frame, d_frame)
             if res is not None:
-                _, coords = res
+                _, coords, _, _, _, _, _ = res
                 x, y, z, o = coords
                 send_to_stm32(x, y, z, o)
 
@@ -428,4 +471,4 @@ finally:
     cv2.destroyAllWindows()
     if ser and ser.is_open:
         ser.close()
-    print("Program zaključen.") 
+    print("Program zaključen.")
