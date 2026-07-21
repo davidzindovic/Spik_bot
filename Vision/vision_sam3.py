@@ -57,11 +57,18 @@ except ImportError as e:
     from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 # ==============================================================================
-# NASTAVITVE PROGRAMA
+# NASTAVITVE PROGRAMA IN KALIBRACIJA
 # ==============================================================================
 DEVELOPMENT = True  
-SERIAL_PORT = 'COM3'  # Windows COM vrata
+SERIAL_PORT = 'COM3'  # Windows COM vrata ali /dev/ttyACM0 na Linuxu
 BAUD_RATE = 115200
+
+# --- KALIBRACIJSKI PARAMETRI (Nastavi po potrebi) ---
+X_SCALE = 1.0       # Množilnik za X (npr. 1.05 poveča X za 5%)
+X_OFFSET_MM = -25     # Konstanten zamik za X v mm (npr. +15 ali -10)
+
+Y_SCALE = 1.0       # Množilnik za Y (globina)
+Y_OFFSET_MM = -230     # Konstanten zamik za Y v mm
 # ==============================================================================
 
 # --- Nastavitve serijske komunikacije ---
@@ -140,7 +147,7 @@ def run_segmentation(color_image, depth_image):
     # Pretvori BGR v RGB
     rgb_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
     
-    # Priprava vhodnih podatkov
+    # Priprava vhodnih podatkov za CLIPSeg
     inputs = processor(text=["tree trunk"], images=[rgb_image], padding="max_length", return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     
@@ -164,7 +171,7 @@ def run_segmentation(color_image, depth_image):
     if contours:
         largest_contour = max(contours, key=cv2.contourArea)
         
-        # Izračun težišča konture
+        # Izračun težišča konture (v piklih: u = kolona/X, v = vrstica/Y na sliki)
         M = cv2.moments(largest_contour)
         if M["m00"] != 0:
             u = int(M["m10"] / M["m00"])
@@ -191,17 +198,33 @@ def run_segmentation(color_image, depth_image):
                 print("[DEBUG] Ni veljavnih globinskih podatkov za deblo.")
                 return None
 
-        # Pretvorba v metre in 3D deprojekcija
+        # Pretvorba raw globine v metre
         depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
         depth_in_meters = depth_raw * depth_scale
+
+        # Standardna RealSense 3D deprojekcija:
+        # rs_coords[0] = X (desno +, levo -)
+        # rs_coords[1] = Y (dol +, gor -)
+        # rs_coords[2] = Z (naprej/globina +)
         rs_coords = rs.rs2_deproject_pixel_to_point(intrinsics, [u, v], depth_in_meters)
         
-        # --- Koordinate v milimetrih ---
-        X_coord_mm = int(round(-rs_coords[0] * 1000))
-        Y_coord_mm = int(round(rs_coords[2] * 1000))
+        # --- PRENOS V TVOJ KOORDINATNI SISTEM (v mm) ---
+        
+        # 1. Y KOORDINATA (GLOBINA NAPREJ):
+        # Direktna razdalja naprej od kamere
+        raw_y_mm = rs_coords[2] * 1000  
+        
+        # 2. X KOORDINATA (LEVO / DESNO):
+        # Obrnemo predznak, da je Levo (+), Desno (-)
+        raw_x_mm = -rs_coords[0] * 1000 
+
+        # --- APLICIRANJE SKALIRANJA IN OFFSETI ---
+        X_coord_mm = int(round((raw_x_mm * X_SCALE) + X_OFFSET_MM))
+        Y_coord_mm = int(round((raw_y_mm * Y_SCALE) + Y_OFFSET_MM))
         Z_coord_mm = 100  # Konstanten vbodni offset: +100 mm nad kamero
 
-        # --- Radialni kot (O) ---
+        # --- RADIALNI KOT (O) ---
+        # Računa se kot odmik od središča glede na globino Y in zamik X
         radial_angle_rad = math.atan2(X_coord_mm, Y_coord_mm)
         radial_angle_deg = math.degrees(radial_angle_rad)
         orientation = float(np.clip(radial_angle_deg, -30.0, 30.0))
@@ -212,11 +235,11 @@ def run_segmentation(color_image, depth_image):
         cv2.circle(vis_img, (u, v), 7, (0, 0, 255), -1)
         
         text_x = f"X: {X_coord_mm} mm (L+/R-)"
-        text_y = f"Y: {Y_coord_mm} mm (Globina)"
+        text_y = f"Y: {Y_coord_mm} mm (Globina naprej)"
         text_z = f"Z: {Z_coord_mm} mm (Offset)"
         text_o = f"O: {orientation:.2f} deg (Radial)"
         
-        cv2.rectangle(vis_img, (10, 10), (380, 135), (0, 0, 0), -1)
+        cv2.rectangle(vis_img, (10, 10), (410, 135), (0, 0, 0), -1)
         cv2.putText(vis_img, text_x, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
         cv2.putText(vis_img, text_y, (20, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
         cv2.putText(vis_img, text_z, (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
@@ -229,7 +252,6 @@ def run_segmentation(color_image, depth_image):
     else:
         print("[DEBUG] Deblo ni bilo zaznano na sliki.")
         return None
-
 
 try:
     if DEVELOPMENT:
