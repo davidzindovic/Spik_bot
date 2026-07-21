@@ -15,3 +15,5 @@ pyserial -> ```pip install pyserial```
 pytorch, transformers... -> ```pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu``` -> ```pip install transformers```
 
 Opomba: v primeru težav pri nalaganju pytorch naj omenim, da je ukaz za namestitev različice, ki deluje na procesorju. Obstaja možnost, da bo težave povzročala knjižnica za zvok, v tem primeru zaženite: ```pip uninstall -y torch torchvision torchaudio``` in zadevo ponovno namestite.
+
+V primeru dodatnih težav pri namestitvi torch paketa na windowsih uporabite: ```conda install -c pytorch cpuonly mkl intel-openmp -y```. Ob zagonu ukaza ```python -c "import torch; print(torch.__version__)"``` v ukaznem pozivu, bi se vam morala izpisati različica pytorch s končnico +cpu.
