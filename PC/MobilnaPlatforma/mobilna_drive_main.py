@@ -290,7 +290,7 @@ def main():
 
             #damo čas da se kolesa ustavijo in potem v rednem delu spremenimo mode
             if mode_change_requested:
-                if ((cycle_timestamp-timestamp_temp)>100):
+                if ((cycle_timestamp-timestamp_temp)>50):
                     timestamp_temp=cycle_timestamp
                     mode_change_requested=False
                     plc.write_by_name('MAIN.MasterContol.data.steeringMode', gamepad.selected_mode, pyads.PLCTYPE_LREAL)
