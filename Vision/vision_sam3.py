@@ -7,7 +7,7 @@ import math
 # VARNOSTNI POPRAVKI ZA LINUX (CUDA & AUDIO BYPASS)
 # ==============================================================================
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["HF_TOKEN"] = "VPISI_SVOJ_HF_TOKEN_TUKAJ"
+os.environ["HF_TOKEN"] = ""
 
 try:
     import sys
@@ -21,26 +21,34 @@ except Exception:
 try:
     import pyrealsense2 as rs
 except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'pyrealsense2'. Namesti jo z: pip install pyrealsense2")
-    sys.exit(1)
+    print("[NAPAKA] Manjka knjižnica 'pyrealsense2'. Nameščam jo z: pip install pyrealsense2")
+    os.system('python -m pip install pyrealsense2')
+finally:
+    import pyrealsense2 as rs
 
 try:
     import numpy as np
 except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'numpy'. Namesti jo z: pip install numpy")
-    sys.exit(1)
+    print("[NAPAKA] Manjka knjižnica 'numpy'. Nameščam jo z: pip install numpy")
+    os.system('python -m pip install pip install numpy')
+finally:
+    import numpy as np
 
 try:
     import cv2
 except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'opencv-python'. Namesti jo z: pip install opencv-python")
-    sys.exit(1)
+    print("[NAPAKA] Manjka knjižnica 'opencv-python'. Nameščam jo z: pip install opencv-python")
+    os.system('python -m pip install pip install opencv-python')
+finally:
+    import cv2
 
 try:
     import serial
 except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'pyserial'. Namesti jo z: pip install pyserial")
-    sys.exit(1)
+    print("[NAPAKA] Manjka knjižnica 'pyserial'. Nameščam jo z: pip install pyserial")
+    os.system('python -m pip install pip install pyserial')
+finally:
+    import serial
 
 try:
     import torch
@@ -48,13 +56,18 @@ try:
 except ImportError as e:
     print("\n" + "="*80)
     print(f"[NAPAKA] Težava pri uvozu PyTorch/Transformers: {e}")
-    sys.exit(1)
+    os.system('python -m pip install pip uninstall -y torch torchvision torchaudio')
+    os.system('python -m pip install pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu')
+    os.system('python -m pip install pip install transformers')
+finally:
+    import torch
+    from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 # ==============================================================================
 # NASTAVITVE PROGRAMA
 # ==============================================================================
 DEVELOPMENT = True  
-SERIAL_PORT = '/dev/ttyACM0'  # Na Linuxu je običajno /dev/ttyACM0 ali /dev/ttyUSB0
+SERIAL_PORT = 'COM3'  # Na Linuxu je običajno /dev/ttyACM0 ali /dev/ttyUSB0
 BAUD_RATE = 115200
 # ==============================================================================
 
@@ -66,8 +79,8 @@ except Exception as e:
     print(f"[DEBUG] Opozorilo pri povezovanju na serijska vrata: {e}")
     print("[DEBUG] Poskušam se povezati na alternativna vrata /dev/ttyUSB0...")
     try:
-        ser = serial.Serial('/dev/ttyUSB0', BAUD_RATE, timeout=1)
-        print("[DEBUG] Uspešno povezan na /dev/ttyUSB0")
+        ser = serial.Serial('SERIAL_PORT', BAUD_RATE, timeout=1)
+        print("[DEBUG] Uspešno povezan na ",SERIAL_PORT)
     except:
         print("[DEBUG] Serijska vrata niso na voljo. Program bo tekel brez pošiljanja na STM32.")
         ser = None
