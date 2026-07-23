@@ -115,8 +115,8 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      35U     /* below this: stop (unless reversing out) */
-#define DC_DIST_MAX_MM      105U    /* above this: stop (unless forwarding back) */
+#define DC_DIST_MIN_MM      120U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MAX_MM      150U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
  *
@@ -968,7 +968,22 @@ int main(void) {
 	DC_Motor_Init(); //dodaj pull down upor
     DC_Motor_Set_Speed(0);
 
-	//calibrate_all_motors();
+	calibrate_all_motors();
+
+/*
+    while(1)
+   {
+   	_Bool sw0=read_switch(0);
+		_Bool sw1=read_switch(1);
+		_Bool sw2=read_switch(2);
+		_Bool sw3=read_switch(3);
+		char debug_msg[100];
+		snprintf(debug_msg, sizeof(debug_msg), " SW0: %u | SW1: %u | SW2: %u | SW3: %u \r\n", sw0,sw1,sw2,sw3);
+		serial_print_string(debug_msg);
+		HAL_Delay(200);
+	}
+*/
+
 
     char menu[] =
             "\r\n==================================================================\r\n"
@@ -1045,10 +1060,13 @@ int main(void) {
 		                	DC_Motor_Update(trenutna_razdalja);
 		                }
 
-		                char debug_msg[64];
-		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
-		                serial_print_string(debug_msg);
+		                //char debug_msg[64];
+		                //snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
+		                //serial_print_string(debug_msg);
  		            }
+
+
+
 
 
 
@@ -1139,6 +1157,19 @@ if (manual_mode_flag==1)
 
 
 
+/*stikala test
+     while(1)
+    {
+    	_Bool sw0=read_switch(0);
+		_Bool sw1=read_switch(1);
+		_Bool sw2=read_switch(2);
+		_Bool sw3=read_switch(3);
+		char debug_msg[100];
+		snprintf(debug_msg, sizeof(debug_msg), " SW0: %u | SW1: %u | SW2: %u | SW3: %u \r\n", sw0,sw1,sw2,sw3);
+		serial_print_string(debug_msg);
+		HAL_Delay(200);
+	}
+ */
 
 
 
@@ -4173,31 +4204,37 @@ void calibrate_motor(uint8_t motor_number)
 	snprintf(msg, sizeof(msg), "CAL M%d: moving to switch 1 (dir_minus)...\r\n", motor_number);
 	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 
-	/* --- Phase 1: drive in direction_minus until switch 1 triggers --- */
-	motors[motor_number].position = 0;
-	motors[motor_number].end_switch_triggered = 0;
-	motors[motor_number].allowed_direction = 2; /* allow both directions during calibration */
+	if (motor_number!=3)
+	{
+		/* --- Phase 1: drive in direction_minus until switch 1 triggers --- */
+		motors[motor_number].position = 0;
+		motors[motor_number].end_switch_triggered = 0;
+		motors[motor_number].allowed_direction = 2; /* allow both directions during calibration */
 
-	direction_change(motor_number, motors[motor_number].direction_minus);
-	HAL_Delay(100);
-	run_motor(motor_number);
-
+		direction_change(motor_number, motors[motor_number].direction_minus);
+		HAL_Delay(100);
+		run_motor(motor_number);
+	}
 	while (!read_switch(motor_number)) { /* spin until switch fires */ }
 
-	stop_motor(motor_number);
-
+	if (motor_number!=3)
+	{
+		stop_motor(motor_number);
+	}
 	snprintf(msg, sizeof(msg), "CAL M%d: switch 1 hit. Reversing...\r\n", motor_number);
 	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 
-	/* --- Phase 2: reverse direction and move BLIND for at least 1 second --- */
-	direction_change(motor_number, motors[motor_number].direction_plus);
-	HAL_Delay(100);
+	if (motor_number!=3)
+	{
+		/* --- Phase 2: reverse direction and move BLIND for at least 1 second --- */
+		direction_change(motor_number, motors[motor_number].direction_plus);
+		HAL_Delay(100);
 
-	motors[motor_number].position = 0; /* reset step counter at switch-1 position */
-	motors[motor_number].end_switch_triggered = 0;
+		motors[motor_number].position = 0; /* reset step counter at switch-1 position */
+		motors[motor_number].end_switch_triggered = 0;
 
-	run_motor(motor_number);
-
+		run_motor(motor_number);
+	}
 	/* Mandatory blind travel: do NOT read the switch for the first 1000 ms.
 	   This ensures the mechanism has physically cleared the switch actuator. */
 	HAL_Delay(1000);
@@ -4208,59 +4245,64 @@ void calibrate_motor(uint8_t motor_number)
 	/* --- Phase 3: continue until switch 2 triggers, counting steps --- */
 	/* position is incremented by the TIM IRQ callback while running */
 	while (!read_switch(motor_number)) { /* spin until switch fires */ }
+	uint32_t measured_steps;
+	if (motor_number!=3)
+	{
+		stop_motor(motor_number);
 
-	stop_motor(motor_number);
-
-	uint32_t measured_steps = motors[motor_number].position;
-
+		measured_steps = motors[motor_number].position;
+	}
 	snprintf(msg, sizeof(msg), "CAL M%d: switch 2 hit. Steps between switches: %lu\r\n",
 	         motor_number, measured_steps);
 	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 
-	/* Sanity check: if we measured almost nothing the count is wrong */
-	if (measured_steps < 100)
+	if (motor_number!=3)
 	{
-		snprintf(msg, sizeof(msg), "CAL M%d: ERR - step count too low (%lu), aborting\r\n",
-		         motor_number, measured_steps);
+		/* Sanity check: if we measured almost nothing the count is wrong */
+		if (measured_steps < 100)
+		{
+			snprintf(msg, sizeof(msg), "CAL M%d: ERR - step count too low (%lu), aborting\r\n",
+					 motor_number, measured_steps);
+			HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+			return;
+		}
+
+		/* --- Phase 4: update motor parameters --- */
+		motors[motor_number].max_position    = measured_steps;
+		motors[motor_number].unit_conversion = measured_steps / motors[motor_number].travel_length;
+		motors[motor_number].end_switch_triggered = 0;
+		motors[motor_number].allowed_direction    = 2;
+
+		snprintf(msg, sizeof(msg), "CAL M%d: max_pos=%lu, unit_conv=%lu. Moving to centre...\r\n",
+				 motor_number,
+				 motors[motor_number].max_position,
+				 motors[motor_number].unit_conversion);
 		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
-		return;
+
+
+		/* --- Phase 5: drive back to the centre of the travel range --- */
+		direction_change(motor_number, motors[motor_number].direction_minus);
+		HAL_Delay(100);
+		run_motor(motor_number);
+
+		if(motor_number!=2)
+		{
+			while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
+		}
+		else
+		{
+			while (motors[motor_number].position > (motors[motor_number].max_position * 1 / 10)) { /* wait */ }
+		}
+
+		stop_motor(motor_number);
+
+		motors[motor_number].starting_position = motors[motor_number].position;
+		motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
+
+		snprintf(msg, sizeof(msg), "CAL M%d: done. Centre pos=%lu\r\n",
+				 motor_number, motors[motor_number].position);
+		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 	}
-
-	/* --- Phase 4: update motor parameters --- */
-	motors[motor_number].max_position    = measured_steps;
-	motors[motor_number].unit_conversion = measured_steps / motors[motor_number].travel_length;
-	motors[motor_number].end_switch_triggered = 0;
-	motors[motor_number].allowed_direction    = 2;
-
-	snprintf(msg, sizeof(msg), "CAL M%d: max_pos=%lu, unit_conv=%lu. Moving to centre...\r\n",
-	         motor_number,
-	         motors[motor_number].max_position,
-	         motors[motor_number].unit_conversion);
-	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
-
-
-	/* --- Phase 5: drive back to the centre of the travel range --- */
-	direction_change(motor_number, motors[motor_number].direction_minus);
-	HAL_Delay(100);
-	run_motor(motor_number);
-
-	if(motor_number!=2)
-	{
-		while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
-	}
-	else
-	{
-		while (motors[motor_number].position > (motors[motor_number].max_position * 1 / 10)) { /* wait */ }
-	}
-
-	stop_motor(motor_number);
-
-	motors[motor_number].starting_position = motors[motor_number].position;
-	motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
-
-	snprintf(msg, sizeof(msg), "CAL M%d: done. Centre pos=%lu\r\n",
-	         motor_number, motors[motor_number].position);
-	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 }
 
 /**
@@ -4276,7 +4318,7 @@ void calibrate_all_motors(void)
 {
 	serial_print_string("CALIBRATION: starting motors 0, 1, 2...\r\n");
 
-	for (uint8_t m = 0; m <= 2; m++)
+	for (uint8_t m = 0; m <= 3; m++)
 	{
 		motors[m].reset_requested=1;
 		serial_print_string("-----------------------\r\n");
@@ -6069,7 +6111,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
             /* Preverimo, če je pretekel določen čas (npr. 5000 ms) brez blokiranja kode */
             //pocakamo da pride do pravilnega pritiska, nato štopamo koliko časa vzdržuje pritisk
 
-        	while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3)) //cakamo da se pritisk ustali
+        	//while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3)) //cakamo da se pritisk ustali
 
 			dc_stop_timestamp = HAL_GetTick();
         	dc_wait_time_ms=5000; //zelimo da ohrani pritisk 5 sekund
@@ -6077,11 +6119,11 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         	while(dc_time_elapsed < dc_wait_time_ms)
         	{
-        		if(reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3))
-        				{
+        		//if(reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3))
+        		//		{
         					dc_time_elapsed+=HAL_GetTick()-dc_stop_timestamp;
         					dc_stop_timestamp=HAL_GetTick();
-        				}
+        		//		}
         	}
 
         	//if ((HAL_GetTick() - dc_stop_timestamp) >= dc_wait_time_ms) {
