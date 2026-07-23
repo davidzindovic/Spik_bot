@@ -183,7 +183,7 @@ class SimpleGamepadPygame:
 
     def update_and_log(self):
         """Neblokirajoče branje stanja ploščka. Upošteva globalno vision_active."""
-        global vision_active
+        global vision_active, mode_change_requested
         self.has_changed = False
         self.mode_changed = False
 
@@ -241,14 +241,17 @@ class SimpleGamepadPygame:
                 elif event.button == 3:        # Y – mode 1
                     self.selected_mode = 1.0
                     self.mode_changed = True
+                    mode_change_requested=True
                     print("[NAČIN] Mode 1 (Y)")
                 elif event.button == 2:        # X – mode 2
                     self.selected_mode = 2.0
                     self.mode_changed = True
+                    mode_change_requested=True
                     print("[NAČIN] Mode 2 (X)")
                 elif event.button == 1:        # B – mode 5
                     self.selected_mode = 5.0
                     self.mode_changed = True
+                    mode_change_requested=True
                     print("[NAČIN] Mode 5 (B)")
 
         # --- D‑pad (samo če ni vision_active) ---
@@ -304,6 +307,8 @@ processor = None
 model = None
 spatial_filter = None
 hole_filling = None
+mode_change_requested=False
+temp_timestamp=0
 
 def init_vision():
     """Inicializacija RealSense in CLIPSeg modela."""
@@ -586,7 +591,7 @@ def vision_thread_func(color_frame, depth_frame):
 # GLAVNI PROGRAM
 # ==============================================================================
 def main():
-    global vision_active, vision_ready, vision_result, pipeline
+    global vision_active, vision_ready, vision_result, pipeline, mode_change_requested, temp_timestamp
 
     # --- Inicializacija serijske povezave (ni nujno, da je odprta) ---
     try:
@@ -766,6 +771,7 @@ def main():
             # Vedno pošljemo timestamp (watchdog)
             if plc is not None:
                 try:
+                    #print("game pad :",gamepad.plc_state)
                     plc.write_by_name('MAIN.CartContol.data.timeStamp', cycle_timestamp, pyads.PLCTYPE_LREAL)
                 except Exception as e:
                     print(f"[PLC] Napaka pri timestampu: {e}")
@@ -786,6 +792,9 @@ def main():
                             2.0, 2.0, 2.0,     # 13-15 dodatna oprema stop
                             0.0                # 16 steeringMode
                         ]
+                        print("5")
+                        print("vision active:",vision_active)
+                        print("vision ready:",vision_ready)
                         plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
                         # Poskrbimo še za hitrost 0
                         plc.write_by_name("MAIN.CartContol.data.hitrost_ms", 0.0, pyads.PLCTYPE_LREAL)
@@ -797,11 +806,17 @@ def main():
                     try:
                         if plc is not None:
                             if gamepad.plc_state == 1:
+                                print("4")
+                                print("vision active:",vision_active)
+                                print("vision ready:",vision_ready)
                                 plc.write_by_name('MAIN.MasterContol.data.mode', 1, pyads.PLCTYPE_LREAL)
                                 plc.write_by_name('MAIN.MasterContol.data.masterSwich', 1, pyads.PLCTYPE_LREAL)
                                 plc.write_by_name('MAIN.MasterContol.data.steeringMode', gamepad.selected_mode, pyads.PLCTYPE_LREAL)
                                 print(f"PLC: START (mode {gamepad.selected_mode})")
                             else:
+                                print("3")
+                                print("vision active:",vision_active)
+                                print("vision ready:",vision_ready)
                                 plc.write_by_name('MAIN.MasterContol.data.mode', 0, pyads.PLCTYPE_LREAL)
                                 plc.write_by_name('MAIN.MasterContol.data.masterSwich', 0, pyads.PLCTYPE_LREAL)
                                 print("PLC: STOP")
@@ -831,7 +846,9 @@ def main():
                         ]
                         try:
                             if plc is not None:
-                                #print("hitrost")
+                                print("2")
+                                print("vision active:",vision_active)
+                                print("vision ready:",vision_ready)
                                 plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
                                 plc.write_by_name("MAIN.CartContol.dataArray[0]", cart_data[0], pyads.PLCTYPE_LREAL)
                                 plc.write_by_name("MAIN.CartContol.dataArray[1]", cart_data[1], pyads.PLCTYPE_LREAL)
@@ -840,11 +857,21 @@ def main():
                             print(f"[PLC] Napaka pri pisanju: {e}")
 
                 # Če je prišlo do spremembe načina (gumbi X,Y,B), pošljemo mode
-                if gamepad.mode_changed:
+                if mode_change_requested:
                     try:
-                        if plc is not None:
-                            plc.write_by_name('MAIN.MasterContol.data.steeringMode', gamepad.selected_mode, pyads.PLCTYPE_LREAL)
-                            print(f"PLC: mode nastavljen na {gamepad.selected_mode}")
+                        if plc is not None and mode_change_requested:
+                            print("1")
+                            print("vision active:",vision_active)
+                            print("vision ready:",vision_ready)
+
+                            if gamepad.mode_changed:
+                                temp_timestamp=cycle_timestamp
+
+                            if ((cycle_timestamp-temp_timestamp)>=50):
+                                plc.write_by_name('MAIN.MasterContol.data.steeringMode', gamepad.selected_mode, pyads.PLCTYPE_LREAL)
+                                print(f"PLC: mode nastavljen na {gamepad.selected_mode}")
+                                mode_change_requested=False
+
                     except Exception as e:
                         print(f"[PLC] Napaka pri pisanju mode: {e}")
 
