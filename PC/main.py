@@ -2,7 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-main.py – Združena koda za krmiljenje mobilne platforme in vizualno segmentacijo z RealSense.
+Združena koda: mobilna platforma + segmentacija z RealSense in CLIPSeg.
+- Gamepad krmiljenje (hitrost, zavijanje z D-pad, načini, varnost)
+- PLC komunikacija prek ADS
+- RB (gumb 5) odpira/zapira okno s preview (živi prikaz)
+- A (gumb 0) sproži segmentacijo na trenutnem okvirju
+- X (gumb 2) sprejme rezultat (pošlje na STM32)
+- B (gumb 1) zavrne rezultat (vrne v preview)
+- Med odprtim oknom je vožnja zaustavljena
 """
 
 import os
@@ -10,7 +17,14 @@ import sys
 import time
 import math
 import threading
-import queue
+import numpy as np
+import cv2
+import torch
+import pygame
+import pyads
+import serial
+import pyrealsense2 as rs
+from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 # ==============================================================================
 # NASTAVITVE OKOLJA
@@ -25,78 +39,6 @@ except Exception:
     pass
 
 # ==============================================================================
-# UVOZ KNJIŽNIC (s samodejno namestitvijo)
-# ==============================================================================
-def install_and_import(package, import_name=None, extra=None):
-    try:
-        if import_name is None:
-            import_name = package
-        return __import__(import_name)
-    except ImportError:
-        print(f"[NAPAKA] Manjka '{package}'. Nameščam ...")
-        cmd = f'python -m pip install {package}'
-        if extra:
-            cmd += f'[{extra}]'
-        os.system(cmd)
-        return __import__(import_name)
-
-try:
-    sys.modules['torchaudio'] = None
-except Exception:
-    pass
-
-# ==============================================================================
-# PREVERJANJE IN UVOZ KNJIŽNIC
-# ==============================================================================
-import time
-import pygame
-import pyads
-try:
-    import pyrealsense2 as rs
-except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'pyrealsense2'. Nameščam jo z: pip install pyrealsense2")
-    os.system('python -m pip install pyrealsense2')
-finally:
-    import pyrealsense2 as rs
-
-try:
-    import numpy as np
-except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'numpy'. Nameščam jo z: pip install numpy")
-    os.system('python -m pip install pip install numpy')
-finally:
-    import numpy as np
-
-try:
-    import cv2
-except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'opencv-python'. Nameščam jo z: pip install opencv-python")
-    os.system('python -m pip install pip install opencv-python')
-finally:
-    import cv2
-
-try:
-    import serial
-except ImportError:
-    print("[NAPAKA] Manjka knjižnica 'pyserial'. Nameščam jo z: pip install pyserial")
-    os.system('python -m pip install pip install pyserial')
-finally:
-    import serial
-
-try:
-    import torch
-    from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
-except ImportError as e:
-    print("\n" + "="*80)
-    print(f"[NAPAKA] Težava pri uvozu PyTorch/Transformers: {e}")
-    os.system('python -m pip install pip uninstall -y torch torchvision torchaudio')
-    os.system('python -m pip install pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu')
-    os.system('python -m pip install pip install transformers')
-finally:
-    import torch
-    from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
-
-# ==============================================================================
 # KONFIGURACIJA
 # ==============================================================================
 # --- Serijska povezava za STM32 ---
@@ -106,8 +48,8 @@ BAUD_RATE = 115200
 # --- RealSense in segmentacija ---
 MIN_DISTANCE_MM = 200
 MAX_DISTANCE_MM = 400
-ENABLE_AVERAGING = False      # vedno uporabimo eno sliko
-NUM_SAMPLES = 7               # ni v uporabi, če je ENABLE_AVERAGING = False
+ENABLE_AVERAGING = False      # True = povpreči več slik, False = ena slika
+NUM_SAMPLES = 7               # velja le, če je ENABLE_AVERAGING = True
 
 X_SCALE = 1.0
 X_OFFSET_MM = 0
@@ -120,47 +62,72 @@ LOKALNI_AMS_ID = "192.168.65.121.1.1"
 PLC_IP = "192.168.64.200"
 PLC_AMS_ID = "169.254.220.1.1.1"
 
-# ==============================================================================
-# GLOBALNE SPREMENLJIVKE ZA VISION
-# ==============================================================================
-vision_active = False          # ali je segmentacija v teku ali prikaz rezultata
-vision_ready = False           # ali je rezultat pripravljen za prikaz
-vision_result = None           # (vis_img, coords, raw_color_img, contour, u, v, text_lines) ali None
+# --- Globalne spremenljivke za krmiljenje (iz mobilna_drive_main.py) ---
+set_speed = 50
+current_angle = 0.0
+old_current_angle = 0.0
+delta_angle = 0.0
+max_angle = 30.0
+angle_step = 10
+mode_change_requested = False
+timestamp_temp = 0
+cycle_timestamp = 0
+
+# --- Globalne za vision ---
+pipeline = None
+align = None
+depth_scale = None
+intrinsics = None
+device = "cpu"
+processor = None
+model = None
+spatial_filter = None
+hole_filling = None
+
+# Stanja za preview/segmentacijo
+vision_window_open = False     # ali je okno s preview odprto
+vision_preview_mode = True     # True = prikazujemo živi prikaz, False = prikazujemo rezultat segmentacije
+vision_segmentation_result = None  # (vis_img, coords, raw_color_img, contour, u, v, text_lines) ali None
 vision_lock = threading.Lock()
+last_color_frame = None        # zadnji barvni okvir za segmentacijo
+last_depth_frame = None        # zadnji globinski okvir
 
 # ==============================================================================
-# RAZRED ZA GAMEPAD (iz mobilna_drive_main.py, prilagojen za integracijo)
+# RAZRED ZA GAMEPAD
 # ==============================================================================
 class SimpleGamepadPygame:
     def __init__(self):
         pygame.init()
         pygame.joystick.init()
+        
         self.joystick = None
-        self.x_axis = 0.0
-        self.y_axis = 0.0
-        self.e_stop = 0.0
-        self.drive_mode = 1.0
-        self.plc_state = 0
+        self.x_axis = 0.0      
+        self.y_axis = 0.0      # Hitrost (naprej / nazaj)
+        self.e_stop = 0.0      # Varnostni gumb (E-Stop)
+        self.drive_mode = 1.0  # Način vožnje (1.0 = Drive, 0.0 = Stop)
+        self.plc_state = 0     # 0 = Stop, 1 = Start
         self.dead_man_pressed = False
+        
         self.cruise_control_active = False
         self.selected_mode = 1.0
         self.mode_changed = False
-
+        
         self.prev_y_axis = 0.0
         self.prev_e_stop = 0.0
         self.prev_drive_mode = 1.0
+        
         self.has_changed = False
-
-        # spremenljivke za D‑pad (uporabljajo se v glavni zanki)
+        
+        # Atributi za D-pad
         self.hat_x = 0
         self.hat_y = 0
         self.prev_hat_x = 0
         self.prev_hat_y = 0
-
+        
         if pygame.joystick.get_count() > 0:
             self.joystick = pygame.joystick.Joystick(0)
             self.joystick.init()
-            print(f"[INFO] Zaznan plošček: {self.joystick.get_name()}")
+            print(f"[INFO] Uspešno zaznan plošček: {self.joystick.get_name()}")
         else:
             print("[OPOZORILO] Noben igralni plošček ni zaznan!")
 
@@ -169,26 +136,26 @@ class SimpleGamepadPygame:
         print("                NAVODILA ZA UPORABO IGRALNEGA PLOŠČKA                 ")
         print("="*70)
         print(" * DESNI ANALOG (Y os)          : Hitrost NAPREJ (+) / NAZAJ (-)")
-        print(" * D-PAD (Levo/Desno)           : Nastavitev kota koles (samo v načinu 1)")
-        print(" * GUMB LB (4)                  : DEAD MAN SWITCH (drži za delovanje)")
-        print(" * GUMB A (0)                   : Tempomat (zakleni hitrost)")
-        print(" * GUMB Y (3), X (2), B (1)     : Izbira načina (1, 2, 5)")
-        print(" * GUMB START (7)               : Zagon / Zaustavitev")
-        print(" * GUMB RB (5)                  : Sproži segmentacijo / prekliči rezultat")
-        print(" * Ko je prikazana segmentacija:")
-        print("     D-PAD GOR    → pošlji koordinate na STM32")
-        print("     D-PAD DOL    → shrani sliko")
-        print("     RB           → prekliči")
+        print(" * D-PAD (Levo/Desno)          : Nastavljanje kota koles (zaklenjeno stanje)")
+        print(" * GUMB LB (4)                 : DEAD MAN SWITCH (drži za delovanje)")
+        print(" * GUMB A (0)                  : Vklop/izklop TEMPOMATA")
+        print(" * GUMBI Y (3), X (2), B (1)   : Nastavitev načina (Y->1, X->2, B->5)")
+        print(" * GUMB START (7)              : Preklop ZAGON / STOP")
+        print(" * GUMB RB (5)                 : Odpre/zapre okno s preview")
+        print(" * Ko je okno odprto (preview):")
+        print("     A (0)    : Sproži segmentacijo")
+        print("     X (2)    : Sprejmi rezultat (pošlji koordinate na STM32)")
+        print("     B (1)    : Zavrni rezultat (vrni se v preview)")
+        print("     RB (5)   : Zapri okno")
         print("="*70 + "\n")
 
     def update_and_log(self):
-        """Neblokirajoče branje stanja ploščka. Upošteva globalno vision_active."""
-        global vision_active, mode_change_requested
+        global current_angle, old_current_angle, delta_angle, mode_change_requested, cycle_timestamp, timestamp_temp
         self.has_changed = False
         self.mode_changed = False
-
+        
         pygame.event.pump()
-
+        
         if not self.joystick:
             if pygame.joystick.get_count() > 0:
                 self.joystick = pygame.joystick.Joystick(0)
@@ -196,7 +163,16 @@ class SimpleGamepadPygame:
                 print(f"[INFO] Plošček ponovno povezan: {self.joystick.get_name()}")
             return
 
-        # --- Dead Man Switch (vedno aktiven) ---
+        # --- 1. Branje analogne Y osi (hitrost) ---
+        if self.selected_mode != 5.0:
+            if not self.cruise_control_active:
+                raw_y = -self.joystick.get_axis(3)
+                y_val = round(raw_y, 3) if abs(raw_y) > 0.05 else 0.0
+                if y_val != self.y_axis:
+                    self.y_axis = y_val
+                    self.has_changed = True
+
+        # --- Dead Man Switch ---
         self.dead_man_pressed = bool(self.joystick.get_button(4))
         if not self.dead_man_pressed:
             if self.e_stop != 1.0:
@@ -208,61 +184,54 @@ class SimpleGamepadPygame:
                 self.e_stop = 0.0
                 self.has_changed = True
 
-        # Če je segmentacija aktivna, ne spreminjamo krmilnih spremenljivk
-        if vision_active:
-            # Še vedno beremo hat za morebitno uporabo v glavni zanki
-            hat = self.joystick.get_hat(0)
-            self.prev_hat_x, self.prev_hat_y = self.hat_x, self.hat_y
-            self.hat_x, self.hat_y = hat
-            return
-
-        # --- Branje analognih osi (samo če ni tempomata) ---
-        if self.selected_mode != 5.0:
-            if not self.cruise_control_active:
-                raw_y = -self.joystick.get_axis(3)
-                y_val = round(raw_y, 3) if abs(raw_y) > 0.05 else 0.0
-                if y_val != self.y_axis:
-                    self.y_axis = y_val
-                    self.has_changed = True
-
-        # --- Obdelava diskretnih dogodkov ---
-        for event in pygame.event.get():
-            if event.type == pygame.JOYBUTTONDOWN:
-                if event.button == 7:          # Start
-                    self.drive_mode = 1.0 if self.drive_mode == 0.0 else 0.0
-                    self.has_changed = True
-                elif event.button == 0 and self.dead_man_pressed:  # A – tempomat
-                    self.cruise_control_active = not self.cruise_control_active
-                    self.has_changed = True
-                    if self.cruise_control_active:
-                        print(f"[TEMPOMAT] VKLOPLJEN pri hitrosti: {self.y_axis:.2f} m/s")
-                    else:
-                        print("[TEMPOMAT] IZKLOPLJEN")
-                elif event.button == 3:        # Y – mode 1
-                    self.selected_mode = 1.0
-                    self.mode_changed = True
-                    mode_change_requested=True
-                    print("[NAČIN] Mode 1 (Y)")
-                elif event.button == 2:        # X – mode 2
-                    self.selected_mode = 2.0
-                    self.mode_changed = True
-                    mode_change_requested=True
-                    print("[NAČIN] Mode 2 (X)")
-                elif event.button == 1:        # B – mode 5
-                    self.selected_mode = 5.0
-                    self.mode_changed = True
-                    mode_change_requested=True
-                    print("[NAČIN] Mode 5 (B)")
-
-        # --- D‑pad (samo če ni vision_active) ---
+        # --- Branje D-pad ---
         hat = self.joystick.get_hat(0)
         self.prev_hat_x, self.prev_hat_y = self.hat_x, self.hat_y
         self.hat_x, self.hat_y = hat
 
-        if self.selected_mode == 1.0 and not self.e_stop and hat[0] != 0:
-            # obdelava kota (originalna logika) – v tej integraciji se ne uporablja neposredno,
-            # ker kot krmilimo preko PLC; ohranimo za morebitno uporabo
-            pass
+        # --- Gumbi in D-pad za zavijanje (samo če ni mode_change_requested in ni odprto okno) ---
+        if not mode_change_requested and not vision_window_open:
+            for event in pygame.event.get():
+                if event.type == pygame.JOYBUTTONDOWN:
+                    if event.button == 7: # Start
+                        self.drive_mode = 1.0 if self.drive_mode == 0.0 else 0.0
+                        self.has_changed = True
+                    elif event.button == 0 and self.dead_man_pressed: # A - tempomat
+                        self.cruise_control_active = not self.cruise_control_active
+                        self.has_changed = True
+                        if self.cruise_control_active:
+                            print(f"[TEMPOMAT] VKLOPLJEN pri hitrosti: {self.y_axis:.2f} m/s")
+                        else:
+                            print("[TEMPOMAT] IZKLOPLJEN")
+                    elif event.button == 3: # Y -> Mode 1
+                        self.selected_mode = 1.0
+                        self.mode_changed = True
+                        mode_change_requested = True
+                        timestamp_temp = cycle_timestamp
+                        print("[NAČIN] Izbran Mode 1 (Y)")
+                    elif event.button == 2: # X -> Mode 2
+                        self.selected_mode = 2.0
+                        self.mode_changed = True
+                        mode_change_requested = True
+                        timestamp_temp = cycle_timestamp
+                        print("[NAČIN] Izbran Mode 2 (X)")
+                    elif event.button == 1: # B -> Mode 5
+                        self.selected_mode = 5.0
+                        self.mode_changed = True
+                        mode_change_requested = True
+                        timestamp_temp = cycle_timestamp
+                        print("[NAČIN] Izbran Mode 5 (B)")
+
+                # D-PAD (hat) za zavijanje (samo v načinu 1 in če ni e-stop in ni odprto okno)
+                elif event.type == pygame.JOYHATMOTION and self.selected_mode == 1.0:
+                    hat_x, hat_y = event.value
+                    if hat_x != 0 and not self.e_stop and not vision_window_open:
+                        new_angle = current_angle + (hat_x * angle_step)
+                        if -max_angle <= new_angle <= max_angle:
+                            current_angle = new_angle
+                            delta_angle = current_angle - old_current_angle
+                            self.has_changed = True
+                            print(f"[D-PAD] Kot: {current_angle}° (Δ={delta_angle}°)")
 
         # --- Izpisi ob spremembah ---
         if self.has_changed:
@@ -293,25 +262,10 @@ class SimpleGamepadPygame:
                     print(f"[JOYSTICK] Hitrost: {self.y_axis:+.2f} m/s ({smer})")
                     self.prev_y_axis = self.y_axis
 
-
 # ==============================================================================
-# FUNKCIJE ZA VISION (iz vision_sam3.py, prilagojene)
+# FUNKCIJE ZA VISION (iz vision_sam3.py)
 # ==============================================================================
-# Globalne spremenljivke za kamero in model
-pipeline = None
-align = None
-depth_scale = None
-intrinsics = None
-device = "cpu"
-processor = None
-model = None
-spatial_filter = None
-hole_filling = None
-mode_change_requested=False
-temp_timestamp=0
-
 def init_vision():
-    """Inicializacija RealSense in CLIPSeg modela."""
     global pipeline, align, depth_scale, intrinsics, processor, model
     global spatial_filter, hole_filling
 
@@ -360,7 +314,6 @@ def init_vision():
     model.to(device)
     print("[DEBUG] CLIPSeg model uspešno naložen.")
 
-
 def filter_by_distance(color_image, depth_image):
     depth_in_mm = depth_image.astype(np.float32) * depth_scale * 1000.0
     valid_mask = (depth_in_mm >= MIN_DISTANCE_MM) & (depth_in_mm <= MAX_DISTANCE_MM)
@@ -369,7 +322,6 @@ def filter_by_distance(color_image, depth_image):
     filtered_color[~valid_mask] = 0
     filtered_depth[~valid_mask] = 0
     return filtered_color, filtered_depth
-
 
 def save_full_color_image(raw_color_img, contour, u, v, text_lines):
     folder = "slike_segmentacija"
@@ -396,7 +348,6 @@ def save_full_color_image(raw_color_img, contour, u, v, text_lines):
     cv2.imwrite(fpath, save_img)
     print(f"[INFO] Slika shranjena: {fpath}")
 
-
 def send_to_stm32(x, y, z, o):
     """Pošlje koordinate preko serijske povezave na STM32."""
     try:
@@ -421,7 +372,6 @@ def send_to_stm32(x, y, z, o):
     except Exception as e:
         print(f"[SERIJSKI] Napaka pri pošiljanju: {e}")
 
-
 def process_single_frame(color_image, depth_frame_raw):
     """Obdelava ene slike – segmentacija in izračun koordinat."""
     filtered_dframe = spatial_filter.process(depth_frame_raw)
@@ -440,7 +390,7 @@ def process_single_frame(color_image, depth_frame_raw):
     logits = outputs.logits.unsqueeze(1)
     preds = torch.nn.functional.interpolate(logits, size=(720, 1280), mode="bilinear")
     probs = torch.sigmoid(preds[0][0])
-    mask = (probs > 0.35).cpu().numpy().astype(bool)
+    mask = (probs > 0.25).cpu().numpy().astype(bool)  # znižan prag
 
     contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -480,59 +430,15 @@ def process_single_frame(color_image, depth_frame_raw):
 
     return u, v, raw_x_mm, raw_y_mm, largest_contour, color_filtered, color_image
 
-
-def run_measurement(color_frame=None, depth_frame=None):
-    """
-    Izvede meritev na podanih okvirjih (ali, če je ENABLE_AVERAGING True, povpreči več slik).
-    Vrne (vis_img, coords, raw_color_img, contour, u, v, text_lines) ali None.
-    """
-    if ENABLE_AVERAGING:
-        print(f"[DEBUG] Povprečenje vklopljeno ({NUM_SAMPLES} slik)")
-        x_list, y_list = [], []
-        last_vis_img = None
-        last_raw_color = None
-        last_contour = None
-        last_u, last_v = 640, 360
-
-        for _ in range(NUM_SAMPLES):
-            frames = pipeline.wait_for_frames()
-            aligned_frames = align.process(frames)
-            c_frame = aligned_frames.get_color_frame()
-            d_frame = aligned_frames.get_depth_frame()
-            if not c_frame or not d_frame:
-                continue
-            c_img = np.asanyarray(c_frame.get_data())
-            res = process_single_frame(c_img, d_frame)
-            if res is not None:
-                u, v, raw_x, raw_y, contour, filtered_c_img, raw_color_img = res
-                x_list.append(raw_x)
-                y_list.append(raw_y)
-                last_vis_img = filtered_c_img.copy()
-                last_raw_color = raw_color_img.copy()
-                last_contour = contour
-                last_u, last_v = u, v
-
-        if not x_list:
-            return None
-
-        avg_raw_x = np.median(x_list)
-        avg_raw_y = np.median(y_list)
-        u, v = last_u, last_v
-        vis_img = last_vis_img
-        raw_color_img = last_raw_color
-        contour = last_contour
-        raw_x, raw_y = avg_raw_x, avg_raw_y
-        mode_label = f"POVPREČJE ({len(x_list)} slik)"
-    else:
-        if color_frame is None or depth_frame is None:
-            return None
-        c_img = np.asanyarray(color_frame.get_data())
-        res = process_single_frame(c_img, depth_frame)
-        if res is None:
-            return None
-        u, v, raw_x, raw_y, contour, filtered_c_img, raw_color_img = res
-        vis_img = filtered_c_img.copy()
-        mode_label = "POSAMEZNA SLIKA"
+def run_measurement(color_frame, depth_frame):
+    """Izvede meritev na enem okvirju (brez povprečenja)."""
+    c_img = np.asanyarray(color_frame.get_data())
+    res = process_single_frame(c_img, depth_frame)
+    if res is None:
+        return None
+    u, v, raw_x, raw_y, contour, filtered_c_img, raw_color_img = res
+    vis_img = filtered_c_img.copy()
+    mode_label = "POSAMEZNA SLIKA"
 
     # Narišemo konturo in točko na sliko za prikaz
     if contour is not None:
@@ -565,44 +471,34 @@ def run_measurement(color_frame=None, depth_frame=None):
 
     return vis_img, coords, raw_color_img, contour, u, v, text_lines
 
-
-# ==============================================================================
-# NIT ZA ASINHRONO SEGMENTACIJO
-# ==============================================================================
-def vision_thread_func(color_frame, depth_frame):
-    """Ciljna funkcija za nit – izvede meritev in nastavi globalne rezultate."""
-    global vision_ready, vision_result, vision_active
-    try:
-        res = run_measurement(color_frame, depth_frame)
-        with vision_lock:
-            vision_result = res
-            vision_ready = True
-    except Exception as e:
-        print(f"[SEGMENTACIJA] Napaka: {e}")
-        with vision_lock:
-            vision_result = None
-            vision_ready = True
-    finally:
-        # Po koncu niti ne spreminjamo vision_active; to bo glavna zanka obravnavala
-        pass
-
+def create_preview_frame(color_image, depth_image):
+    """Ustvari sliko za preview: levo barva, desno globina (filtrirano po razdalji)."""
+    color_filt, depth_filt = filter_by_distance(color_image, depth_image)
+    depth_colormap = cv2.applyColorMap(
+        cv2.convertScaleAbs(depth_filt, alpha=0.08), cv2.COLORMAP_JET
+    )
+    preview = np.hstack((color_filt, depth_colormap))
+    # Dodamo napise
+    cv2.putText(preview, f"COLOR ({MIN_DISTANCE_MM}-{MAX_DISTANCE_MM}mm)", (30, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(preview, f"DEPTH ({MIN_DISTANCE_MM}-{MAX_DISTANCE_MM}mm)", (1310, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    # Napis za gumbe
+    cv2.putText(preview, "A: Segmentacija | X: Sprejmi | B: Zavrni | RB: Zapri", (30, 700),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    return preview
 
 # ==============================================================================
 # GLAVNI PROGRAM
 # ==============================================================================
 def main():
-    global vision_active, vision_ready, vision_result, pipeline, mode_change_requested, temp_timestamp
-
-    # --- Inicializacija serijske povezave (ni nujno, da je odprta) ---
-    try:
-        ser_test = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        ser_test.close()
-        print(f"[DEBUG] Serijski port {SERIAL_PORT} dosegljiv.")
-    except:
-        print(f"[OPOZORILO] Serijski port {SERIAL_PORT} ni na voljo – pošiljanje na STM32 ne bo delovalo.")
+    global pipeline, vision_window_open, vision_preview_mode, vision_segmentation_result
+    global cycle_timestamp, mode_change_requested, timestamp_temp
+    global current_angle, old_current_angle, delta_angle
+    global last_color_frame, last_depth_frame
 
     # --- Inicializacija PLC ---
-    print("Povezovanje s PLC-jem ...")
+    print("Povezovanje s PLC-jem...")
     plc = pyads.Connection(PLC_AMS_ID, pyads.PORT_TC3PLC1, PLC_IP)
     try:
         plc.open()
@@ -623,21 +519,17 @@ def main():
     gamepad = SimpleGamepadPygame()
     gamepad.print_instructions()
 
-    # --- OpenCV okno ---
+    # --- OpenCV okno (sprva zaprto) ---
     cv2.namedWindow("Segmentacija", cv2.WINDOW_NORMAL)
-    cv2.startWindowThread()
-    cv2.destroyWindow("Segmentacija")  # sprva zapremo
+    cv2.destroyWindow("Segmentacija")
 
     # --- Spremenljivke za zanko ---
-    cycle_timestamp = 0.0
     loop_rate = 0.02  # 50 Hz
     prev_plc_state = -1
-    old_plc_mode = 0
-
-    # Stanje gumbov za robno detekcijo
     prev_rb_state = False
-    prev_hat_y = 0
-    prev_hat_x = 0
+    prev_a_state = False
+    prev_x_state = False
+    prev_b_state = False
 
     print("Krmiljenje aktivno. Pritisnite Ctrl+C za izhod.")
 
@@ -657,6 +549,9 @@ def main():
                     aligned_frames = align.process(frames)
                     color_frame = aligned_frames.get_color_frame()
                     depth_frame = aligned_frames.get_depth_frame()
+                    if color_frame and depth_frame:
+                        last_color_frame = color_frame
+                        last_depth_frame = depth_frame
                 except Exception:
                     pass
 
@@ -666,122 +561,116 @@ def main():
             gamepad.update_and_log()
 
             # ------------------------------------------------------------
-            # 3. Obdelava RB gumba (gumb 5) – zagon / preklic segmentacije
+            # 3. Obdelava gumbov za upravljanje segmentacije
             # ------------------------------------------------------------
             rb_pressed = False
+            a_pressed = False
+            x_pressed = False
+            b_pressed = False
             if gamepad.joystick:
                 rb_pressed = bool(gamepad.joystick.get_button(5))
+                a_pressed = bool(gamepad.joystick.get_button(0))
+                x_pressed = bool(gamepad.joystick.get_button(2))
+                b_pressed = bool(gamepad.joystick.get_button(1))
 
-            if rb_pressed and not prev_rb_state:  # robni prehod 0→1
-                if not vision_active:
-                    # Zaženi segmentacijo v ozadju
-                    if pipeline is not None and color_frame is not None and depth_frame is not None:
-                        print("[SEGMENTACIJA] Zagon meritve ...")
-                        vision_active = True
-                        vision_ready = False
-                        vision_result = None
-                        # Kopiramo okvirje, da jih nit uporabi
-                        thr = threading.Thread(target=vision_thread_func,
-                                               args=(color_frame, depth_frame),
-                                               daemon=True)
-                        thr.start()
+            # --- RB: odpri/zapri okno ---
+            if rb_pressed and not prev_rb_state:
+                if not vision_window_open:
+                    # Odpri okno
+                    if pipeline is not None and last_color_frame is not None:
+                        print("[PREVIEW] Odpiram okno s preview.")
+                        vision_window_open = True
+                        vision_preview_mode = True
+                        vision_segmentation_result = None
+                        cv2.namedWindow("Segmentacija", cv2.WINDOW_NORMAL)
                     else:
-                        print("[SEGMENTACIJA] Kamera ni na voljo.")
+                        print("[PREVIEW] Kamera ni na voljo.")
                 else:
-                    # Če je že aktivna (prikaz rezultata ali čakanje), prekliči
-                    #if vision_ready:
-                    # zapri okno in izbriši rezultat
+                    # Zapri okno
+                    print("[PREVIEW] Zapiram okno.")
+                    vision_window_open = False
+                    vision_preview_mode = True
+                    vision_segmentation_result = None
                     cv2.destroyWindow("Segmentacija")
-                    with vision_lock:
-                        vision_result = None
-                        vision_ready = False
-                    vision_active = False
-                    print("[SEGMENTACIJA] Preklicano.")
-                    #else:
-                    # segmentacija še teče – ne moremo prekiniti, vendar lahko spremenimo stanje?
-                    #    print("[SEGMENTACIJA] Meritev že poteka, počakajte.")
-                        
             prev_rb_state = rb_pressed
 
-            # ------------------------------------------------------------
-            # 4. Preverimo, ali je segmentacija končana (vision_ready)
-            # ------------------------------------------------------------
-            if vision_ready and vision_active:
-                with vision_lock:
-                    res = vision_result
-                    vision_ready = False
-                if res is not None:
-                    # Prikaži rezultat
-                    vis_img, coords, raw_color_img, contour, u, v, text_lines = res
-                    cv2.imshow("Segmentacija", vis_img)
-                    # Shranimo podatke za kasnejšo uporabo
-                    # (shranimo jih v spremenljivke, ki jih bomo uporabili ob D-pad)
-                    # Uporabimo kar globalne spremenljivke ali pa jih shranimo v gamepad?
-                    # Za preprostost bomo uporabili spremenljivke zunaj zanke:
-                    # Uporabimo kar closure, vendar bomo morali shraniti v zunanje spremenljivke
-                    # Ker smo v zanki, jih lahko shranimo v lokalne spremenljivke, vendar morajo biti dosegljive
-                    # v naslednjih iteracijah. Uporabimo kar globalne spremenljivke.
-                    global _last_vis_result
-                    _last_vis_result = res
-                    print("[SEGMENTACIJA] Rezultat prikazan. Uporabite D-pad GOR/DOL ali RB za preklic.")
-                else:
-                    print("[SEGMENTACIJA] Meritev ni uspela (ni zaznanega objekta).")
-                    vision_active = False
-                    cv2.destroyWindow("Segmentacija")
+            # --- Če je okno odprto, obdelaj ostale gumbe ---
+            if vision_window_open:
+                # A: sproži segmentacijo (samo v preview načinu)
+                if a_pressed and not prev_a_state and vision_preview_mode:
+                    if last_color_frame is not None and last_depth_frame is not None:
+                        print("[SEGMENTACIJA] Zaganjam segmentacijo...")
+                        # Izvedemo meritev sinhrono (ker je hitra, lahko blokiramo)
+                        res = run_measurement(last_color_frame, last_depth_frame)
+                        if res is not None:
+                            vis_img, coords, raw_color_img, contour, u, v, text_lines = res
+                            vision_segmentation_result = res
+                            vision_preview_mode = False
+                            print("[SEGMENTACIJA] Rezultat prikazan. Uporabi X za sprejem, B za zavrnitev.")
+                        else:
+                            print("[SEGMENTACIJA] Meritev ni uspela (ni zaznanega objekta).")
+                            # Prikažemo obvestilo na preview
+                            preview = create_preview_frame(
+                                np.asanyarray(last_color_frame.get_data()),
+                                np.asanyarray(last_depth_frame.get_data())
+                            )
+                            cv2.putText(preview, "NI ZAZNANEGA OBJEKTA!", (300, 360),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                            cv2.imshow("Segmentacija", preview)
+                    else:
+                        print("[SEGMENTACIJA] Ni na voljo slik.")
+                prev_a_state = a_pressed
 
-            # ------------------------------------------------------------
-            # 5. Če je rezultat prikazan, obdelaj D-pad in RB za akcije
-            # ------------------------------------------------------------
-            if vision_active and vision_ready is False and hasattr(gamepad, 'hat_y'):
-                # Preberemo trenutno stanje hat iz gamepad objekta (že posodobljeno v update_and_log)
-                hat_y = gamepad.hat_y
-                hat_x = gamepad.hat_x
-
-                # Robna detekcija za D-pad gor (y=1) in dol (y=-1)
-                if hat_y == 1 and prev_hat_y != 1:
-                    # Pošlji koordinate
-                    if '_last_vis_result' in globals() and globals()['_last_vis_result'] is not None:
-                        _, coords, _, _, _, _, _ = globals()['_last_vis_result']
+                # X: sprejmi rezultat (pošlji na STM32) in vrni v preview
+                if x_pressed and not prev_x_state and not vision_preview_mode:
+                    if vision_segmentation_result is not None:
+                        _, coords, _, _, _, _, _ = vision_segmentation_result
                         x, y, z, o = coords
                         send_to_stm32(x, y, z, o)
-                        # Po pošiljanju zapri segmentacijo
-                        cv2.destroyWindow("Segmentacija")
-                        vision_active = False
-                        print("[SEGMENTACIJA] Koordinate poslane. Zapiranje.")
-                elif hat_y == -1 and prev_hat_y != -1:
-                    # Shrani sliko
-                    if '_last_vis_result' in globals() and globals()['_last_vis_result'] is not None:
-                        _, _, raw_color_img, contour, u, v, text_lines = globals()['_last_vis_result']
-                        save_full_color_image(raw_color_img, contour, u, v, text_lines)
-                        cv2.destroyWindow("Segmentacija")
-                        vision_active = False
-                        print("[SEGMENTACIJA] Slika shranjena. Zapiranje.")
+                        print("[SEGMENTACIJA] Koordinate poslane. Vračam se v preview.")
+                        vision_preview_mode = True
+                        vision_segmentation_result = None
+                    else:
+                        print("[SEGMENTACIJA] Ni rezultata za sprejeti.")
+                prev_x_state = x_pressed
 
+                # B: zavrni rezultat in vrni v preview
+                if b_pressed and not prev_b_state and not vision_preview_mode:
+                    print("[SEGMENTACIJA] Rezultat zavrnjen. Vračam se v preview.")
+                    vision_preview_mode = True
+                    vision_segmentation_result = None
+                prev_b_state = b_pressed
 
-                prev_hat_y = hat_y
-                prev_hat_x = hat_x
-
-                # Če je RB ponovno pritisnjen, prekličemo (že obdelano zgoraj)
-                # Dodatno: če pritisnemo katerikoli drug gumb (razen D-pad), morda ignoriramo
-                # Ali pa prekličemo ob kateremkoli gumbu? Po navodilih naj bi samo RB preklical.
+                # --- Prikaz v oknu ---
+                if vision_window_open:
+                    if vision_preview_mode:
+                        # Prikaži preview
+                        if last_color_frame is not None and last_depth_frame is not None:
+                            c_img = np.asanyarray(last_color_frame.get_data())
+                            d_img = np.asanyarray(last_depth_frame.get_data())
+                            preview = create_preview_frame(c_img, d_img)
+                            cv2.imshow("Segmentacija", preview)
+                    else:
+                        # Prikaži rezultat segmentacije
+                        if vision_segmentation_result is not None:
+                            vis_img, _, _, _, _, _, _ = vision_segmentation_result
+                            cv2.imshow("Segmentacija", vis_img)
+                    cv2.waitKey(1)
 
             # ------------------------------------------------------------
-            # 6. Pošiljanje PLC podatkov
+            # 4. Pošiljanje PLC podatkov (med odprtim oknom zaustavimo vožnjo)
             # ------------------------------------------------------------
-            # Vedno pošljemo timestamp (watchdog)
+            # WATCHDOG
             if plc is not None:
                 try:
-                    #print("game pad :",gamepad.plc_state)
                     plc.write_by_name('MAIN.CartContol.data.timeStamp', cycle_timestamp, pyads.PLCTYPE_LREAL)
                 except Exception as e:
                     print(f"[PLC] Napaka pri timestampu: {e}")
 
-            # Če je vision_active (segmentacija v teku ali prikaz rezultata), pošljemo zaustavitev
-            if vision_active:
-                # Pošljemo ukaz za zaustavitev (hitrost 0, e-stop?)
+            # Če je okno odprto, pošljemo zaustavitev
+            if vision_window_open:
                 try:
                     if plc is not None:
-                        # Pošljemo podatke za zaustavitev
                         master_data = [
                             cycle_timestamp,   # 1
                             0.0,               # 2 masterSwich OFF
@@ -792,31 +681,21 @@ def main():
                             2.0, 2.0, 2.0,     # 13-15 dodatna oprema stop
                             0.0                # 16 steeringMode
                         ]
-                        print("5")
-                        print("vision active:",vision_active)
-                        print("vision ready:",vision_ready)
                         plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
-                        # Poskrbimo še za hitrost 0
                         plc.write_by_name("MAIN.CartContol.data.hitrost_ms", 0.0, pyads.PLCTYPE_LREAL)
                 except Exception as e:
                     print(f"[PLC] Napaka pri pošiljanju zaustavitve: {e}")
             else:
-                # Normalno krmiljenje
+                # Normalno krmiljenje (iz mobilna_drive_main.py)
                 if gamepad.plc_state != prev_plc_state:
                     try:
                         if plc is not None:
                             if gamepad.plc_state == 1:
-                                print("4")
-                                print("vision active:",vision_active)
-                                print("vision ready:",vision_ready)
                                 plc.write_by_name('MAIN.MasterContol.data.mode', 1, pyads.PLCTYPE_LREAL)
                                 plc.write_by_name('MAIN.MasterContol.data.masterSwich', 1, pyads.PLCTYPE_LREAL)
                                 plc.write_by_name('MAIN.MasterContol.data.steeringMode', gamepad.selected_mode, pyads.PLCTYPE_LREAL)
                                 print(f"PLC: START (mode {gamepad.selected_mode})")
                             else:
-                                print("3")
-                                print("vision active:",vision_active)
-                                print("vision ready:",vision_ready)
                                 plc.write_by_name('MAIN.MasterContol.data.mode', 0, pyads.PLCTYPE_LREAL)
                                 plc.write_by_name('MAIN.MasterContol.data.masterSwich', 0, pyads.PLCTYPE_LREAL)
                                 print("PLC: STOP")
@@ -824,9 +703,8 @@ def main():
                     except Exception as e:
                         print(f"[PLC] Napaka pri vpisu stanja: {e}")
 
-                # Ostali podatki ob spremembah
-                if gamepad.has_changed and not gamepad.mode_changed:
-                    # Pošiljamo samo, če ni mode_changed (mode spremenimo posebej)
+                # Ob spremembah (hitrost, kot) pošiljamo podatke
+                if gamepad.has_changed and not mode_change_requested:
                     if gamepad.e_stop == 0 and gamepad.drive_mode == 1.0 and gamepad.selected_mode != 5.0:
                         master_data = [
                             cycle_timestamp,
@@ -838,50 +716,56 @@ def main():
                             0.0, 0.0, 0.0,
                             gamepad.selected_mode
                         ]
-                        cart_data = [
-                            cycle_timestamp,
-                            gamepad.y_axis,
-                            0.0,  # delta angle (ni v uporabi)
-                            0.0, 0.0, 0.0, 0.0
-                        ]
                         try:
                             if plc is not None:
-                                print("2")
-                                print("vision active:",vision_active)
-                                print("vision ready:",vision_ready)
                                 plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
-                                plc.write_by_name("MAIN.CartContol.dataArray[0]", cart_data[0], pyads.PLCTYPE_LREAL)
-                                plc.write_by_name("MAIN.CartContol.dataArray[1]", cart_data[1], pyads.PLCTYPE_LREAL)
-                                # ostale ne pošiljamo
+                                plc.write_by_name("MAIN.CartContol.dataArray[0]", cycle_timestamp, pyads.PLCTYPE_LREAL)
+                                plc.write_by_name("MAIN.CartContol.dataArray[1]", gamepad.y_axis, pyads.PLCTYPE_LREAL)
+                                # Pošiljanje kota (delta_angle) samo ob spremembi
+                                if abs(delta_angle) >= angle_step:
+                                    print(f"Zavijam na PLC -> Kot: {current_angle}°")
+                                    plc.write_by_name('STEERING.WHEEL_1_ANG_REF', current_angle, pyads.PLCTYPE_LREAL)
+                                    old_current_angle = current_angle
+                                    delta_angle = 0.0
                         except Exception as e:
                             print(f"[PLC] Napaka pri pisanju: {e}")
+                    else:
+                        # Če ni pogojev za vožnjo, pošljemo zaustavitev
+                        try:
+                            if plc is not None:
+                                master_data = [
+                                    cycle_timestamp,
+                                    0.0, 0.0, 0.0,
+                                    2.0, 2.0, 2.0, 2.0,
+                                    2.0, 2.0, 2.0, 2.0,
+                                    2.0, 2.0, 2.0,
+                                    0.0
+                                ]
+                                plc.write_by_name("MAIN.MasterContol.dataArray", master_data, pyads.PLCTYPE_LREAL*16)
+                                plc.write_by_name("MAIN.CartContol.data.hitrost_ms", 0.0, pyads.PLCTYPE_LREAL)
+                        except Exception as e:
+                            print(f"[PLC] Napaka pri pisanju zaustavitve: {e}")
 
-                # Če je prišlo do spremembe načina (gumbi X,Y,B), pošljemo mode
+                # Obdelava mode_change_requested (počakamo, da se kolesa ustavijo)
                 if mode_change_requested:
                     try:
-                        if plc is not None and mode_change_requested:
-                            print("1")
-                            print("vision active:",vision_active)
-                            print("vision ready:",vision_ready)
-
-                            if gamepad.mode_changed:
-                                temp_timestamp=cycle_timestamp
-
-                            if ((cycle_timestamp-temp_timestamp)>=50):
+                        if plc is not None:
+                            if (cycle_timestamp - timestamp_temp) >= 50:
                                 plc.write_by_name('MAIN.MasterContol.data.steeringMode', gamepad.selected_mode, pyads.PLCTYPE_LREAL)
                                 print(f"PLC: mode nastavljen na {gamepad.selected_mode}")
-                                mode_change_requested=False
-
+                                mode_change_requested = False
+                            else:
+                                # Med čakanjem pošljemo hitrost 0
+                                plc.write_by_name('MAIN.CartContol.data.hitrost_ms', 0.0, pyads.PLCTYPE_LREAL)
                     except Exception as e:
                         print(f"[PLC] Napaka pri pisanju mode: {e}")
 
             # ------------------------------------------------------------
-            # 7. OpenCV osveževanje okna (waitKey)
+            # 5. OpenCV osveževanje okna (waitKey) – že narejeno zgoraj
             # ------------------------------------------------------------
-            cv2.waitKey(1)
 
             # ------------------------------------------------------------
-            # 8. Zakasnitev za želeno frekvenco
+            # 6. Zakasnitev za želeno frekvenco
             # ------------------------------------------------------------
             elapsed = time.time() - start_time
             time.sleep(max(0.0, loop_rate - elapsed))
@@ -897,7 +781,6 @@ def main():
             plc.close()
         pygame.quit()
         print("[INFO] Program končan.")
-
 
 if __name__ == "__main__":
     main()
