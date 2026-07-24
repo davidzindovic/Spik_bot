@@ -508,6 +508,8 @@ float igla_sklop_offset=219;//v mm
 
 _Bool calibrate_flag=0;
 _Bool switch_test=0;
+_Bool tof_test=0;
+_Bool spik_test=0;
 
 _Bool manual_mode_flag=0;
 _Bool manual_mode_array[8]={0,0,0,0,0,0,0,0};
@@ -1008,6 +1010,7 @@ int main(void) {
     		"  calibrate   -> Izvede kalibracijo\r\n"
     		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
     		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+    		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
     		"----------------------------------------------------------------------\r\n"
             " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
     		"----------------------------------------------------------------------\r\n\r\n";
@@ -1041,7 +1044,7 @@ int main(void) {
 
  //tof
 		//while(1){
- 		            if (vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)
+ 		            if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||spik_test)
  		            {
 		                vl53_data_ready = 0;
 		                trenutna_razdalja = VL53L0X_ReadDistance();
@@ -1117,6 +1120,16 @@ if (switch_test==1)
 }
 //-----------------------------END--------------------------
 
+//---------------------------tof test----------------------
+ if (vl53_data_ready && tof_test)
+ {
+    vl53_data_ready = 0;
+    trenutna_razdalja = VL53L0X_ReadDistance();
+    char debug_msg2[64];
+    snprintf(debug_msg2, sizeof(debug_msg2), "Razdalja: %u mm \r\n", trenutna_razdalja);
+    serial_print_string(debug_msg2);
+    tof_test=0;
+ }
 
 		/*
 		if(read_switch(3))serial_print_string("Stikalo dc motorja pritisnjeno.\r\n");
@@ -5689,7 +5702,16 @@ void USART3_IRQHandler(void)
 	                        	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
 	                        }
 	                    }
-
+						//------------tof test---------------
+	                    else if((strcasecmp((char*)uart3_rx_buffer, "tof") == 0))
+						{
+							tof_test=!tof_test;
+						}
+	                    //------------spikanje---------------
+	                    else if((strcasecmp((char*)uart3_rx_buffer, "spik") == 0))
+						{
+							spik_test=!spik_test;
+						}
 	                    //----------kalibracija-------
 	                    else if(strcasecmp((char*)uart3_rx_buffer, "calibrate") == 0)
 	                    {
@@ -6204,11 +6226,11 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 /* Linearna prilagoditev hitrosti med 200 (min hitrost za premik) in 950 (max) */
                 //float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
                 //calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
-            		dc_motor_speed=-900;
+            		dc_motor_speed=900;
             }
             	else
             	{
-            		dc_motor_speed=-200;
+            		dc_motor_speed=200;
             	}
 
             /* Varnostna omejitev, da ne preseže maksimalnega ARR časovnika (999) */
@@ -6216,8 +6238,9 @@ void DC_Motor_Update(uint16_t distance_mm) {
             //if (calculated_speed < 200) calculated_speed = 200;
 
             /* Nastavimo hitrost za vožnjo naprej (pozitivna vrednost) */
-            DC_Motor_Set_Speed(calculated_speed);
-            serial_print_string("Priblizujem se oviri.\r\n");
+			serial_print_string("Priblizujem se oviri.\r\n");
+			DC_Motor_Set_Speed(calculated_speed);
+
             break;
         }
 
@@ -6256,11 +6279,13 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 zagon_izvedbe = false;
                 serial_print_string("Umaknjen na varno razdaljo.\r\n");
                 premik_done=0; //ponastavimo zastavico za kinematiko
+                spik_test=0;
                 break;
             }
 
             /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            dc_motor_speed=900;
+            serial_print_string("FUra nazaj.\r\n");
+            dc_motor_speed=-900;
             DC_Motor_Set_Speed(dc_motor_speed);
             break;
         }
