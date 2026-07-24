@@ -115,8 +115,8 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      120U     /* below this: stop (unless reversing out) */
-#define DC_DIST_MAX_MM      150U    /* above this: stop (unless forwarding back) */
+#define DC_DIST_MIN_MM      85U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MAX_MM      165U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
  *
@@ -733,7 +733,7 @@ int main(void) {
 	    //.end_switch2_pin = GPIO_PIN_15,//D9
 	    //.end_switch2_port = GPIOH,
 		.unit_conversion=100, //steps per mm
-		.travel_length=530, //mm
+		.travel_length=630, //mm
 		.num_steps_per_turn=40000/*,
 		.num_turns_from_encoder=0,
 		.encoder_A_state = 0,
@@ -1057,6 +1057,7 @@ int main(void) {
 		                	//serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
 		                }
+		                /*
 		                else if (read_switch(3))
 		                {
 		                	//serial_print_string("Koncno stikalo pritisnjeno, umikam...\r\n");
@@ -1067,14 +1068,15 @@ int main(void) {
 		                	DC_Motor_Set_Speed(0);
 		                	dc_motor_speed=-dc_motor_speed; //nastavimo hitrost nazaj na originalno
 		                }
+		                */
 		                else
 		                {
 		                	DC_Motor_Update(trenutna_razdalja);
 		                }
 
-		                //char debug_msg[64];
-		                //snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
-		                //serial_print_string(debug_msg);
+		                char debug_msg[64];
+		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
+		                serial_print_string(debug_msg);
  		            }
 
 
@@ -6202,11 +6204,11 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 /* Linearna prilagoditev hitrosti med 200 (min hitrost za premik) in 950 (max) */
                 //float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
                 //calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
-            		dc_motor_speed=900;
+            		dc_motor_speed=-900;
             }
             	else
             	{
-            		dc_motor_speed=200;
+            		dc_motor_speed=-200;
             	}
 
             /* Varnostna omejitev, da ne preseže maksimalnega ARR časovnika (999) */
@@ -6258,7 +6260,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
             }
 
             /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            dc_motor_speed=-900;
+            dc_motor_speed=900;
             DC_Motor_Set_Speed(dc_motor_speed);
             break;
         }
