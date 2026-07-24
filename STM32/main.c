@@ -481,8 +481,12 @@ typedef struct {
 volatile BoundingBox_t robot_bbox = {
     .min_x = -530/2,
     .max_x = 530/2,
-    .min_y = 90,     // Y je lahko samo pozitiven
-    .max_y = 90+105+150
+    //.min_y = 90,     // Y je lahko samo pozitiven
+    //.max_y = 90+105+150
+
+	.min_y=290,
+	.max_y=400
+
 };
 
 // Željene ciljne koordinate (nastavljene preko UART)
@@ -544,7 +548,8 @@ void uart_print_current_targets(void) {
     current_y=sin((90-current_o)*PI/180)*izteg;
 	*/
 
-    float trenutni_izteg=motors[2].position/motors[2].unit_conversion-motors[2].offset;
+    //float trenutni_izteg=motors[2].position/motors[2].unit_conversion-motors[2].offset;
+    float trenutni_izteg=motors[2].position/motors[2].unit_conversion+motors[2].offset+igla_sklop_offset;
 
     current_o=motors[1].position/motors[1].unit_conversion-motors[1].travel_length/2;
     current_y=trenutni_izteg*sin((90-current_o)*PI/180);
@@ -760,7 +765,7 @@ int main(void) {
 		.starting_position=5000,
 		.position = 0,
 		.target_position=0,
-		.offset=90,//tukaj offset v deg?
+		.offset=90,//os vrtenja do konc spindla
 		.running = false,
 		.reset_requested = false,
 		.reset_completed = false,
@@ -1049,16 +1054,16 @@ int main(void) {
 		                if (false_read_tof>20)
 		                {
 		                	false_read_tof=0;
-		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
+		                	//serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
 		                }
 		                else if (read_switch(3))
 		                {
-		                	serial_print_string("Koncno stikalo pritisnjeno, umikam...\r\n");
+		                	//serial_print_string("Koncno stikalo pritisnjeno, umikam...\r\n");
 		                	DC_Motor_Set_Speed(0);
 		                	dc_motor_speed=-dc_motor_speed;
 		                	DC_Motor_Set_Speed(dc_motor_speed);
-		                	while(read_switch(3)){}//pocakamo da se umakne dovolj stran
+		                	//while(read_switch(3)){}//pocakamo da se umakne dovolj stran
 		                	DC_Motor_Set_Speed(0);
 		                	dc_motor_speed=-dc_motor_speed; //nastavimo hitrost nazaj na originalno
 		                }
@@ -4912,12 +4917,15 @@ void execute_robot_movement(void)
 
 
     //izračun potrebnih kotov
-    izteg=sqrt(pow(target_y/cos(target_o*PI/180),2))-motors[2].offset;
+    //izteg=sqrt(pow(target_y/cos(target_o*PI/180),2))-motors[2].offset;
+    izteg=sqrt(pow(target_y/cos(target_o*PI/180),2))+motors[2].offset+igla_sklop_offset;
 
     //target_x,target_y,target_o=tocka!!! ločeno se spremeni v premik motorja
     motors[0].target_position = (int32_t)((target_x-cos((90-target_o)*PI/180)*izteg) * motors[0].unit_conversion+motors[0].max_position/2);
+
     motors[1].target_position = (int32_t)(target_o * motors[1].unit_conversion+motors[1].max_position/2);
-    //motors[2].target_position = (int32_t)((((target_y-motors[2].offset)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion);
+
+    //staro://motors[2].target_position = (int32_t)((((target_y-motors[2].offset)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion);
     motors[2].target_position = (int32_t)((((target_y)/sin((90-target_o)*PI/180))) * motors[2].unit_conversion+motors[2].home_position);
 
 
@@ -5626,12 +5634,58 @@ void USART3_IRQHandler(void)
 									"\r\nManual mode izklopljen.\r\n";
 
 								HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+
+								char menu1[] =
+										"\r\n==================================================================\r\n"
+										//" KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
+										"======================================================================\r\n"
+										" Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
+										"  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
+										"  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
+										"  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
+										"  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
+										"  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
+										"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
+										"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+										"  calibrate   -> Izvede kalibracijo\r\n"
+										"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
+										"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+										"----------------------------------------------------------------------\r\n"
+										" Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
+										"----------------------------------------------------------------------\r\n\r\n";
+
+								HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+
 	                    	}
 	                    }
 						//konc
 	                    else if((strcasecmp((char*)uart3_rx_buffer, "stikala") == 0)||(strcasecmp((char*)uart3_rx_buffer, "sw") == 0))
 	                    {
 	                        switch_test=!switch_test;
+
+	                        if(switch_test==0)
+	                        {
+	                            char menu[] =
+	                                    "\r\n==================================================================\r\n"
+	                                    //" KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
+	                                    "======================================================================\r\n"
+	                                    " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
+	                                    "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
+	                                    "  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
+	                                    "  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
+	                                    "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
+	                                    "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
+	                            		"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
+	                            		"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+	                            		"  calibrate   -> Izvede kalibracijo\r\n"
+	                            		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
+	                            		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+	                            		"----------------------------------------------------------------------\r\n"
+	                                    " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
+	                            		"----------------------------------------------------------------------\r\n\r\n";
+
+	                        	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+	                        }
 	                    }
 
 	                    //----------kalibracija-------
@@ -5650,10 +5704,11 @@ void USART3_IRQHandler(void)
 	                    else
 	                    {
 	                        // Stara regulacija tlaka (opcijsko)
-	                        target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
-	                        char echo[64];
-	                        snprintf(echo, sizeof(echo), "\r\nPritisk set: %.2f\r\n", target_pressure);
-	                        HAL_UART_Transmit(&huart3, (uint8_t*)echo, strlen(echo), 100);
+
+	                    	//target_pressure = parse_float_from_string((char*)uart3_rx_buffer);
+	                        //char echo[64];
+	                        //snprintf(echo, sizeof(echo), "\r\nPritisk set: %.2f\r\n", target_pressure);
+	                        //HAL_UART_Transmit(&huart3, (uint8_t*)echo, strlen(echo), 100);
 	                    }
 
 	                    // Reset bufferja
