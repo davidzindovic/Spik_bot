@@ -500,7 +500,10 @@ _Bool lin_motor_running=0;
 
 int16_t dc_motor_speed=0;
 
-float igla_sklop_offset=150;//v mm
+float igla_sklop_offset=219;//v mm
+
+_Bool calibrate_flag=0;
+_Bool switch_test=0;
 
 _Bool manual_mode_flag=0;
 _Bool manual_mode_array[8]={0,0,0,0,0,0,0,0};
@@ -541,11 +544,11 @@ void uart_print_current_targets(void) {
     current_y=sin((90-current_o)*PI/180)*izteg;
 	*/
 
-    izteg=motors[2].position/motors[2].unit_conversion;
+    float trenutni_izteg=motors[2].position/motors[2].unit_conversion-motors[2].offset;
 
     current_o=motors[1].position/motors[1].unit_conversion-motors[1].travel_length/2;
-    current_y=izteg*sin((90-current_o)*PI/180);
-    current_x=izteg*cos((90-current_o)*PI/180)+motors[0].position/motors[0].unit_conversion-motors[0].travel_length/2;
+    current_y=trenutni_izteg*sin((90-current_o)*PI/180);
+    current_x=trenutni_izteg*cos((90-current_o)*PI/180)+motors[0].position/motors[0].unit_conversion-motors[0].travel_length/2;
 
     volatile int32_t print_target_y=target_y+motors[2].offset+igla_sklop_offset;
 
@@ -968,7 +971,7 @@ int main(void) {
 	DC_Motor_Init(); //dodaj pull down upor
     DC_Motor_Set_Speed(0);
 
-	calibrate_all_motors();
+
 
 /*
     while(1)
@@ -987,7 +990,7 @@ int main(void) {
 
     char menu[] =
             "\r\n==================================================================\r\n"
-            " KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
+            //" KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
             "======================================================================\r\n"
             " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
             "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
@@ -996,6 +999,10 @@ int main(void) {
             "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
             "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
     		"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
+    		"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+    		"  calibrate   -> Izvede kalibracijo\r\n"
+    		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
+    		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
     		"----------------------------------------------------------------------\r\n"
             " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
     		"----------------------------------------------------------------------\r\n\r\n";
@@ -1080,6 +1087,29 @@ if (manual_mode_flag==1)
 	robot_control_manually();//interupti stikal, 1 za rewirat
 }
 //--------------------------END-------------------------------------
+
+//-----------------------CALIBRATION MODE-----------------
+if (calibrate_flag==1)
+{
+	calibrate_all_motors();//interupti stikal, 1 za rewirat
+	calibrate_flag=0;
+}
+//-----------------------------END--------------------------
+
+//-----------------------CALIBRATION MODE-----------------
+if (switch_test==1)
+{
+   	_Bool sw0=read_switch(0);
+	_Bool sw1=read_switch(1);
+	_Bool sw2=read_switch(2);
+	_Bool sw3=read_switch(3);
+	char debug_msg[100];
+	snprintf(debug_msg, sizeof(debug_msg), " SW0: %u | SW1: %u | SW2: %u | SW3: %u \r\n", sw0,sw1,sw2,sw3);
+	serial_print_string(debug_msg);
+	HAL_Delay(200);
+}
+//-----------------------------END--------------------------
+
 
 		/*
 		if(read_switch(3))serial_print_string("Stikalo dc motorja pritisnjeno.\r\n");
@@ -4927,7 +4957,7 @@ void execute_robot_movement(void)
         // Varnostni izhod ob sprožitvi stikal
         if (motors[0].end_switch_triggered || motors[1].end_switch_triggered) {
             stop_all_motors();
-            serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom X/Y!\r\n");
+            serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom X/O!\r\n");
             return;
         }
 
@@ -4962,7 +4992,7 @@ void execute_robot_movement(void)
         {
             if (motors[2].end_switch_triggered) {
                 stop_motor(2);
-                serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom O!\r\n");
+                serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom izteg!\r\n");
                 return;
             }
 
@@ -5564,9 +5594,12 @@ void USART3_IRQHandler(void)
 	                        pospravi_robota();
 	                    }
 	                    //------------manual mode-------------------
-	                    else if(strcasecmp((char*)uart3_rx_buffer, "manual") == 0)
+	                    else if((strcasecmp((char*)uart3_rx_buffer, "manual") == 0)||(strcasecmp((char*)uart3_rx_buffer, "obup") == 0))
 	                    {
+	                    	manual_mode_flag=!manual_mode_flag;
 
+	                    	if(manual_mode_flag)
+							{
 	                        char menu[] =
 	                                "\r\n==================================================\r\n"
 	                                " NACIN KRMILJENJA S TIPKOVNICO\r\n"
@@ -5586,10 +5619,34 @@ void USART3_IRQHandler(void)
 									" Pritisk tipke X ustavi vse motorje.\r\n\r\n";
 
 	                    	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+							}
+	                    	else
+	                    	{
+	                    		 char menu[] =
+									"\r\nManual mode izklopljen.\r\n";
 
-	                        manual_mode_flag=1;
+								HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+	                    	}
 	                    }
-	                    //----------------konc manual-------------
+						//konc
+	                    else if((strcasecmp((char*)uart3_rx_buffer, "stikala") == 0)||(strcasecmp((char*)uart3_rx_buffer, "sw") == 0))
+	                    {
+	                        switch_test=!switch_test;
+	                    }
+
+	                    //----------kalibracija-------
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "calibrate") == 0)
+	                    {
+
+	                        char menu[] =
+	                                "\r\nZacenjam kalibracijo.\r\n";
+
+	                    	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+
+	                        calibrate_flag=1;
+	                    }
+
+	                    //----------------konc kalibracija-------------
 	                    else
 	                    {
 	                        // Stara regulacija tlaka (opcijsko)
