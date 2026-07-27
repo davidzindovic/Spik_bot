@@ -115,8 +115,8 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      85U     /* below this: stop (unless reversing out) */
-#define DC_DIST_MAX_MM      165U    /* above this: stop (unless forwarding back) */
+#define DC_DIST_MIN_MM      90U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MAX_MM      130U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
  *
@@ -1010,6 +1010,7 @@ int main(void) {
     		"  calibrate   -> Izvede kalibracijo\r\n"
     		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
     		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+    		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
     		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
     		"----------------------------------------------------------------------\r\n"
             " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
@@ -1044,8 +1045,14 @@ int main(void) {
 
  //tof
 		//while(1){
- 		            if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||spik_test)
+ 		            if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||(vl53_data_ready&&spik_test))
  		            {
+ 		            	const uint8_t num_samples=5;
+						static uint16_t action_moving_average_array[5];
+						static uint8_t action_moving_array_index=0;
+						static _Bool moving_average_ready=0;
+						uint32_t avrg_razdalja=0;
+
 		                vl53_data_ready = 0;
 		                trenutna_razdalja = VL53L0X_ReadDistance();
 
@@ -1053,12 +1060,14 @@ int main(void) {
 		                {
 		                	false_read_tof++;
 		                }
+		                else false_read_tof=0;
 
-		                if (false_read_tof>20)
+		                if (false_read_tof>num_samples)
 		                {
 		                	false_read_tof=0;
-		                	//serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
+		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
+		                	VL53L0X_Init();
 		                }
 		                /*
 		                else if (read_switch(3))
@@ -1074,12 +1083,49 @@ int main(void) {
 		                */
 		                else
 		                {
-		                	DC_Motor_Update(trenutna_razdalja);
+		                if (trenutna_razdalja!= 65535 && trenutna_razdalja!=0)
+		                    {
+		                		action_moving_average_array[action_moving_array_index]=trenutna_razdalja;
+		                		action_moving_array_index++;
+		                    	if(action_moving_array_index>(num_samples-1))
+		                    	{
+		                    		moving_average_ready=1;
+		                    		action_moving_array_index=0;
+		                    	}
+
+							if(moving_average_ready)
+								{
+									avrg_razdalja=0;
+
+									static uint32_t avrg_razdalja=0;
+
+									for (uint8_t i=0;i<num_samples;i++)
+									{
+										avrg_razdalja+=action_moving_average_array[i];
+									}
+									avrg_razdalja/=(num_samples+1);
+
+									//char debug_msg3[64];
+									//snprintf(debug_msg3, sizeof(debug_msg3), "Povprecna Razdalja: %u mm \r\n", avrg_razdalja);
+									//serial_print_string(debug_msg3);
+
+									//if((avrg_razdalja>DC_DIST_MIN_MM) && (avrg_razdalja<(DC_DIST_MAX_MM)))
+									//{
+									//	char debug_msg3[64];
+									//	snprintf(debug_msg3, sizeof(debug_msg3), "Povprecna Razdalja: %u mm \r\n", avrg_razdalja);
+									//	serial_print_string(debug_msg3);
+
+										DC_Motor_Update(avrg_razdalja);
+									//}
+								}
+		                    }
 		                }
 
-		                char debug_msg[64];
-		                snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
-		                serial_print_string(debug_msg);
+
+
+		                //char debug_msg[64];
+		                //snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
+		                //serial_print_string(debug_msg);
  		            }
 
 
@@ -1123,12 +1169,54 @@ if (switch_test==1)
 //---------------------------tof test----------------------
  if (vl53_data_ready && tof_test)
  {
+	 const uint8_t num_samples=5;
+
+	 static uint8_t num_tof_prints=0;
+
+	 static uint16_t moving_average_array[5];
+	 static uint8_t moving_array_index=0;
+
     vl53_data_ready = 0;
     trenutna_razdalja = VL53L0X_ReadDistance();
     char debug_msg2[64];
-    snprintf(debug_msg2, sizeof(debug_msg2), "Razdalja: %u mm \r\n", trenutna_razdalja);
+    snprintf(debug_msg2, sizeof(debug_msg2), "TOF test; Razdalja: %u mm \r\n", trenutna_razdalja);
     serial_print_string(debug_msg2);
-    tof_test=0;
+
+    if (trenutna_razdalja!= 65535 && trenutna_razdalja!=0)
+    {
+    	moving_average_array[moving_array_index]=trenutna_razdalja;
+    	moving_array_index++;
+    }
+    if(moving_array_index==num_samples)
+    {
+    	static uint32_t avrg_razdalja=0;
+
+    	for (uint8_t i=0;i<num_samples;i++)
+    	{
+    		avrg_razdalja+=moving_average_array[i];
+    		moving_average_array[i]=0;
+    	}
+    	avrg_razdalja/=num_samples;
+
+    	moving_array_index=0;
+
+        char debug_msg3[64];
+        snprintf(debug_msg3, sizeof(debug_msg3), "TOF test; Povprecna Razdalja: %u mm \r\n", avrg_razdalja);
+        serial_print_string(debug_msg3);
+
+        avrg_razdalja=0;
+    }
+
+
+    if (num_tof_prints>=(num_samples-1))
+	{
+    	tof_test=0;
+    	num_tof_prints=0;
+	}
+    else
+    {
+    	num_tof_prints++;
+    }
  }
 
 		/*
@@ -6201,6 +6289,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
         return;
     }
 
+    static int16_t dc_motor_speed=0;
+
     switch (dc_current_state) {
 
         case DC_STATE_REGULATED: {
@@ -6210,27 +6300,33 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
                 dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
                 dc_current_state = DC_STATE_WAITING;
+                char debug_msg3[64];
+				snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+				serial_print_string(debug_msg3);
                 serial_print_string("Blizu ovire! Stop. Cakam 5 sekund...\r\n");
                 break;
             }
 
             /* 2. Izračun hitrosti: dlje kot je ovira, hitreje se motor premika.
                Uporabimo linearno interpolacijo med varnim minimumom in maksimumom. */
-            int16_t calculated_speed;
+            //int16_t calculated_speed;
+
 
             //if (distance_mm >= DC_DIST_MAX_MM) {
                 /* Če smo izven regulacijskega območja (zelo daleč), gremo s polno hitrostjo */
             //    calculated_speed = 950;
             //} else
-            	if(distance_mm>(DC_DIST_MIN_MM+30)) {
+            	if(distance_mm>(DC_DIST_MIN_MM+20)) {
                 /* Linearna prilagoditev hitrosti med 200 (min hitrost za premik) in 950 (max) */
                 //float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
                 //calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
-            		dc_motor_speed=900;
+            		dc_motor_speed=-900;
+            		serial_print_string("Hitro se priblizujem oviri.\r\n");
             }
             	else
-            	{
-            		dc_motor_speed=200;
+            	{serial_print_string("Pocasi se priblizujem oviri.\r\n");
+
+            		dc_motor_speed=-200;
             	}
 
             /* Varnostna omejitev, da ne preseže maksimalnega ARR časovnika (999) */
@@ -6238,8 +6334,12 @@ void DC_Motor_Update(uint16_t distance_mm) {
             //if (calculated_speed < 200) calculated_speed = 200;
 
             /* Nastavimo hitrost za vožnjo naprej (pozitivna vrednost) */
-			serial_print_string("Priblizujem se oviri.\r\n");
-			DC_Motor_Set_Speed(calculated_speed);
+			//char debug_msg3[64];
+			//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+			//serial_print_string(debug_msg3);
+
+
+			DC_Motor_Set_Speed(dc_motor_speed);
 
             break;
         }
@@ -6264,7 +6364,12 @@ void DC_Motor_Update(uint16_t distance_mm) {
         	}
 
         	//if ((HAL_GetTick() - dc_stop_timestamp) >= dc_wait_time_ms) {
-                serial_print_string("Apliciranje opravljeno. Umikam motor nazaj...\r\n");
+
+        		char debug_msg3[64];
+				snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+				serial_print_string(debug_msg3);
+
+        		serial_print_string("Apliciranje opravljeno. Umikam motor nazaj...\r\n");
                 dc_current_state = DC_STATE_RETRACTING;
             //}
             break;
@@ -6272,11 +6377,15 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         case DC_STATE_RETRACTING: {
             /* 1. Pogoj za konec umikanja: ko dosežemo želeno varnostno razdaljo (maksimum) */
-            if (distance_mm >= DC_DIST_MAX_MM) {
+            //if (distance_mm >= DC_DIST_MAX_MM) {
+        	if (read_switch(3)) {
             	dc_motor_speed=0;
                 DC_Motor_Set_Speed(dc_motor_speed);
-                //dc_current_state = DC_STATE_REGULATED;
+                dc_current_state = DC_STATE_REGULATED;
                 zagon_izvedbe = false;
+                char debug_msg3[64];
+				snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+				serial_print_string(debug_msg3);
                 serial_print_string("Umaknjen na varno razdaljo.\r\n");
                 premik_done=0; //ponastavimo zastavico za kinematiko
                 spik_test=0;
@@ -6284,14 +6393,17 @@ void DC_Motor_Update(uint16_t distance_mm) {
             }
 
             /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            serial_print_string("FUra nazaj.\r\n");
-            dc_motor_speed=-900;
+            //char debug_msg3[64];
+			//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+			//serial_print_string(debug_msg3);
+            serial_print_string("Fura nazaj.\r\n");
+            dc_motor_speed=900;
             DC_Motor_Set_Speed(dc_motor_speed);
             break;
         }
 
         default:
-            //dc_current_state = DC_STATE_REGULATED;
+            dc_current_state = DC_STATE_REGULATED;
             break;
     }
 }
