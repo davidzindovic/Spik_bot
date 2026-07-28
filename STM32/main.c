@@ -115,7 +115,7 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      90U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MIN_MM      83U     /* below this: stop (unless reversing out) */
 #define DC_DIST_MAX_MM      130U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
@@ -1062,8 +1062,11 @@ int main(void) {
 		                	false_read_tof=0;
 		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
-		                	VL53L0X_Diagnose();
+
 		                	I2C4_BusRecovery();
+		                	HAL_Delay(10);
+		                	MX_I2C4_Init();       // ponovna inicializacija
+		                	VL53L0X_Init();       // ponovni zagon senzorja
 		                }
 		                /*
 		                else if (read_switch(3))
@@ -1167,6 +1170,13 @@ if (switch_test==1)
     	moving_average_array[moving_array_index]=trenutna_razdalja;
     	moving_array_index++;
     }
+    else
+    {
+    	I2C4_BusRecovery();
+    	HAL_Delay(10);
+    	MX_I2C4_Init();       // ponovna inicializacija
+    	VL53L0X_Init();       // ponovni zagon senzorja
+ 	 }
     if(moving_array_index==num_samples)
     {
     	static uint32_t avrg_razdalja=0;
@@ -3662,7 +3672,7 @@ static void MX_I2C4_Init(void) {
 
     // 3. Then init the peripheral
     hi2c4.Instance = I2C4;
-    hi2c4.Init.Timing = 0x10808DD3 ;//0x00F0EDFF
+    hi2c4.Init.Timing = 0x10808DD3;//0x00D0C7FF
     hi2c4.Init.OwnAddress1 = 0;
     hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
     hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
