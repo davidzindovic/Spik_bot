@@ -298,7 +298,6 @@ def abort_measurement():
     send_uart_command("MERITEV KONEC")
     measurement_aborted = True
     measurement_waiting_for_approval = False
-    # Vrnitev v predogled (omogoči novo segmentacijo)
     vision_preview_mode = True
     vision_segmentation_result = None
     measurement_state = "idle"
@@ -350,7 +349,6 @@ def finalize_measurement():
             print(f"[MERITEV] Napaka pri risanju grafa: {e}")
 
     # Pošlji GO, da se platforma premakne
-    send_go()
 
     # Zapri okno in omogoči vožnjo
     vision_window_open = False
@@ -387,15 +385,13 @@ def process_uart_messages():
             elif msg.startswith("Razdalja:"):
                 if measurement_state in ("meas3", "wait3", "meas4", "wait4"):
                     try:
-                        # Izlušči številski del: odstrani "Razdalja:" in "mm"
-                        dist_part = msg.split(":")[1].strip()  # npr. "123.45 mm"
-                        # Odstrani "mm" in morebitne presledke
-                        dist_str = dist_part.replace("mm", "").strip()
+                        dist_part = msg.split(":")[1].strip()
+                        dist_str=dist_part.replace(" mm","").strip()
                         dist_mm = float(dist_str)
                         measurement_distances.append((time.time(), dist_mm))
                         print(f"[MERITEV] Zabeležena razdalja: {dist_mm} mm")
                     except Exception as e:
-                        print(f"[MERITEV] Napaka pri razčlenjevanju razdalje: {e} (sporočilo: {msg})")
+                        print(f"[MERITEV] Napaka pri razčlenjevanju razdalje: {e}")
 
 # ==============================================================================
 # RAZRED ZA GAMEPAD
@@ -777,6 +773,7 @@ def main():
 
     loop_rate = 0.02
     prev_plc_state = -1
+    # Spremenljivke za detekcijo robov
     prev_rb_state = False
     prev_a_state = False
     prev_b_state = False
@@ -805,34 +802,32 @@ def main():
 
             gamepad.update_and_log()
 
-            rb_pressed = False
-            a_pressed = False
-            b_pressed = False
+            # Trenutna stanja gumbov (za detekcijo robov)
             if gamepad.joystick:
-                rb_pressed = bool(gamepad.joystick.get_button(5))
-                a_pressed = bool(gamepad.joystick.get_button(0))
-                b_pressed = bool(gamepad.joystick.get_button(1))
+                current_a = bool(gamepad.joystick.get_button(0))
+                current_b = bool(gamepad.joystick.get_button(1))
+                current_rb = bool(gamepad.joystick.get_button(5))
+            else:
+                current_a = False
+                current_b = False
+                current_rb = False
 
             # Obdelava UART sporočil (merilni protokol)
             process_uart_messages()
 
             # Čakanje na potrditev uporabnika med meritvijo
             if measurement_waiting_for_approval:
-                if a_pressed and not prev_a_state:
+                # Detekcija A (potrditev) ali B (prekinitev)
+                if current_a and not prev_a_state:
                     step = measurement_step_number
                     if step < 4:
                         print(f"[MERITEV] Uporabnik potrdil, nadaljujem na korak {step+1}")
                         measurement_waiting_for_approval = False
                         start_measurement_step(step+1)
-                    prev_a_state = a_pressed
-                elif b_pressed and not prev_b_state:
+                elif current_b and not prev_b_state:
                     print("[MERITEV] Uporabnik prekinil meritev.")
                     abort_measurement()
-                    prev_b_state = b_pressed
-                # Preprečimo obdelavo ostalih tipk
-                prev_a_state = a_pressed
-                prev_b_state = b_pressed
-                # Prikaz okna (če je odprto)
+                # Ne glede na to, nadaljujemo s prikazom
                 if vision_window_open:
                     if vision_preview_mode:
                         if last_color_frame is not None and last_depth_frame is not None:
@@ -845,11 +840,16 @@ def main():
                             vis_img, _, _, _, _, _, _ = vision_segmentation_result
                             cv2.imshow("Segmentacija", vis_img)
                     cv2.waitKey(1)
+                # Posodobimo prev stanja in nadaljujemo
+                prev_a_state = current_a
+                prev_b_state = current_b
+                prev_rb_state = current_rb
+                # Počakamo na konec zanke
                 time.sleep(loop_rate)
                 continue
 
             # RB: odpri/zapri okno (samo če ni v meritvi)
-            if rb_pressed and not prev_rb_state and measurement_state == "idle":
+            if current_rb and not prev_rb_state and measurement_state == "idle":
                 if not vision_window_open:
                     if pipeline is not None and last_color_frame is not None:
                         print("[PREVIEW] Odpiram okno, nastavljam mode 5.")
@@ -878,12 +878,11 @@ def main():
                     vision_segmentation_result = None
                     cv2.destroyWindow("Segmentacija")
                     mode_change_requested = False
-            prev_rb_state = rb_pressed
 
             # Obdelava, če je okno odprto in ni v meritvi
             if vision_window_open and measurement_state == "idle":
                 # A v preview -> sproži segmentacijo
-                if a_pressed and not prev_a_state and vision_preview_mode:
+                if current_a and not prev_a_state and vision_preview_mode:
                     if last_color_frame is not None and last_depth_frame is not None:
                         print("[SEGMENTACIJA] Zaganjam segmentacijo...")
                         uart_log_timestamp("MEASURE_START")
@@ -902,44 +901,41 @@ def main():
                             cv2.putText(preview, "NI ZAZNANEGA OBJEKTA!", (300, 360),
                                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
                             cv2.imshow("Segmentacija", preview)
-                            # Po neuspešni segmentaciji ostanemo v preview
-                            vision_preview_mode = True
                     else:
                         print("[SEGMENTACIJA] Ni na voljo slik.")
-                    prev_a_state = a_pressed
 
-                # A v rezultatu -> sprejem (samo če ni v preview in obstaja rezultat)
-                elif a_pressed and not prev_a_state and not vision_preview_mode and vision_segmentation_result is not None:
-                    vis_img, coords, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
-                    x, y, z, o = coords
-                    # Shrani sliko
-                    save_full_color_image(raw_color_img, contour, u, v, text_lines)
-                    # Pošlji koordinate (brez GO)
-                    send_coordinates(x, y, z, o)
-                    # Ustvari mapo in začni meritev
-                    create_measurement_folder()
-                    measurement_times = []
-                    measurement_distances = []
-                    measurement_total_time = 0.0
-                    measurement_aborted = False
-                    start_measurement_step(1)
-                    # Po začetku meritve se okno še vedno prikazuje, vendar je vožnja zaustavljena
-                    # Ne spreminjamo vision_preview_mode, ostane False, ampak meritev prevzame nadzor
-                    prev_a_state = a_pressed
+                # A v rezultatu -> sprejem
+                elif current_a and not prev_a_state and not vision_preview_mode:
+                    if vision_segmentation_result is not None:
+                        vis_img, coords, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
+                        x, y, z, o = coords
+                        # Shrani sliko
+                        save_full_color_image(raw_color_img, contour, u, v, text_lines)
+                        # Pošlji koordinate (brez GO)
+                        send_coordinates(x, y, z, o)
+                        # Ustvari mapo in začni meritev
+                        create_measurement_folder()
+                        measurement_times = []
+                        measurement_distances = []
+                        measurement_total_time = 0.0
+                        measurement_aborted = False
+                        start_measurement_step(1)
+                    else:
+                        print("[SEGMENTACIJA] Ni rezultata za sprejeti.")
 
-                # B v rezultatu -> zavrni (samo če ni v preview)
-                elif b_pressed and not prev_b_state and not vision_preview_mode and vision_segmentation_result is not None:
-                    vis_img, coords, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
-                    # Shrani sliko
-                    save_full_color_image(raw_color_img, contour, u, v, text_lines)
-                    print("[SEGMENTACIJA] Rezultat zavrnjen. Vračam se v preview.")
-                    uart_log_timestamp("REJECT")
-                    # Vrnitev v preview
-                    vision_preview_mode = True
-                    vision_segmentation_result = None
-                    prev_b_state = b_pressed
+                # B v rezultatu -> zavrni
+                elif current_b and not prev_b_state and not vision_preview_mode:
+                    if vision_segmentation_result is not None:
+                        _, _, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
+                        # Shrani sliko
+                        save_full_color_image(raw_color_img, contour, u, v, text_lines)
+                        print("[SEGMENTACIJA] Rezultat zavrnjen. Vračam se v preview.")
+                        uart_log_timestamp("REJECT")
+                        vision_preview_mode = True
+                        vision_segmentation_result = None
+                    else:
+                        print("[SEGMENTACIJA] Ni rezultata za zavrniti.")
 
-                # Preprečimo, da bi se B uporabil za kaj drugega v preview (ni potrebno)
                 # Prikaz okna
                 if vision_window_open and measurement_state == "idle":
                     if vision_preview_mode:
@@ -1041,6 +1037,11 @@ def main():
                                 plc.write_by_name('MAIN.CartContol.data.hitrost_ms', 0.0, pyads.PLCTYPE_LREAL)
                     except Exception as e:
                         print(f"[PLC] Napaka pri pisanju mode: {e}")
+
+            # Posodobitev prejšnjih stanj gumbov (za naslednjo zanko)
+            prev_a_state = current_a
+            prev_b_state = current_b
+            prev_rb_state = current_rb
 
             elapsed = time.time() - start_time
             time.sleep(max(0.0, loop_rate - elapsed))
