@@ -1067,7 +1067,9 @@ int main(void) {
 		                	false_read_tof=0;
 		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
-		                	VL53L0X_Init();
+		                	//VL53L0X_Init();
+		                	VL53L0X_Diagnose();
+		                	I2C4_BusRecovery();
 		                }
 		                /*
 		                else if (read_switch(3))
@@ -6312,8 +6314,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 break;
             }
 
-            if (!read_switch(3))
-            {
+            //if (!read_switch(3))
+            //{
 					if(distance_mm>(DC_DIST_MIN_MM+20)) {
 
 						dc_motor_speed=-900;
@@ -6332,13 +6334,13 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
 
 				DC_Motor_Set_Speed(dc_motor_speed);
-            }
-            else
-            {
-            	serial_print_string("Sprednje stikalo proženo, umikam nazaj.\r\n");
-            	DC_Motor_Set_Speed(0);
-            	dc_current_state = DC_STATE_RETRACTING;
-            }
+            //}
+            //else
+            //{
+            //	serial_print_string("Sprednje stikalo proženo, umikam nazaj.\r\n");
+            //	DC_Motor_Set_Speed(0);
+            //	dc_current_state = DC_STATE_RETRACTING;
+            //}
             break;
         }
 
@@ -6392,7 +6394,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
             /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
             char debug_msg3[64];
-			snprintf(debug_msg3, sizeof(debug_msg3), "\n\nFura nazaj. Pocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+			snprintf(debug_msg3, sizeof(debug_msg3), "\n\nFura nazaj. Razdalja: %u mm \r\n", distance_mm);
 			serial_print_string(debug_msg3);
             dc_motor_speed=900;
             DC_Motor_Set_Speed(dc_motor_speed);
