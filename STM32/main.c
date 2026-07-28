@@ -485,7 +485,7 @@ volatile BoundingBox_t robot_bbox = {
     //.max_y = 90+105+150
 
 	.min_y=290,
-	.max_y=400
+	.max_y=470
 
 };
 
@@ -505,6 +505,7 @@ _Bool lin_motor_running=0;
 int16_t dc_motor_speed=0;
 
 float igla_sklop_offset=219;//v mm
+float offset_centr_vrtenja_do_kamera=110;//v mm
 
 _Bool calibrate_flag=0;
 _Bool switch_test=0;
@@ -1037,7 +1038,7 @@ int main(void) {
 		 //---------------------MERITEV------------------
 
 		 if(next_step==1 && premik_done==0)execute_robot_movement();
-		 else if(next_step==2 || next_step==3 || next_step==4 || next_step==0)
+		 else if((next_step==2 || next_step==3 || next_step==4 || next_step==0)&&premik_done==1)
 		 {
  		            if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||(vl53_data_ready&&spik_test))
  		            {
@@ -4919,6 +4920,8 @@ void execute_robot_movement(void)
 
 
     // 3. SOČASNI ZAGON: Motor 0 in Motor 1 (X in O)
+
+    serial_print_string("Zagon M0 in M1\r\n");
     if (motors[0].position != motors[0].target_position) run_motor(0);
     if (motors[1].position != motors[1].target_position) run_motor(1);
 
@@ -4954,6 +4957,8 @@ void execute_robot_movement(void)
     }
 
     // 4. SEKVENČNI ZAGON: Motor 2 (Y), ko prva dva zaključita
+
+    serial_print_string("Zagon M2\r\n");
     if (motors[2].position != motors[2].target_position)
     {
         run_motor(2);
@@ -4986,10 +4991,15 @@ void execute_robot_movement(void)
     serial_print_string("\r\n");
     serial_print_string("MERITEV 1 STOP");
     serial_print_string("\r\n");
+	serial_print_string("MERITEV 1 STOP");
+	serial_print_string("\r\n");
+	serial_print_string("MERITEV 1 STOP");
+    serial_print_string("\r\n");
 }
 
 void pospravi_robota(void)
 {
+	serial_print_string("Homing robot.\r\n");
 	stop_all_motors();
 
 	motors[0].target_position=0;
@@ -5040,6 +5050,10 @@ void pospravi_robota(void)
 		}
 	}
 	serial_print_string("\r\nRobot je domaci poziciji.\r\n");
+	serial_print_string("\r\n");
+	serial_print_string("MERITEV 4 STOP");
+	serial_print_string("\r\n");
+	serial_print_string("MERITEV 4 STOP");
 	serial_print_string("\r\n");
 	serial_print_string("MERITEV 4 STOP");
 	serial_print_string("\r\n");
@@ -6201,9 +6215,13 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         	if(next_step==2 || next_step==3)
         	{
-				if (distance_mm <= DC_DIST_MIN_MM) {
+				if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) {
 					dc_motor_speed=0;
 					DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
+					serial_print_string("\r\n");
+					serial_print_string("MERITEV 3 STOP");
+					serial_print_string("\r\n");
+					serial_print_string("MERITEV 3 STOP");
 					serial_print_string("\r\n");
 					serial_print_string("MERITEV 3 STOP");
 					serial_print_string("\r\n");
@@ -6214,6 +6232,17 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					serial_print_string(debug_msg3);
 					serial_print_string("Blizu ovire! Stop. Cakam 5 sekund...\r\n");
 					break;
+				}
+				else if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2)) {
+				dc_motor_speed=0;
+				DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
+				serial_print_string("\r\n");
+				serial_print_string("MERITEV 2 STOP");
+				serial_print_string("\r\n");
+				serial_print_string("MERITEV 2 STOP");
+				serial_print_string("\r\n");
+				serial_print_string("MERITEV 2 STOP");
+				serial_print_string("\r\n");
 				}
 
 
@@ -6232,6 +6261,10 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						slowed_down=1;
 						dc_motor_speed=0;
 						DC_Motor_Set_Speed(dc_motor_speed);
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV 2 STOP");
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV 2 STOP");
 						serial_print_string("\r\n");
 						serial_print_string("MERITEV 2 STOP");
 						serial_print_string("\r\n");
