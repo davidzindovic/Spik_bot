@@ -889,6 +889,13 @@ def main():
                         res = run_measurement(last_color_frame, last_depth_frame)
                         if res is not None:
                             vis_img, coords, raw_color_img, contour, u, v, text_lines = res
+
+                            #shranimo fotko
+                            measurement_folder=create_measurement_folder()
+                            img_path=os.path.join(measurement_folder,"segmentacija.png")
+                            cv2.imwrite(img_path,vis_img)
+                            print(f"[SEGMENTACIJA] Slika shranjena v {img_path}")
+
                             vision_segmentation_result = (vis_img, coords, raw_color_img, contour, u, v, text_lines)
                             vision_preview_mode = False
                             print("[SEGMENTACIJA] Rezultat prikazan. Pritisnite A za sprejem, B za zavrnitev.")
