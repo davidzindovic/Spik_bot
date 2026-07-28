@@ -12,7 +12,8 @@ Združena koda: mobilna platforma + segmentacija z RealSense in CLIPSeg.
 - Med odprtim oknom je vožnja zaustavljena
 - UART komunikacija: pošiljanje brez \r\n, branje odgovorov
 - Merilni protokol: MERITEV 1–4 s časovnimi žigi, shranjevanje v CSV, graf razdalje
-- GO se pošlje šele po končani meritvi (po MERITEV 4 STOP)
+- GO se pošlje šele po končani meritvi (po MERITEV 4 STOP) - trenutno zakomentirano
+- Slika segmentacije se shrani takoj po uspešni segmentaciji v svojo mapo (zaporedna številka)
 """
 
 import os
@@ -97,11 +98,11 @@ last_depth_frame = None
 uart_ser = None
 uart_lock = threading.Lock()
 uart_sending = threading.Event()
-exit_pending = False          # ali čakamo na EXIT po GO
+exit_pending = False          # ni v uporabi
 
 # Merilni protokol
 measurement_state = "idle"          # idle, meas1, wait1, meas2, wait2, meas3, wait3, meas4, done, aborted
-measurement_folder = None
+measurement_folder = None           # trenutna mapa za meritve (ustvari se ob segmentaciji)
 measurement_run_counter = 0
 measurement_times = []
 measurement_distances = []
@@ -217,22 +218,16 @@ def send_coordinates(x, y, z, o):
         uart_sending.clear()
 
 def send_go():
-    """Pošlje GO ukaz in nastavi exit_pending."""
-    global exit_pending
-    print("[SERIJSKI] Pošiljam GO ...")
-    send_uart_command("GO")
-    exit_pending = True
-    uart_log_timestamp("GO_SENT")
+    """Pošlje GO ukaz (trenutno ni v uporabi)."""
+    # zakomentirano, ker ni potrebno
+    # print("[SERIJSKI] Pošiljam GO ...")
+    # send_uart_command("GO")
+    pass
 
 def send_exit():
-    """Pošlje EXIT ukaz (običajno ob zaprtju okna)."""
-    global exit_pending
-    if not exit_pending:
-        return
-    print("[SERIJSKI] Pošiljam EXIT ...")
-    send_uart_command("EXIT")
-    exit_pending = False
-    uart_log_timestamp("EXIT_SENT")
+    """Pošlje EXIT ukaz (trenutno ni v uporabi)."""
+    # zakomentirano
+    pass
 
 def send_calibration():
     """Pošlje kalibracijski ukaz."""
@@ -242,12 +237,13 @@ def send_calibration():
 # FUNKCIJE ZA MERILNI PROTOKOL
 # ==============================================================================
 def create_measurement_folder():
+    """Ustvari novo mapo z zaporedno številko in vrne pot."""
     global measurement_run_counter, measurement_folder
     base = "meritve"
     if not os.path.exists(base):
         os.makedirs(base)
     measurement_run_counter += 1
-    folder_name = f"MERITEV_{measurement_run_counter}"
+    folder_name = f"MERITEV_{measurement_run_counter:03d}"  # 001, 002, ...
     measurement_folder = os.path.join(base, folder_name)
     os.makedirs(measurement_folder, exist_ok=True)
     print(f"[MERITEV] Ustvarjena mapa: {measurement_folder}")
@@ -304,19 +300,19 @@ def abort_measurement():
     print("[MERITEV] Meritev prekinjena, vračam se v predogled.")
 
 def finalize_measurement():
-    """Po končani meritvi (po MERITEV 4 STOP) shrani podatke, izriše graf, pošlje GO in zapre okno."""
+    """Po končani meritvi (po MERITEV 4 STOP) shrani podatke, izriše graf in zapre okno."""
     global measurement_state, measurement_folder, measurement_times, measurement_distances
-    global vision_window_open, vision_preview_mode, vision_segmentation_result, exit_pending
+    global vision_window_open, vision_preview_mode, vision_segmentation_result
 
     if measurement_folder is None:
         print("[MERITEV] Ni mape za shranjevanje.")
         return
 
-    # Shrani časovni CSV
+    # Shrani časovni CSV z enotami
     times_csv = os.path.join(measurement_folder, "TEREN_BF_MERITVE.csv")
     with open(times_csv, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Step', 'StartTime', 'StopTime', 'ElapsedSeconds'])
+        writer.writerow(['Step', 'StartTime (s)', 'StopTime (s)', 'Elapsed (s)'])
         for rec in measurement_times:
             writer.writerow([rec['step'], rec['start'], rec['stop'], rec['elapsed']])
         writer.writerow(['TOTAL', '', '', measurement_total_time])
@@ -327,7 +323,7 @@ def finalize_measurement():
         dist_csv = os.path.join(measurement_folder, "razdalje.csv")
         with open(dist_csv, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['Timestamp', 'Razdalja_mm'])
+            writer.writerow(['Timestamp (s)', 'Razdalja (mm)'])
             for ts, dist in measurement_distances:
                 writer.writerow([ts, dist])
         print(f"[MERITEV] Razdalje shranjene v {dist_csv}")
@@ -348,7 +344,8 @@ def finalize_measurement():
         except Exception as e:
             print(f"[MERITEV] Napaka pri risanju grafa: {e}")
 
-    # Pošlji GO, da se platforma premakne
+    # GO ni potreben, zakomentirano
+    # send_go()
 
     # Zapri okno in omogoči vožnjo
     vision_window_open = False
@@ -356,7 +353,7 @@ def finalize_measurement():
     vision_segmentation_result = None
     cv2.destroyWindow("Segmentacija")
     measurement_state = "idle"
-    print("[MERITEV] Meritev končana, GO poslan. Okno zaprto, platforma pripravljena na vožnjo.")
+    print("[MERITEV] Meritev končana. Okno zaprto, platforma pripravljena na vožnjo.")
 
 def process_uart_messages():
     """Preveri čakalno vrsto UART sporočil in obravnava ukaze MERITEV in Razdalja."""
@@ -386,7 +383,7 @@ def process_uart_messages():
                 if measurement_state in ("meas3", "wait3", "meas4", "wait4"):
                     try:
                         dist_part = msg.split(":")[1].strip()
-                        dist_str=dist_part.replace(" mm","").strip()
+                        dist_str = dist_part.replace(" mm", "").strip()
                         dist_mm = float(dist_str)
                         measurement_distances.append((time.time(), dist_mm))
                         print(f"[MERITEV] Zabeležena razdalja: {dist_mm} mm")
@@ -441,8 +438,8 @@ class SimpleGamepadPygame:
         print("     A (0)    : Sproži segmentacijo")
         print("     RB (5)   : Zapri okno")
         print(" * Ko je prikazan rezultat segmentacije:")
-        print("     A (0)    : Sprejmi koordinate (začne meritev, shrani sliko)")
-        print("     B (1)    : Zavrni (shrani sliko, vrni se v preview)")
+        print("     A (0)    : Sprejmi koordinate (začne meritev)")
+        print("     B (1)    : Zavrni (vrni se v preview)")
         print(" * Med merilnim protokolom:")
         print("     A (0)    : Potrdi in nadaljuj na naslednji korak")
         print("     B (1)    : Prekini meritev")
@@ -609,7 +606,25 @@ def filter_by_distance(color_image, depth_image):
     filtered_depth[~valid_mask] = 0
     return filtered_color, filtered_depth
 
+def create_annotated_image(raw_color_img, contour, u, v, text_lines):
+    """Ustvari sliko z originalno barvno sliko, narisano konturo, točko in besedilom."""
+    img = raw_color_img.copy()
+    if contour is not None:
+        cv2.drawContours(img, [contour], -1, (0, 255, 0), 2)
+    cv2.circle(img, (u, v), 10, (0, 0, 255), -1)
+    cv2.circle(img, (u, v), 10, (255, 255, 255), 2)
+    # Dodamo informacije
+    cv2.rectangle(img, (10, 10), (550, 155), (0, 0, 0), -1)
+    y_pos = 30
+    for line in text_lines:
+        cv2.putText(img, line, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
+        y_pos += 25
+    cv2.putText(img, "A: Sprejmi | B: Zavrni", (20, y_pos+5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    return img
+
 def save_full_color_image(raw_color_img, contour, u, v, text_lines, folder="slike_segmentacija"):
+    """Stara funkcija za shranjevanje, ni več v uporabi (ohranjena za kompatibilnost)."""
     if not os.path.exists(folder):
         os.makedirs(folder)
     i = 1
@@ -618,16 +633,8 @@ def save_full_color_image(raw_color_img, contour, u, v, text_lines, folder="slik
         if not os.path.exists(fpath):
             break
         i += 1
-    save_img = raw_color_img.copy()
-    if contour is not None:
-        cv2.drawContours(save_img, [contour], -1, (0, 255, 0), 2)
-    cv2.circle(save_img, (u, v), 7, (0, 0, 255), -1)
-    cv2.rectangle(save_img, (10, 10), (430, 115), (0, 0, 0), -1)
-    y_pos = 30
-    for line in text_lines:
-        cv2.putText(save_img, line, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
-        y_pos += 25
-    cv2.imwrite(fpath, save_img)
+    img = create_annotated_image(raw_color_img, contour, u, v, text_lines)
+    cv2.imwrite(fpath, img)
     print(f"[INFO] Slika shranjena: {fpath}")
     uart_log_timestamp("IMAGE_SAVED")
 
@@ -682,10 +689,7 @@ def run_measurement(color_frame, depth_frame):
     if res is None:
         return None
     u, v, raw_x, raw_y, contour, filtered_c_img, raw_color_img = res
-    vis_img = filtered_c_img.copy()
-    mode_label = "POSAMEZNA SLIKA"
-    if contour is not None:
-        cv2.drawContours(vis_img, [contour], -1, (0, 255, 0), 2)
+    # Izračun koordinat
     X_coord_mm = int(round((-raw_x * X_SCALE) + X_OFFSET_MM))
     Y_coord_mm = int(round((raw_y * Y_SCALE) + Y_OFFSET_MM))
     Z_coord_mm = int(Z_HEIGHT_MM)
@@ -696,27 +700,29 @@ def run_measurement(color_frame, depth_frame):
     text_y = f"Y: {Y_coord_mm-205-20} mm"
     text_z = f"Z: {Z_coord_mm} mm"
     text_o = f"O: {-orientation:.2f} deg"
+    text_lines = [text_x, text_y, text_z, text_o]
+    coords = (X_coord_mm, Y_coord_mm, Z_coord_mm, orientation)
+    
+    # Ustvari prikazno sliko (za na zaslon) – uporabimo filtrirano sliko
+    vis_img = filtered_c_img.copy()
+    if contour is not None:
+        cv2.drawContours(vis_img, [contour], -1, (0, 255, 0), 2)
     cv2.rectangle(vis_img, (10, 10), (550, 155), (0, 0, 0), -1)
     y_pos = 30
-    cv2.putText(vis_img, text_x, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
-    y_pos += 25
-    cv2.putText(vis_img, text_y, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
-    y_pos += 25
-    cv2.putText(vis_img, text_z, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 255, 255), 2)
-    y_pos += 25
-    cv2.putText(vis_img, text_o, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
-    y_pos += 25
+    for line in text_lines:
+        cv2.putText(vis_img, line, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
+        y_pos += 25
     cv2.putText(vis_img, "A: Sprejmi | B: Zavrni", (20, y_pos+5),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
     cv2.circle(vis_img, (u, v), 10, (0, 0, 255), -1)
     cv2.circle(vis_img, (u, v), 10, (255, 255, 255), 2)
     
-    text_lines = [text_x, text_y, text_z, text_o]
-    coords = (X_coord_mm, Y_coord_mm, Z_coord_mm, orientation)
+    # Ustvari sliko za shranjevanje (originalna barvna z risbami)
+    display_img = create_annotated_image(raw_color_img, contour, u, v, text_lines)
+    
     elapsed = time.time() - start_time
     uart_log_timestamp(f"MEASURE_DONE {elapsed:.3f}s")
-    return vis_img, coords, raw_color_img, contour, u, v, text_lines
+    return vis_img, display_img, coords, raw_color_img, contour, u, v, text_lines
 
 def create_preview_frame(color_image, depth_image):
     color_filt, depth_filt = filter_by_distance(color_image, depth_image)
@@ -740,7 +746,7 @@ def main():
     global cycle_timestamp, mode_change_requested, timestamp_temp
     global current_angle, old_current_angle, delta_angle
     global last_color_frame, last_depth_frame
-    global measurement_state, measurement_waiting_for_approval, measurement_folder, measurement_times, measurement_distances, measurement_total_time, measurement_aborted, exit_pending
+    global measurement_state, measurement_waiting_for_approval, measurement_folder, measurement_times, measurement_distances, measurement_total_time, measurement_aborted
 
     # Zaženi UART listener
     uart_thread = threading.Thread(target=uart_listener, daemon=True)
@@ -837,7 +843,7 @@ def main():
                             cv2.imshow("Segmentacija", preview)
                     else:
                         if vision_segmentation_result is not None:
-                            vis_img, _, _, _, _, _, _ = vision_segmentation_result
+                            vis_img, _, _, _, _, _, _, _ = vision_segmentation_result
                             cv2.imshow("Segmentacija", vis_img)
                     cv2.waitKey(1)
                 # Posodobimo prev stanja in nadaljujemo
@@ -867,12 +873,8 @@ def main():
                     else:
                         print("[PREVIEW] Kamera ni na voljo.")
                 else:
-                    # Zapiranje okna: pošlji EXIT, če čaka
-                    if exit_pending:
-                        print("[PREVIEW] Zapiram okno, pošiljam EXIT.")
-                        send_exit()
-                    else:
-                        print("[PREVIEW] Zapiram okno.")
+                    # Zapiranje okna (EXIT ni v uporabi)
+                    print("[PREVIEW] Zapiram okno.")
                     vision_window_open = False
                     vision_preview_mode = True
                     vision_segmentation_result = None
@@ -888,15 +890,15 @@ def main():
                         uart_log_timestamp("MEASURE_START")
                         res = run_measurement(last_color_frame, last_depth_frame)
                         if res is not None:
-                            vis_img, coords, raw_color_img, contour, u, v, text_lines = res
-
-                            #shranimo fotko
-                            measurement_folder=create_measurement_folder()
-                            img_path=os.path.join(measurement_folder,"segmentacija.png")
-                            cv2.imwrite(img_path,vis_img)
+                            vis_img, display_img, coords, raw_color_img, contour, u, v, text_lines = res
+                            # Ustvari novo mapo za to segmentacijo
+                            measurement_folder = create_measurement_folder()
+                            # Shrani sliko (original + risbe) v to mapo
+                            img_path = os.path.join(measurement_folder, "segmentacija.png")
+                            cv2.imwrite(img_path, display_img)
                             print(f"[SEGMENTACIJA] Slika shranjena v {img_path}")
-
-                            vision_segmentation_result = (vis_img, coords, raw_color_img, contour, u, v, text_lines)
+                            # Shrani rezultat za nadaljnjo uporabo
+                            vision_segmentation_result = (vis_img, display_img, coords, raw_color_img, contour, u, v, text_lines)
                             vision_preview_mode = False
                             print("[SEGMENTACIJA] Rezultat prikazan. Pritisnite A za sprejem, B za zavrnitev.")
                         else:
@@ -911,17 +913,14 @@ def main():
                     else:
                         print("[SEGMENTACIJA] Ni na voljo slik.")
 
-                # A v rezultatu -> sprejem
+                # A v rezultatu -> sprejem (uporabi obstoječo mapo)
                 elif current_a and not prev_a_state and not vision_preview_mode:
                     if vision_segmentation_result is not None:
-                        vis_img, coords, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
+                        _, _, coords, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
                         x, y, z, o = coords
-                        # Shrani sliko
-                        save_full_color_image(raw_color_img, contour, u, v, text_lines)
                         # Pošlji koordinate (brez GO)
                         send_coordinates(x, y, z, o)
-                        # Ustvari mapo in začni meritev
-                        create_measurement_folder()
+                        # Začni meritev (uporabi obstoječo mapo)
                         measurement_times = []
                         measurement_distances = []
                         measurement_total_time = 0.0
@@ -930,12 +929,9 @@ def main():
                     else:
                         print("[SEGMENTACIJA] Ni rezultata za sprejeti.")
 
-                # B v rezultatu -> zavrni
+                # B v rezultatu -> zavrni (samo vrni v preview, slika že shranjena)
                 elif current_b and not prev_b_state and not vision_preview_mode:
                     if vision_segmentation_result is not None:
-                        _, _, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
-                        # Shrani sliko
-                        save_full_color_image(raw_color_img, contour, u, v, text_lines)
                         print("[SEGMENTACIJA] Rezultat zavrnjen. Vračam se v preview.")
                         uart_log_timestamp("REJECT")
                         vision_preview_mode = True
@@ -953,7 +949,7 @@ def main():
                             cv2.imshow("Segmentacija", preview)
                     else:
                         if vision_segmentation_result is not None:
-                            vis_img, _, _, _, _, _, _ = vision_segmentation_result
+                            vis_img, _, _, _, _, _, _, _ = vision_segmentation_result
                             cv2.imshow("Segmentacija", vis_img)
                     cv2.waitKey(1)
 
