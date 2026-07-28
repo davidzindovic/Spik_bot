@@ -518,6 +518,13 @@ _Bool manual_mode_array[8]={0,0,0,0,0,0,0,0};
 
 #define PI 3.141592654
 
+uint8_t next_step=9; //spremenljivka za korake v meritvi
+//0=segmentacija
+//1=premik v predvbodno tocko
+//2=premik tik do debla z iglo
+//3=premik igle v deblo
+//4=premik v zacetno lego
+
 // Funkcija za izpis stanja spremenljivk nazaj na UART
 void uart_print_current_targets(void) {
     char response[200];
@@ -1025,26 +1032,13 @@ int main(void) {
 	while (1) {
 		/* USER CODE END WHILE */
 
-		//test_motor(0);
-		//test_motor(1);
-		//test_motor(2);
-		//test_motor(3);
-		//test_all_motors();
-
-		//demo_za_predstavitev();
-		//test_tipke_na_roke();
-
-		//serijc BAUD=115200
-		//trenutno povezan motor 2
-		//6 rpm = freq 4000
-		//motor_status();
-
-		//serial_print_string("URAVNOVEŠENO!\r\n");
 
 
+		 //---------------------MERITEV------------------
 
- //tof
-		//while(1){
+		 if(next_step==1 && premik_done==0)execute_robot_movement();
+		 else if(next_step==2 || next_step==3 || next_step==4 || next_step==0)
+		 {
  		            if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||(vl53_data_ready&&spik_test))
  		            {
  		            	const uint8_t num_samples=5;
@@ -1067,7 +1061,6 @@ int main(void) {
 		                	false_read_tof=0;
 		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
-		                	//VL53L0X_Init();
 		                	VL53L0X_Diagnose();
 		                	I2C4_BusRecovery();
 		                }
@@ -1107,35 +1100,19 @@ int main(void) {
 									}
 									avrg_razdalja/=(num_samples+1);
 
-									//char debug_msg3[64];
-									//snprintf(debug_msg3, sizeof(debug_msg3), "Povprecna Razdalja: %u mm \r\n", avrg_razdalja);
-									//serial_print_string(debug_msg3);
-
-									//if((avrg_razdalja>DC_DIST_MIN_MM) && (avrg_razdalja<(DC_DIST_MAX_MM)))
-									//{
-									//	char debug_msg3[64];
-									//	snprintf(debug_msg3, sizeof(debug_msg3), "Povprecna Razdalja: %u mm \r\n", avrg_razdalja);
-									//	serial_print_string(debug_msg3);
-
-										DC_Motor_Update(avrg_razdalja);
-									//}
+									DC_Motor_Update(avrg_razdalja);
 								}
 		                    }
 		                }
-
-
-
-		                //char debug_msg[64];
-		                //snprintf(debug_msg, sizeof(debug_msg), "Razdalja: %u mm \r\n", trenutna_razdalja);
-		                //serial_print_string(debug_msg);
  		            }
+		 }
+		 else if((next_step==4 || next_step==0) && premik_done==0)
+		 {
+			 pospravi_robota();
+		 }
 
 
-
-
-
-
-			   // }
+//---------------------konec dela za MERITEV------------------------
 
 
 //----------------------MANUAL MODE------------------------------------
@@ -1220,124 +1197,7 @@ if (switch_test==1)
     	num_tof_prints++;
     }
  }
-
-		/*
-		if(read_switch(3))serial_print_string("Stikalo dc motorja pritisnjeno.\r\n");
-		else serial_print_string("Nic.\r\n");
-		HAL_Delay(300);
-*/
-
-
-		/*
-		_Bool sw1=read_switch(0);
-		_Bool sw2=read_switch(2);
-		_Bool sw3=read_switch(1);
-
-
-
-								if(sw1&&sw2&&sw3)
-								{
-									direction_change(0,!motors[0].direction);
-									direction_change(1,!motors[1].direction);
-									direction_change(2,!motors[2].direction);
-								}
-
-								else{
-
-
-
-										if(sw1)
-										{
-											if (!motors[0].running)run_motor(0);
-										}
-										else if(!sw1)
-										{
-											if(motors[0].running)stop_motor(0);
-										}
-
-										if(sw2)
-										{
-											if (!motors[2].running)run_motor(2);
-										}
-										else if(!sw2)
-										{
-											if(motors[2].running)stop_motor(2);
-										}
-
-										if(sw3)
-										{
-											if (!motors[1].running)run_motor(1);
-										}
-										else if(!sw3)
-										{
-											if(motors[1].running)stop_motor(1);
-										}
-
-								}
-
-		//serial_print_uint16(read_analog_pin(2));
-		//serial_print_uint16(read_analog_pin(3));
-		//serial_print_string("\r\n\n");
-
-*/
-
-
-
-
-/*
- //pressure sensor test
-        while(!reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2))
-        {
-            HAL_Delay(300);
-            //motor_status();
-        }
-
-		//test_all_motors();
-*/
-
-
-
-/*stikala test
-     while(1)
-    {
-    	_Bool sw0=read_switch(0);
-		_Bool sw1=read_switch(1);
-		_Bool sw2=read_switch(2);
-		_Bool sw3=read_switch(3);
-		char debug_msg[100];
-		snprintf(debug_msg, sizeof(debug_msg), " SW0: %u | SW1: %u | SW2: %u | SW3: %u \r\n", sw0,sw1,sw2,sw3);
-		serial_print_string(debug_msg);
-		HAL_Delay(200);
-	}
- */
-
-
-
-
-
-
-/*
- //dc motor test
- 		// Prisilno pošljemo ukaz za vrtenje NAPREJ (hitrost 600 od 999)
-		    serial_print_string("Test: Motor naprej...\r\n");
-		    DC_Motor_Set_Speed(600);
-		    HAL_Delay(1000); // Drži 3 sekunde
-
-		    // Ustavi motor
-		    serial_print_string("Test: Motor STOP...\r\n");
-		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(3000); // Čakaj 1 sekundo
-
-		    // Prisilno pošljemo ukaz za vrtenje NAZAJ (hitrost -600)
-		    serial_print_string("Test: Motor nazaj...\r\n");
-		    DC_Motor_Set_Speed(-600);
-		    HAL_Delay(1000); // Drži 3 sekunde
-
-		    // Ustavi motor
-		    serial_print_string("Test: Motor STOP...\r\n");
-		    DC_Motor_Set_Speed(0);
-		    HAL_Delay(3000);
-*/
+//------------------end tof test------------------
 
 
 		/* USER CODE BEGIN 3 */
@@ -2829,7 +2689,7 @@ static void MX_GPIO_Init(void) {
         return false;
     }
 
-    // 2. Izvedba meritve
+    // 2. Izvedba MERITEV
     HAL_ADC_Start(hadc);
     if (HAL_ADC_PollForConversion(hadc, 10) == HAL_OK)
     {
@@ -4345,37 +4205,31 @@ void calibrate_motor(uint8_t motor_number)
 	snprintf(msg, sizeof(msg), "CAL M%d: moving to switch 1 (dir_minus)...\r\n", motor_number);
 	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 
-	if (motor_number!=3)
-	{
-		/* --- Phase 1: drive in direction_minus until switch 1 triggers --- */
-		motors[motor_number].position = 0;
-		motors[motor_number].end_switch_triggered = 0;
-		motors[motor_number].allowed_direction = 2; /* allow both directions during calibration */
+	/* --- Phase 1: drive in direction_minus until switch 1 triggers --- */
+	motors[motor_number].position = 0;
+	motors[motor_number].end_switch_triggered = 0;
+	motors[motor_number].allowed_direction = 2; /* allow both directions during calibration */
 
-		direction_change(motor_number, motors[motor_number].direction_minus);
-		HAL_Delay(100);
-		run_motor(motor_number);
-	}
+	direction_change(motor_number, motors[motor_number].direction_minus);
+	HAL_Delay(100);
+	run_motor(motor_number);
+
 	while (!read_switch(motor_number)) { /* spin until switch fires */ }
 
-	if (motor_number!=3)
-	{
-		stop_motor(motor_number);
-	}
+	stop_motor(motor_number);
+
 	snprintf(msg, sizeof(msg), "CAL M%d: switch 1 hit. Reversing...\r\n", motor_number);
 	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 
-	if (motor_number!=3)
-	{
-		/* --- Phase 2: reverse direction and move BLIND for at least 1 second --- */
-		direction_change(motor_number, motors[motor_number].direction_plus);
-		HAL_Delay(100);
+	/* --- Phase 2: reverse direction and move BLIND for at least 1 second --- */
+	direction_change(motor_number, motors[motor_number].direction_plus);
+	HAL_Delay(100);
 
-		motors[motor_number].position = 0; /* reset step counter at switch-1 position */
-		motors[motor_number].end_switch_triggered = 0;
+	motors[motor_number].position = 0; /* reset step counter at switch-1 position */
+	motors[motor_number].end_switch_triggered = 0;
 
-		run_motor(motor_number);
-	}
+	run_motor(motor_number);
+
 	/* Mandatory blind travel: do NOT read the switch for the first 1000 ms.
 	   This ensures the mechanism has physically cleared the switch actuator. */
 	HAL_Delay(1000);
@@ -4387,63 +4241,60 @@ void calibrate_motor(uint8_t motor_number)
 	/* position is incremented by the TIM IRQ callback while running */
 	while (!read_switch(motor_number)) { /* spin until switch fires */ }
 	uint32_t measured_steps;
-	if (motor_number!=3)
-	{
-		stop_motor(motor_number);
 
-		measured_steps = motors[motor_number].position;
-	}
+	stop_motor(motor_number);
+
+	measured_steps = motors[motor_number].position;
+
 	snprintf(msg, sizeof(msg), "CAL M%d: switch 2 hit. Steps between switches: %lu\r\n",
 	         motor_number, measured_steps);
 	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
 
-	if (motor_number!=3)
+	/* Sanity check: if we measured almost nothing the count is wrong */
+	if (measured_steps < 100)
 	{
-		/* Sanity check: if we measured almost nothing the count is wrong */
-		if (measured_steps < 100)
-		{
-			snprintf(msg, sizeof(msg), "CAL M%d: ERR - step count too low (%lu), aborting\r\n",
-					 motor_number, measured_steps);
-			HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
-			return;
-		}
-
-		/* --- Phase 4: update motor parameters --- */
-		motors[motor_number].max_position    = measured_steps;
-		motors[motor_number].unit_conversion = measured_steps / motors[motor_number].travel_length;
-		motors[motor_number].end_switch_triggered = 0;
-		motors[motor_number].allowed_direction    = 2;
-
-		snprintf(msg, sizeof(msg), "CAL M%d: max_pos=%lu, unit_conv=%lu. Moving to centre...\r\n",
-				 motor_number,
-				 motors[motor_number].max_position,
-				 motors[motor_number].unit_conversion);
+		snprintf(msg, sizeof(msg), "CAL M%d: ERR - step count too low (%lu), aborting\r\n",
+				 motor_number, measured_steps);
 		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
-
-
-		/* --- Phase 5: drive back to the centre of the travel range --- */
-		direction_change(motor_number, motors[motor_number].direction_minus);
-		HAL_Delay(100);
-		run_motor(motor_number);
-
-		if(motor_number!=2)
-		{
-			while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
-		}
-		else
-		{
-			while (motors[motor_number].position > (motors[motor_number].max_position * 1 / 10)) { /* wait */ }
-		}
-
-		stop_motor(motor_number);
-
-		motors[motor_number].starting_position = motors[motor_number].position;
-		motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
-
-		snprintf(msg, sizeof(msg), "CAL M%d: done. Centre pos=%lu\r\n",
-				 motor_number, motors[motor_number].position);
-		HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+		return;
 	}
+
+	/* --- Phase 4: update motor parameters --- */
+	motors[motor_number].max_position    = measured_steps;
+	motors[motor_number].unit_conversion = measured_steps / motors[motor_number].travel_length;
+	motors[motor_number].end_switch_triggered = 0;
+	motors[motor_number].allowed_direction    = 2;
+
+	snprintf(msg, sizeof(msg), "CAL M%d: max_pos=%lu, unit_conv=%lu. Moving to centre...\r\n",
+			 motor_number,
+			 motors[motor_number].max_position,
+			 motors[motor_number].unit_conversion);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
+
+	/* --- Phase 5: drive back to the centre of the travel range --- */
+	direction_change(motor_number, motors[motor_number].direction_minus);
+	HAL_Delay(100);
+	run_motor(motor_number);
+
+	if(motor_number!=2)
+	{
+		while (motors[motor_number].position > (motors[motor_number].max_position / 2)) { /* wait */ }
+	}
+	else
+	{
+		while (motors[motor_number].position > (motors[motor_number].max_position * 1 / 10)) { /* wait */ }
+	}
+
+	stop_motor(motor_number);
+
+	motors[motor_number].starting_position = motors[motor_number].position;
+	motors[motor_number].unit_conversion=motors[motor_number].max_position/motors[motor_number].travel_length;
+
+	snprintf(msg, sizeof(msg), "CAL M%d: done. Centre pos=%lu\r\n",
+			 motor_number, motors[motor_number].position);
+	HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
+
 }
 
 /**
@@ -4459,7 +4310,7 @@ void calibrate_all_motors(void)
 {
 	serial_print_string("CALIBRATION: starting motors 0, 1, 2...\r\n");
 
-	for (uint8_t m = 0; m <= 3; m++)
+	for (uint8_t m = 0; m < 3; m++)
 	{
 		motors[m].reset_requested=1;
 		serial_print_string("-----------------------\r\n");
@@ -5132,6 +4983,9 @@ void execute_robot_movement(void)
     uart_print_current_targets();
 
     premik_done=1;
+    serial_print_string("\r\n");
+    serial_print_string("MERITEV 1 STOP");
+    serial_print_string("\r\n");
 }
 
 void pospravi_robota(void)
@@ -5186,6 +5040,10 @@ void pospravi_robota(void)
 		}
 	}
 	serial_print_string("\r\nRobot je domaci poziciji.\r\n");
+	serial_print_string("\r\n");
+	serial_print_string("MERITEV 4 STOP");
+	serial_print_string("\r\n");
+	next_step=9; //ponastavitev na neuporabno vrednost
 }
 
 
@@ -5819,7 +5677,41 @@ void USART3_IRQHandler(void)
 	                        calibrate_flag=1;
 	                    }
 
-	                    //----------------konc kalibracija-------------
+	                    //------------konc rocnih komand----------------
+
+
+
+	                    //-------------ukazi iz pc za MERITEV----------
+	                    //to omogoči vstop v določene dele kode, pred tem čaka
+	                    //v primeru da je next step 0 prekine kodo in pospravi robota
+	                    //ko opravi določen del sporoči "MERITEV X STOP"
+
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "MERITEV 1 START") == 0)
+	                    {
+	                       next_step=1;
+	                       serial_print_string("Next step =1 \r\n");
+	                    }
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "MERITEV 2 START") == 0)
+						{
+						   next_step=2;
+						   serial_print_string("Next step =2 \r\n");
+						}
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "MERITEV 3 START") == 0)
+						{
+						   next_step=3;
+						   serial_print_string("Next step =3 \r\n");
+						}
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "MERITEV 4 START") == 0)
+						{
+						   next_step=4;
+						   serial_print_string("Next step =4 \r\n");
+						}
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "MERITEV KONEC") == 0)
+						{
+						   next_step=0;
+						   serial_print_string("Next step =0 \r\n");
+						}
+	                    //----------------konc meritev-------------
 	                    else
 	                    {
 	                        // Stara regulacija tlaka (opcijsko)
@@ -6291,56 +6183,76 @@ void DC_Motor_Set_Speed(int16_t speed) {
  */
 
 void DC_Motor_Update(uint16_t distance_mm) {
-    /* Preprečimo neveljavne meritve senzorja (npr. 0xFFFF ob napaki) */
+    /* Preprečimo neveljavne MERITEV senzorja (npr. 0xFFFF ob napaki) */
     if (distance_mm == 0xFFFF || distance_mm == 0) {
         return;
     }
 
     static int16_t dc_motor_speed=0;
+    static _Bool slowed_down=0;
+
+
+    if(next_step==0)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
 
     switch (dc_current_state) {
 
         case DC_STATE_REGULATED: {
             /* 1. Pogoj za ustavitev: dosežen minimum (preblizu ovire) */
-            if (distance_mm <= DC_DIST_MIN_MM) {
-            	dc_motor_speed=0;
-                DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
-                dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
-                dc_current_state = DC_STATE_WAITING;
-                char debug_msg3[64];
-				snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-				serial_print_string(debug_msg3);
-                serial_print_string("Blizu ovire! Stop. Cakam 5 sekund...\r\n");
-                break;
-            }
 
-            //if (!read_switch(3))
-            //{
-					if(distance_mm>(DC_DIST_MIN_MM+20)) {
+        	if(next_step==2 || next_step==3)
+        	{
+				if (distance_mm <= DC_DIST_MIN_MM) {
+					dc_motor_speed=0;
+					DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
+					serial_print_string("\r\n");
+					serial_print_string("MERITEV 3 STOP");
+					serial_print_string("\r\n");
+					dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
+					dc_current_state = DC_STATE_WAITING;
+					char debug_msg3[64];
+					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+					serial_print_string(debug_msg3);
+					serial_print_string("Blizu ovire! Stop. Cakam 5 sekund...\r\n");
+					break;
+				}
 
+
+					if((distance_mm>(DC_DIST_MIN_MM+20))&&(next_step==2)&&!slowed_down) {
+
+						//if(dc_motor_speed!=(-900))
+						//{
+							char debug_msg3[64];
+							snprintf(debug_msg3, sizeof(debug_msg3), "\n\nHitro se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+							serial_print_string(debug_msg3);
+						//}
 						dc_motor_speed=-900;
+						DC_Motor_Set_Speed(dc_motor_speed);
+					}
+					else if(next_step==2 && dc_motor_speed!=0) {
+						slowed_down=1;
+						dc_motor_speed=0;
+						DC_Motor_Set_Speed(dc_motor_speed);
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV 2 STOP");
+						serial_print_string("\r\n");
+					}
+					else if(next_step==3)
+					{
 						char debug_msg3[64];
-						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nHitro se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
 						serial_print_string(debug_msg3);
+						serial_print_string("\n\nPocasi se priblizujem oviri.\r\n");
+
+						dc_motor_speed=-600;
+						DC_Motor_Set_Speed(dc_motor_speed);
 					}
 					else
 					{
-						char debug_msg3[64];
-						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
-						serial_print_string(debug_msg3);
-
-						dc_motor_speed=-600;
+						dc_motor_speed=0;
+						DC_Motor_Set_Speed(dc_motor_speed);
 					}
 
-
-				DC_Motor_Set_Speed(dc_motor_speed);
-            //}
-            //else
-            //{
-            //	serial_print_string("Sprednje stikalo proženo, umikam nazaj.\r\n");
-            //	DC_Motor_Set_Speed(0);
-            //	dc_current_state = DC_STATE_RETRACTING;
-            //}
+        	}
             break;
         }
 
@@ -6350,20 +6262,20 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         	//while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3)) //cakamo da se pritisk ustali
 
-			dc_stop_timestamp = HAL_GetTick();
-        	dc_wait_time_ms=2000; //zelimo da ohrani pritisk 5 sekund
-        	dc_time_elapsed=0;
 
-        	while(dc_time_elapsed < dc_wait_time_ms)
-        	{
-        		//if(reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3))
-        		//		{
-        					dc_time_elapsed+=HAL_GetTick()-dc_stop_timestamp;
-        					dc_stop_timestamp=HAL_GetTick();
-        		//		}
-        	}
+        	if(next_step==4)
+			{
+				dc_stop_timestamp = HAL_GetTick();
+				dc_wait_time_ms=2000; //zelimo da ohrani pritisk 5 sekund
+				dc_time_elapsed=0;
 
-        	//if ((HAL_GetTick() - dc_stop_timestamp) >= dc_wait_time_ms) {
+				while(dc_time_elapsed < dc_wait_time_ms)
+				{
+
+								dc_time_elapsed+=HAL_GetTick()-dc_stop_timestamp;
+								dc_stop_timestamp=HAL_GetTick();
+
+				}
 
         		char debug_msg3[64];
 				snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
@@ -6371,7 +6283,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         		serial_print_string("Apliciranje opravljeno. Umikam motor nazaj...\r\n");
                 dc_current_state = DC_STATE_RETRACTING;
-            //}
+			}
             break;
         }
 
@@ -6389,6 +6301,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 serial_print_string("Umaknjen na varno razdaljo.\r\n");
                 premik_done=0; //ponastavimo zastavico za kinematiko
                 spik_test=0;
+                slowed_down=0;
                 break;
             }
 
