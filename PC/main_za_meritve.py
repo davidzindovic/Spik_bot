@@ -773,6 +773,7 @@ def main():
 
     loop_rate = 0.02
     prev_plc_state = -1
+    # Spremenljivke za detekcijo robov
     prev_rb_state = False
     prev_a_state = False
     prev_b_state = False
@@ -801,34 +802,32 @@ def main():
 
             gamepad.update_and_log()
 
-            rb_pressed = False
-            a_pressed = False
-            b_pressed = False
+            # Trenutna stanja gumbov (za detekcijo robov)
             if gamepad.joystick:
-                rb_pressed = bool(gamepad.joystick.get_button(5))
-                a_pressed = bool(gamepad.joystick.get_button(0))
-                b_pressed = bool(gamepad.joystick.get_button(1))
+                current_a = bool(gamepad.joystick.get_button(0))
+                current_b = bool(gamepad.joystick.get_button(1))
+                current_rb = bool(gamepad.joystick.get_button(5))
+            else:
+                current_a = False
+                current_b = False
+                current_rb = False
 
             # Obdelava UART sporočil (merilni protokol)
             process_uart_messages()
 
             # Čakanje na potrditev uporabnika med meritvijo
             if measurement_waiting_for_approval:
-                if a_pressed and not prev_a_state:
+                # Detekcija A (potrditev) ali B (prekinitev)
+                if current_a and not prev_a_state:
                     step = measurement_step_number
                     if step < 4:
                         print(f"[MERITEV] Uporabnik potrdil, nadaljujem na korak {step+1}")
                         measurement_waiting_for_approval = False
                         start_measurement_step(step+1)
-                    prev_a_state = a_pressed
-                elif b_pressed and not prev_b_state:
+                elif current_b and not prev_b_state:
                     print("[MERITEV] Uporabnik prekinil meritev.")
                     abort_measurement()
-                    prev_b_state = b_pressed
-                # Preprečimo obdelavo ostalih tipk
-                prev_a_state = a_pressed
-                prev_b_state = b_pressed
-                # Prikaz okna (če je odprto)
+                # Ne glede na to, nadaljujemo s prikazom
                 if vision_window_open:
                     if vision_preview_mode:
                         if last_color_frame is not None and last_depth_frame is not None:
@@ -841,11 +840,16 @@ def main():
                             vis_img, _, _, _, _, _, _ = vision_segmentation_result
                             cv2.imshow("Segmentacija", vis_img)
                     cv2.waitKey(1)
+                # Posodobimo prev stanja in nadaljujemo
+                prev_a_state = current_a
+                prev_b_state = current_b
+                prev_rb_state = current_rb
+                # Počakamo na konec zanke
                 time.sleep(loop_rate)
                 continue
 
             # RB: odpri/zapri okno (samo če ni v meritvi)
-            if rb_pressed and not prev_rb_state and measurement_state == "idle":
+            if current_rb and not prev_rb_state and measurement_state == "idle":
                 if not vision_window_open:
                     if pipeline is not None and last_color_frame is not None:
                         print("[PREVIEW] Odpiram okno, nastavljam mode 5.")
@@ -874,12 +878,11 @@ def main():
                     vision_segmentation_result = None
                     cv2.destroyWindow("Segmentacija")
                     mode_change_requested = False
-            prev_rb_state = rb_pressed
 
             # Obdelava, če je okno odprto in ni v meritvi
             if vision_window_open and measurement_state == "idle":
                 # A v preview -> sproži segmentacijo
-                if a_pressed and not prev_a_state and vision_preview_mode:
+                if current_a and not prev_a_state and vision_preview_mode:
                     if last_color_frame is not None and last_depth_frame is not None:
                         print("[SEGMENTACIJA] Zaganjam segmentacijo...")
                         uart_log_timestamp("MEASURE_START")
@@ -900,10 +903,9 @@ def main():
                             cv2.imshow("Segmentacija", preview)
                     else:
                         print("[SEGMENTACIJA] Ni na voljo slik.")
-                    prev_a_state = a_pressed
 
                 # A v rezultatu -> sprejem
-                elif a_pressed and not prev_a_state and not vision_preview_mode:
+                elif current_a and not prev_a_state and not vision_preview_mode:
                     if vision_segmentation_result is not None:
                         vis_img, coords, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
                         x, y, z, o = coords
@@ -920,10 +922,9 @@ def main():
                         start_measurement_step(1)
                     else:
                         print("[SEGMENTACIJA] Ni rezultata za sprejeti.")
-                    prev_a_state = a_pressed
 
                 # B v rezultatu -> zavrni
-                elif b_pressed and not prev_b_state and not vision_preview_mode:
+                elif current_b and not prev_b_state and not vision_preview_mode:
                     if vision_segmentation_result is not None:
                         _, _, raw_color_img, contour, u, v, text_lines = vision_segmentation_result
                         # Shrani sliko
@@ -934,7 +935,6 @@ def main():
                         vision_segmentation_result = None
                     else:
                         print("[SEGMENTACIJA] Ni rezultata za zavrniti.")
-                    prev_b_state = b_pressed
 
                 # Prikaz okna
                 if vision_window_open and measurement_state == "idle":
@@ -1037,6 +1037,11 @@ def main():
                                 plc.write_by_name('MAIN.CartContol.data.hitrost_ms', 0.0, pyads.PLCTYPE_LREAL)
                     except Exception as e:
                         print(f"[PLC] Napaka pri pisanju mode: {e}")
+
+            # Posodobitev prejšnjih stanj gumbov (za naslednjo zanko)
+            prev_a_state = current_a
+            prev_b_state = current_b
+            prev_rb_state = current_rb
 
             elapsed = time.time() - start_time
             time.sleep(max(0.0, loop_rate - elapsed))
