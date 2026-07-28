@@ -380,7 +380,7 @@ def process_uart_messages():
                     abort_measurement()
             # Razdalja za MERITEV 3
             elif msg.startswith("Razdalja:"):
-                if measurement_state in ("meas3", "wait3", "meas4", "wait4"):
+                if measurement_state in ("meas3", "wait3"):
                     try:
                         dist_part = msg.split(":")[1].strip()
                         dist_str = dist_part.replace(" mm", "").strip()
