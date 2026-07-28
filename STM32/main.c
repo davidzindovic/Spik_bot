@@ -3792,7 +3792,8 @@ static void MX_I2C4_Init(void) {
     GPIO_InitStruct.Pin = GPIO_PIN_12 | GPIO_PIN_13;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
     GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    //GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF4_I2C4;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
@@ -4465,7 +4466,13 @@ void calibrate_all_motors(void)
 		HAL_Delay(500); /* short pause between motors */
 	}
 
+	serial_print_string("CALIBRATION: Linear Actuator\r\n");
 
+	if(!read_swtich(3))DC_Motor_Set_Speed(600);
+
+	while(!read_swtich(3)){}
+
+	DC_Motor_Set_Speed(0);
 
 	serial_print_string("CALIBRATION: complete.\r\n");
 
@@ -5733,10 +5740,8 @@ void USART3_IRQHandler(void)
 							}
 	                    	else
 	                    	{
-	                    		 char menu[] =
-									"\r\nManual mode izklopljen.\r\n";
 
-								HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+								serial_print_string("\r\nManual mode izklopljen.\r\n");
 
 								char menu1[] =
 										"\r\n==================================================================\r\n"
@@ -5757,7 +5762,7 @@ void USART3_IRQHandler(void)
 										" Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
 										"----------------------------------------------------------------------\r\n\r\n";
 
-								HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+								HAL_UART_Transmit(&huart3, (uint8_t*)menu1, strlen(menu1), 500);
 
 	                    	}
 	                    }
@@ -6307,36 +6312,22 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 break;
             }
 
-            /* 2. Izračun hitrosti: dlje kot je ovira, hitreje se motor premika.
-               Uporabimo linearno interpolacijo med varnim minimumom in maksimumom. */
-            //int16_t calculated_speed;
 
-
-            //if (distance_mm >= DC_DIST_MAX_MM) {
-                /* Če smo izven regulacijskega območja (zelo daleč), gremo s polno hitrostjo */
-            //    calculated_speed = 950;
-            //} else
             	if(distance_mm>(DC_DIST_MIN_MM+20)) {
-                /* Linearna prilagoditev hitrosti med 200 (min hitrost za premik) in 950 (max) */
-                //float speed_ratio = (float)(distance_mm - DC_DIST_MIN_MM) / (float)(DC_DIST_MAX_MM - DC_DIST_MIN_MM);
-                //calculated_speed = 200 + (int16_t)(speed_ratio * (950 - 200));
+
             		dc_motor_speed=-900;
-            		serial_print_string("Hitro se priblizujem oviri.\r\n");
+            		char debug_msg3[64];
+					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nHitro se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+					serial_print_string(debug_msg3);
             }
             	else
-            	{serial_print_string("Pocasi se priblizujem oviri.\r\n");
+            	{
+					char debug_msg3[64];
+					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+					serial_print_string(debug_msg3);
 
             		dc_motor_speed=-200;
             	}
-
-            /* Varnostna omejitev, da ne preseže maksimalnega ARR časovnika (999) */
-            //if (calculated_speed > 950) calculated_speed = 950;
-            //if (calculated_speed < 200) calculated_speed = 200;
-
-            /* Nastavimo hitrost za vožnjo naprej (pozitivna vrednost) */
-			//char debug_msg3[64];
-			//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-			//serial_print_string(debug_msg3);
 
 
 			DC_Motor_Set_Speed(dc_motor_speed);
@@ -6393,10 +6384,9 @@ void DC_Motor_Update(uint16_t distance_mm) {
             }
 
             /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            //char debug_msg3[64];
-			//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-			//serial_print_string(debug_msg3);
-            serial_print_string("Fura nazaj.\r\n");
+            char debug_msg3[64];
+			snprintf(debug_msg3, sizeof(debug_msg3), "\n\nFura nazaj. Pocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+			serial_print_string(debug_msg3);
             dc_motor_speed=900;
             DC_Motor_Set_Speed(dc_motor_speed);
             break;
