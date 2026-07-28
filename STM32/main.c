@@ -4468,9 +4468,9 @@ void calibrate_all_motors(void)
 
 	serial_print_string("CALIBRATION: Linear Actuator\r\n");
 
-	if(!read_swtich(3))DC_Motor_Set_Speed(600);
+	if(!read_switch(3))DC_Motor_Set_Speed(600);
 
-	while(!read_swtich(3)){}
+	while(!read_switch(3)){}
 
 	DC_Motor_Set_Speed(0);
 
@@ -6312,26 +6312,33 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 break;
             }
 
+            if (!read_switch(3))
+            {
+					if(distance_mm>(DC_DIST_MIN_MM+20)) {
 
-            	if(distance_mm>(DC_DIST_MIN_MM+20)) {
+						dc_motor_speed=-900;
+						char debug_msg3[64];
+						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nHitro se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+						serial_print_string(debug_msg3);
+					}
+					else
+					{
+						char debug_msg3[64];
+						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+						serial_print_string(debug_msg3);
 
-            		dc_motor_speed=-900;
-            		char debug_msg3[64];
-					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nHitro se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
-					serial_print_string(debug_msg3);
+						dc_motor_speed=-600;
+					}
+
+
+				DC_Motor_Set_Speed(dc_motor_speed);
             }
-            	else
-            	{
-					char debug_msg3[64];
-					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
-					serial_print_string(debug_msg3);
-
-            		dc_motor_speed=-200;
-            	}
-
-
-			DC_Motor_Set_Speed(dc_motor_speed);
-
+            else
+            {
+            	serial_print_string("Sprednje stikalo proženo, umikam nazaj.\r\n");
+            	DC_Motor_Set_Speed(0);
+            	dc_current_state = DC_STATE_RETRACTING;
+            }
             break;
         }
 
@@ -6342,7 +6349,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
         	//while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3)) //cakamo da se pritisk ustali
 
 			dc_stop_timestamp = HAL_GetTick();
-        	dc_wait_time_ms=5000; //zelimo da ohrani pritisk 5 sekund
+        	dc_wait_time_ms=2000; //zelimo da ohrani pritisk 5 sekund
         	dc_time_elapsed=0;
 
         	while(dc_time_elapsed < dc_wait_time_ms)
