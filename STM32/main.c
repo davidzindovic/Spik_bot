@@ -115,7 +115,7 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      83U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MIN_MM      87U     /* below this: stop (unless reversing out) */
 #define DC_DIST_MAX_MM      130U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
@@ -4895,7 +4895,7 @@ void execute_robot_movement(void)
     izteg=sqrt(pow(target_y/cos(target_o*PI/180),2))+motors[2].offset+igla_sklop_offset;
 
     //target_x,target_y,target_o=tocka!!! ločeno se spremeni v premik motorja
-    motors[0].target_position = (int32_t)((target_x-cos((90-target_o)*PI/180)*izteg) * motors[0].unit_conversion+motors[0].max_position/2);
+    motors[0].target_position = (int32_t)((target_x-cos((90+target_o)*PI/180)*izteg) * motors[0].unit_conversion+motors[0].max_position/2);
 
     motors[1].target_position = (int32_t)(target_o * motors[1].unit_conversion+motors[1].max_position/2);
 
