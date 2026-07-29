@@ -115,7 +115,7 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      87U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MIN_MM      83U     /* below this: stop (unless reversing out) */
 #define DC_DIST_MAX_MM      130U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
