@@ -13,7 +13,7 @@ Združena koda: mobilna platforma + segmentacija z RealSense in CLIPSeg.
 - UART komunikacija: pošiljanje brez \r\n, branje odgovorov
 - Merilni protokol: MERITEV 1–4 s časovnimi žigi, shranjevanje v CSV, graf razdalje
 - GO se pošlje šele po končani meritvi (po MERITEV 4 STOP) - trenutno zakomentirano
-- Slika segmentacije se shrani takoj po uspešni segmentaciji v svojo mapo (zaporedna številka)
+- Slika segmentacije se shrani takoj po uspešni segmentaciji v svojo mapo (zaporedna številka, preveri obstoječe mape)
 """
 
 import os
@@ -31,6 +31,7 @@ import pyrealsense2 as rs
 from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 import csv
 import matplotlib.pyplot as plt
+import re
 
 # ==============================================================================
 # NASTAVITVE OKOLJA
@@ -236,18 +237,34 @@ def send_calibration():
 # ==============================================================================
 # FUNKCIJE ZA MERILNI PROTOKOL
 # ==============================================================================
-def create_measurement_folder():
-    """Ustvari novo mapo z zaporedno številko in vrne pot."""
+def get_next_measurement_folder():
+    """Pregleda obstoječe mape in vrne pot do naslednje proste mape z zaporedno številko."""
     global measurement_run_counter, measurement_folder
     base = "meritve"
     if not os.path.exists(base):
         os.makedirs(base)
-    measurement_run_counter += 1
-    folder_name = f"MERITEV_{measurement_run_counter:03d}"  # 001, 002, ...
+    
+    # Poišči vse obstoječe mape z vzorcem MERITEV_XXX
+    pattern = re.compile(r'^MERITEV_(\d{3})$')
+    max_num = 0
+    for item in os.listdir(base):
+        match = pattern.match(item)
+        if match:
+            num = int(match.group(1))
+            if num > max_num:
+                max_num = num
+    
+    next_num = max_num + 1
+    measurement_run_counter = next_num
+    folder_name = f"MERITEV_{next_num:03d}"
     measurement_folder = os.path.join(base, folder_name)
     os.makedirs(measurement_folder, exist_ok=True)
     print(f"[MERITEV] Ustvarjena mapa: {measurement_folder}")
     return measurement_folder
+
+def create_measurement_folder():
+    """Ustvari novo mapo z zaporedno številko in vrne pot (združljivost s staro kodo)."""
+    return get_next_measurement_folder()
 
 def start_measurement_step(step_num):
     """Začne korak meritve: pošlje MERITEV X START in zabeleži čas."""
@@ -613,8 +630,8 @@ def create_annotated_image(raw_color_img, contour, u, v, text_lines):
         cv2.drawContours(img, [contour], -1, (0, 255, 0), 2)
     cv2.circle(img, (u, v), 10, (0, 0, 255), -1)
     cv2.circle(img, (u, v), 10, (255, 255, 255), 2)
-    # Dodamo informacije
-    cv2.rectangle(img, (10, 10), (550, 155), (0, 0, 0), -1)
+    # Dodamo informacije – ožji pravokotnik (širina 420 namesto 550)
+    cv2.rectangle(img, (10, 10), (420, 155), (0, 0, 0), -1)
     y_pos = 30
     for line in text_lines:
         cv2.putText(img, line, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
@@ -707,7 +724,8 @@ def run_measurement(color_frame, depth_frame):
     vis_img = filtered_c_img.copy()
     if contour is not None:
         cv2.drawContours(vis_img, [contour], -1, (0, 255, 0), 2)
-    cv2.rectangle(vis_img, (10, 10), (550, 155), (0, 0, 0), -1)
+    # Ožji pravokotnik tudi na prikazni sliki
+    cv2.rectangle(vis_img, (10, 10), (420, 155), (0, 0, 0), -1)
     y_pos = 30
     for line in text_lines:
         cv2.putText(vis_img, line, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
@@ -891,10 +909,12 @@ def main():
                         res = run_measurement(last_color_frame, last_depth_frame)
                         if res is not None:
                             vis_img, display_img, coords, raw_color_img, contour, u, v, text_lines = res
-                            # Ustvari novo mapo za to segmentacijo
-                            measurement_folder = create_measurement_folder()
+                            # Ustvari novo mapo za to segmentacijo (preveri obstoječe)
+                            measurement_folder = get_next_measurement_folder()
                             # Shrani sliko (original + risbe) v to mapo
                             img_path = os.path.join(measurement_folder, "segmentacija.png")
+                            # Prepreči RuntimeError: main thread not in main loop
+                            cv2.waitKey(1)
                             cv2.imwrite(img_path, display_img)
                             print(f"[SEGMENTACIJA] Slika shranjena v {img_path}")
                             # Shrani rezultat za nadaljnjo uporabo
