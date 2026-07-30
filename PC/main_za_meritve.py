@@ -590,7 +590,7 @@ def init_vision():
             adv_mode = rs.rs400_advanced_mode(dev)
             if adv_mode.is_enabled():
                 depth_table = adv_mode.get_depth_table()
-                depth_table.disparityShift = 55
+                depth_table.disparityShift = 75#55
                 adv_mode.set_depth_table(depth_table)
                 print("[DEBUG] Disparity Shift nastavljen na 55.")
     except Exception as e:
@@ -631,7 +631,7 @@ def create_annotated_image(raw_color_img, contour, u, v, text_lines):
     cv2.circle(img, (u, v), 10, (0, 0, 255), -1)
     cv2.circle(img, (u, v), 10, (255, 255, 255), 2)
     # Dodamo informacije – ožji pravokotnik (širina 420 namesto 550)
-    cv2.rectangle(img, (10, 10), (420, 155), (0, 0, 0), -1)
+    cv2.rectangle(img, (10, 10), (250, 155), (0, 0, 0), -1)
     y_pos = 30
     for line in text_lines:
         cv2.putText(img, line, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
