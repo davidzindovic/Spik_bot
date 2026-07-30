@@ -957,52 +957,12 @@ int main(void) {
     		"\\____/\\_|    \\___/\\_| \\_/\\____/  \\___/  \\_/  \r\n";
         HAL_UART_Transmit(&huart3, (uint8_t*)startup_menu, strlen(startup_menu), 500);
 
-	//uart_transmit(text);
-
-	//run_motor(0);
-	//run_motor(1);
-	//run_motor(2);
-	//run_motor(3);
-
-	//receive_target_point(&target_x_coordinate,&target_y_coordinate,&target_z_coordinate,&target_phi);
-	//HAL_Delay(1);
-
-	//hitrost motorjev lahko štelamo tudi s stikali (pulz/rev)
-	//jermen gre samo eno stopnjo hitreje, pri več pa ruži
-/*
-    if(uart3_new_data)
-    {
-        uart3_new_data = 0;  // Počisti flag
-
-        // Izhod za debug
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Using pressure: %.2f bar\r\n", target_pressure);
-        HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), 100);
-    }
-    reguliraj_pritisk(izmeri_pritisk(), target_pressure, 0.05, 2);
-    */
-
 
 
     HAL_Delay(10);
 	DC_Motor_Init(); //dodaj pull down upor
     DC_Motor_Set_Speed(0);
 
-
-
-/*
-    while(1)
-   {
-   	_Bool sw0=read_switch(0);
-		_Bool sw1=read_switch(1);
-		_Bool sw2=read_switch(2);
-		_Bool sw3=read_switch(3);
-		char debug_msg[100];
-		snprintf(debug_msg, sizeof(debug_msg), " SW0: %u | SW1: %u | SW2: %u | SW3: %u \r\n", sw0,sw1,sw2,sw3);
-		serial_print_string(debug_msg);
-		HAL_Delay(200);
-	}
-*/
 
 
     char menu[] =
@@ -1029,11 +989,7 @@ int main(void) {
     		"----------------------------------------------------------------------\r\n\r\n";
 
 	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
-	//uart_print_current_targets();
 
-	//test_motor(3);
-
-	//premik_done=1;
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -1042,7 +998,7 @@ int main(void) {
 		 //---------------------MERITEV------------------
 
 		 if(next_step==1 && premik_done==0)execute_robot_movement();
-		 else if((next_step==2 || next_step==3 || next_step==4 || next_step==0)&&premik_done==1)
+		 else if((next_step==2 || next_step==3 || next_step==5 || next_step==0)&&premik_done==1)
 		 {
  		            if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||(vl53_data_ready&&spik_test))
  		            {
@@ -1115,6 +1071,43 @@ int main(void) {
  		            }
 		 }
 		 else if((next_step==4 || next_step==0) && premik_done==0)
+		 {
+			 float target_pressure=1.8; //zelimo 1.8 bara imeti v sistemu
+			 float target_accuracy=0.05;
+			 uint8_t pump_motor_number=3;
+
+			 //vzpostavimo stabilen pritisk
+			 while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,target_accuracy,pump_motor_number)){}
+
+			uint32_t pumpa_stop_timestamp = HAL_GetTick();
+			uint32_t pumpa_wait_time_ms=10000; //zelimo da ohrani pritisk 10 sekund
+			uint32_t pump_time_elapsed=0;
+
+			while(pump_time_elapsed < pumpa_wait_time_ms)
+			{
+				if(reguliraj_pritisk(izmeri_pritisk(),target_pressure,target_accuracy,pump_motor_number))
+				{
+					pump_time_elapsed+=HAL_GetTick()-pumpa_stop_timestamp;
+					pumpa_stop_timestamp=HAL_GetTick();
+				}
+				else
+				{
+					pumpa_stop_timestamp = HAL_GetTick();
+				}
+			}
+
+			 //nato držimo se kolikor dolgo je nastavljeno
+
+			serial_print_string("\r\nCrpanje opravljeno.\r\n");
+			serial_print_string("\r\n");
+			serial_print_string("MERITEV 4 STOP");
+			serial_print_string("\r\n");
+			serial_print_string("MERITEV 4 STOP");
+			serial_print_string("\r\n");
+			serial_print_string("MERITEV 4 STOP");
+			serial_print_string("\r\n");
+		 }
+		 else if((next_step==5 || next_step==0) && premik_done==0)
 		 {
 			 pospravi_robota();
 		 }
@@ -3065,6 +3058,10 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     float napaka = izmerjen_tlak - zeljen_tlak;
     float kp = 2.0;  // Proporcionalni koeficient (po potrebi prilagodi)
 
+    char debug_msg_pritisk[64];
+	snprintf(debug_msg_pritisk, sizeof(debug_msg_pritisk), "\n\nPritisk: %f bar\r\n", izmerjen_tlak);
+	serial_print_string(debug_msg_pritisk);
+
     // Preveri ali smo že v toleranci (ustaljen tlak)
     if((napaka > -toleranca) && (napaka < toleranca)) {
 
@@ -3073,15 +3070,15 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     	return true;  // Tlak je ustaljen
     }
 
+    /*
     serial_print_string("\r\nizmerjeno: ");
     serial_print_float(izmerjen_tlak);
     serial_print_string("\r\n");
     serial_print_string("nastavljeno: ");
     serial_print_float(zeljen_tlak);
     serial_print_string("\r\n\n");
-    //serial_print_string("napaka: ");
-    //serial_print_float(napaka);
-    //serial_print_string("\r\n");
+    */
+
     //serial_print_string("----------------------\r\n\n");
 
     // Tlak je previsok - potrebno ga je znižati
@@ -5090,11 +5087,11 @@ void pospravi_robota(void)
 	}
 	serial_print_string("\r\nRobot je domaci poziciji.\r\n");
 	serial_print_string("\r\n");
-	serial_print_string("MERITEV 4 STOP");
+	serial_print_string("MERITEV 5 STOP");
 	serial_print_string("\r\n");
-	serial_print_string("MERITEV 4 STOP");
+	serial_print_string("MERITEV 5 STOP");
 	serial_print_string("\r\n");
-	serial_print_string("MERITEV 4 STOP");
+	serial_print_string("MERITEV 5 STOP");
 	serial_print_string("\r\n");
 	next_step=9; //ponastavitev na neuporabno vrednost
 }
@@ -5779,6 +5776,11 @@ void USART3_IRQHandler(void)
 						   next_step=4;
 						   serial_print_string("Next step =4 \r\n");
 						}
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "MERITEV 5 START") == 0)
+						{
+						   next_step=5;
+						   serial_print_string("Next step =5 \r\n");
+						}
 	                    else if(strcasecmp((char*)uart3_rx_buffer, "MERITEV KONEC") == 0)
 						{
 						   next_step=0;
@@ -6352,10 +6354,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
             /* Preverimo, če je pretekel določen čas (npr. 5000 ms) brez blokiranja kode */
             //pocakamo da pride do pravilnega pritiska, nato štopamo koliko časa vzdržuje pritisk
 
-        	//while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,0.05,3)) //cakamo da se pritisk ustali
-
-
-        	if(next_step==4)
+        	if(next_step==5)
 			{
 				dc_stop_timestamp = HAL_GetTick();
 				dc_wait_time_ms=2000; //zelimo da ohrani pritisk 5 sekund
