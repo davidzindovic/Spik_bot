@@ -1070,7 +1070,7 @@ int main(void) {
 		                }
  		            }
 		 }
-		 else if((next_step==4 || next_step==0) && premik_done==0)
+		 else if(next_step==4)
 		 {
 			 float target_pressure=1.8; //zelimo 1.8 bara imeti v sistemu
 			 float target_accuracy=0.05;
@@ -6265,7 +6265,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
     static int16_t dc_motor_speed=0;
     static _Bool slowed_down=0;
-
+    static _Bool panic_stop=0;
 
     if(next_step==0)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
 
@@ -6276,6 +6276,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         	if(next_step==2 || next_step==3)
         	{
+        		if(!panic_stop)
+        		{
 				if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) {
 					dc_motor_speed=0;
 					DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
@@ -6344,6 +6346,33 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					{
 						dc_motor_speed=0;
 						DC_Motor_Set_Speed(dc_motor_speed);
+					}
+        		}
+					if(read_switch(3) && dc_motor_speed<0)//ce se zaleti v sprednje stikalo
+					{
+						dc_motor_speed=0;
+						DC_Motor_Set_Speed(dc_motor_speed);
+
+						panic_stop=1;//da ne pade v kak case
+					}
+
+					if(panic_stop)//premaknemo nazaj in prisilimo pospravljanje
+					{
+						dc_motor_speed=600;
+						DC_Motor_Set_Speed(dc_motor_speed);
+						HAL_Delay(1000);
+						dc_motor_speed=0;
+						DC_Motor_Set_Speed(dc_motor_speed);
+
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV ZAKLJUCENA");
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV ZAKLJUCENA");
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV ZAKLJUCENA");
+						serial_print_string("\r\n");
+
+						next_step=0;
 					}
 
         	}
