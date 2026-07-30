@@ -511,6 +511,8 @@ _Bool calibrate_flag=0;
 _Bool switch_test=0;
 _Bool tof_test=0;
 _Bool spik_test=0;
+_Bool pumpa_flag=0;
+_Bool tlak_flag=0;
 
 _Bool manual_mode_flag=0;
 _Bool manual_mode_array[8]={0,0,0,0,0,0,0,0};
@@ -856,7 +858,7 @@ int main(void) {
 		.direction_port = GPIOD,//D15
 		.timer = &htim12,
 		.timer_channel = TIM_CHANNEL_2,
-		.frequency = 1000,
+		.frequency = 100,
 		.motor_pin = GPIO_PIN_15,//D11
 		.motor_port = GPIOB,
 		.max_position = 10000,
@@ -1020,6 +1022,8 @@ int main(void) {
     		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
     		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
     		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
+    		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
+    		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
     		"----------------------------------------------------------------------\r\n"
             " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
     		"----------------------------------------------------------------------\r\n\r\n";
@@ -1210,6 +1214,31 @@ if (switch_test==1)
  }
 //------------------end tof test------------------
 
+//-------------pumpa test---------------
+// driver: Pololu DRV8825, delovna temp 60 °C
+if(pumpa_flag && !motors[3].running)
+{
+	serial_print_string("\r\nZaganjam pumpo.\r\n");
+	run_motor(3);//zaženemo pumpo če ni že zagnana
+}
+else if(!pumpa_flag && motors[3].running)
+{
+	serial_print_string("\r\nUstavljam pumpo.\r\n");
+	stop_motor(3);
+}
+//--------------konec pumpa test-----------------
+//---------senzor za tlak test-------------
+if(tlak_flag)
+{
+	for(uint8_t tlak_oneshot=0;tlak_oneshot<5;tlak_oneshot++)
+	{
+		serial_print_string("\r\nPovprečen izmerjen tlak:");
+		serial_print_float(izmeri_pritisk());
+		serial_print_string("\r\n");
+	}
+	tlak_flag=0;
+}
+//-----------konc tlak-------------------
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -5631,17 +5660,21 @@ void USART3_IRQHandler(void)
 										"\r\n==================================================================\r\n"
 										//" KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
 										"======================================================================\r\n"
-										" Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
-										"  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
-										"  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
-										"  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
-										"  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
-										"  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
-										"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
-										"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
-										"  calibrate   -> Izvede kalibracijo\r\n"
-										"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
-										"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+							            " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
+							            "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
+							            "  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
+							            "  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
+							            "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
+							            "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
+							    		"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
+							    		"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+							    		"  calibrate   -> Izvede kalibracijo\r\n"
+							    		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
+							    		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+							    		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
+							    		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
+							    		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
+							    		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
 										"----------------------------------------------------------------------\r\n"
 										" Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
 										"----------------------------------------------------------------------\r\n\r\n";
@@ -5672,6 +5705,10 @@ void USART3_IRQHandler(void)
 	                            		"  calibrate   -> Izvede kalibracijo\r\n"
 	                            		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
 	                            		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+	                            		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
+	                            		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
+	                            		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
+	                            		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
 	                            		"----------------------------------------------------------------------\r\n"
 	                                    " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
 	                            		"----------------------------------------------------------------------\r\n\r\n";
@@ -5700,6 +5737,18 @@ void USART3_IRQHandler(void)
 
 	                        calibrate_flag=1;
 	                    }
+
+	                    //----------------pumpa---------------
+	                    else if(strcasecmp((char*)uart3_rx_buffer, "pumpa") == 0)
+	                    {
+	                        pumpa_flag=!pumpa_flag;
+	                    }
+
+	                    //------------senzor za tlak----------------
+						else if(strcasecmp((char*)uart3_rx_buffer, "tlak") == 0)
+						{
+							tlak_flag=!tlak_flag;
+						}
 
 	                    //------------konc rocnih komand----------------
 
