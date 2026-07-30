@@ -6266,6 +6266,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
     static int16_t dc_motor_speed=0;
     static _Bool slowed_down=0;
     static _Bool panic_stop=0;
+    static uint16_t start_distance=0;
 
     if(next_step==0)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
 
@@ -6276,6 +6277,11 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         	if(next_step==2 || next_step==3)
         	{
+        		if(start_distance==0 && distance_mm!=0 && distance_mm!=65535)
+        		{
+        			start_distance=distance_mm;
+        		}
+
         		if(!panic_stop)
         		{
 				if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) {
@@ -6348,7 +6354,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						DC_Motor_Set_Speed(dc_motor_speed);
 					}
         		}
-					if(read_switch(3) && dc_motor_speed<0)//ce se zaleti v sprednje stikalo
+					if(read_switch(3) && dc_motor_speed<0 && (distance_mm-start_distance)>30)//ce se zaleti v sprednje stikalo
 					{
 						dc_motor_speed=0;
 						DC_Motor_Set_Speed(dc_motor_speed);
@@ -6422,6 +6428,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 premik_done=0; //ponastavimo zastavico za kinematiko
                 spik_test=0;
                 slowed_down=0;
+                start_distance=0;
                 break;
             }
 
