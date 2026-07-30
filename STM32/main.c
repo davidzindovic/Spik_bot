@@ -1019,7 +1019,7 @@ int main(void) {
 
 		                if (false_read_tof>num_samples)
 		                {
-		                	false_read_tof=0;
+		                	//false_read_tof=0;
 		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
 
