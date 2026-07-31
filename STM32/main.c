@@ -1106,13 +1106,15 @@ int main(void) {
 			 uint8_t pump_motor_number=3;
 
 			 //vzpostavimo stabilen pritisk
-			 while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,target_accuracy,pump_motor_number)){}
+			 while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,target_accuracy,pump_motor_number) && (next_step!=0)){}
 
 			uint32_t pumpa_stop_timestamp = HAL_GetTick();
 			uint32_t pumpa_wait_time_ms=10000; //zelimo da ohrani pritisk 10 sekund
 			uint32_t pump_time_elapsed=0;
 
-			while(pump_time_elapsed < pumpa_wait_time_ms)
+
+			 //nato držimo se kolikor dolgo je nastavljeno
+			while((pump_time_elapsed < pumpa_wait_time_ms) && (next_step!=0))
 			{
 				if(reguliraj_pritisk(izmeri_pritisk(),target_pressure,target_accuracy,pump_motor_number))
 				{
@@ -1125,7 +1127,7 @@ int main(void) {
 				}
 			}
 
-			 //nato držimo se kolikor dolgo je nastavljeno
+			stop_motor(pump_motor_number);
 
 			serial_print_string("\r\nCrpanje opravljeno.\r\n");
 			serial_print_string("\r\n");
@@ -3157,7 +3159,7 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     	if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_minus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
 
         //int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
-        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka *(1-2*(napaka<0)) * 100);;  // Hitrost sorazmerna napaki
+        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka *(1-2*(napaka<0)) * 100);  // Hitrost sorazmerna napaki
         //rabis ref hitrost pri znani frekvenci
 
         // Omeji hitrost na 0-100%
