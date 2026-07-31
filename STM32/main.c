@@ -5592,15 +5592,18 @@ void USART3_IRQHandler(void)
 	                        }
 	                        */
 
+	                        if(val < 0)
+							{
+								char err[] = "\r\nERROR: Y mora biti pozitiven! Popravljam\r\n";
+								HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
+								val=-val;
+							}
+
 	                        float temp_target=val+motors[2].offset+igla_sklop_offset;
 	                        float x_component=(temp_target-0)/tan((90-target_o)*PI/180);
 
-	                        if(val < 0)
-	                        {
-	                            char err[] = "\r\nERROR: Y mora biti pozitiven!\r\n";
-	                            HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
-	                        }
-	                        else if((x_component<robot_bbox.min_x) || (x_component>robot_bbox.max_x))
+
+	                        if((x_component<robot_bbox.min_x) || (x_component>robot_bbox.max_x))
 	                        {
 	                        	char err[] = "\r\nERROR: Y izven Bounding Boxa (x component)!\r\n";
 	    						HAL_UART_Transmit(&huart3, (uint8_t*)err, strlen(err), 100);
