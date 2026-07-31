@@ -989,7 +989,8 @@ int main(void) {
     		"----------------------------------------------------------------------\r\n\r\n";
 
 	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
-
+	static _Bool post_pospravljanje=0;
+	static uint16_t prej_step=10;
 	while (1) {
 		/* USER CODE END WHILE */
 
@@ -1087,7 +1088,7 @@ int main(void) {
 					                	}
 					                	else
 					                	{
-					                		next_step==0;
+					                		next_step=0;
 					                	}
 					                }
 					                */
@@ -1139,8 +1140,15 @@ int main(void) {
 		 {
 			 stop_motor(3);
 			 pospravi_robota();
+			 post_pospravljanje=1;
 		 }
-
+if(post_pospravljanje && (prej_step!=next_step))
+	{
+	prej_step=next_step;
+	serial_print_string("\r\n");
+	serial_print_uint16((uint16_t)next_step);
+	serial_print_string("\r\n");
+	}
 
 //---------------------konec dela za MERITEV------------------------
 
@@ -5483,6 +5491,10 @@ void USART3_IRQHandler(void)
 	        // NUJNO: Branje registra RDR avtomatsko počisti RXNE zastavico!
 	     //   volatile uint8_t received_char = (uint8_t)(USART3->RDR & 0xFF);
 
+	//if (USART3->ISR & (USART_ISR_ORE | USART_ISR_NE | USART_ISR_FE | USART_ISR_PE))
+   // {
+    //    USART3->ICR = USART_ICR_ORECF | USART_ICR_NECF | USART_ICR_FECF | USART_ICR_PECF;
+    //}
 
 	    	static uint32_t old_target_x=0;
 	    	static uint32_t old_target_o=0;
@@ -5533,6 +5545,7 @@ void USART3_IRQHandler(void)
 	            // Preveri, ali je prejet konec vrstice
 	            if(received_char == '\n' || received_char == '\r')
 	            {
+	            	serial_print_string("\r\nnovo_uart_sporocilo\r\n");
 	                if(uart3_rx_index > 0)
 	                {
 	                    // Zaključi string z null terminatorjem
@@ -6395,7 +6408,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						DC_Motor_Set_Speed(dc_motor_speed);
 					}
         		}
-					if(read_switch(3) && dc_motor_speed<0 && (HAL_GetTick()-dc_motor_speed)>1000)//ce se zaleti v sprednje stikalo
+        		/*
+					if(read_switch(3) && dc_motor_speed<0 && (HAL_GetTick()-dc_sw_timestamp)>3000)//ce se zaleti v sprednje stikalo
 					{
 						dc_motor_speed=0;
 						DC_Motor_Set_Speed(dc_motor_speed);
@@ -6403,7 +6417,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						panic_stop=1;//da ne pade v kak case
 					}
 
-					if(panic_stop)//premaknemo nazaj in prisilimo pospravljanje
+					if(panic_stop==1)//premaknemo nazaj in prisilimo pospravljanje
 					{
 						dc_motor_speed=600;
 						DC_Motor_Set_Speed(dc_motor_speed);
@@ -6421,6 +6435,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
 						next_step=0;
 					}
+					*/
 
         	}
             break;
@@ -6474,6 +6489,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 spik_test=0;
                 slowed_down=0;
                 start_distance=0;
+                panic_stop=0;
                 break;
             }
 
