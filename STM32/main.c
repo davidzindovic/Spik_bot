@@ -997,7 +997,7 @@ int main(void) {
 
 		 //---------------------MERITEV------------------
 
-		 if((next_step==1 || next_step==0) && premik_done==0)execute_robot_movement();
+		 if((next_step==1) && premik_done==0)execute_robot_movement();
 		 else if((next_step==2 || next_step==3 || next_step==5 || next_step==0)&&premik_done==1)
 		 {
 			 	 	if(next_step==5 || next_step==0)
@@ -1137,6 +1137,7 @@ int main(void) {
 		 }
 		 else if((next_step==5 || next_step==0) && premik_done==0)
 		 {
+			 stop_motor(3);
 			 pospravi_robota();
 		 }
 
@@ -6313,8 +6314,13 @@ void DC_Motor_Update(uint16_t distance_mm) {
         		if(!panic_stop)
         		{
 				if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) {
+
+
+					if(dc_motor_speed!=0)
+					{
 					dc_motor_speed=0;
 					DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
+
 					serial_print_string("\r\n");
 					serial_print_string("MERITEV 3 STOP");
 					serial_print_string("\r\n");
@@ -6324,11 +6330,13 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					serial_print_string("\r\n");
 					dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
 					//dc_current_state = DC_STATE_WAITING;
-					dc_current_state = DC_STATE_RETRACTING;
+					//dc_current_state = DC_STATE_RETRACTING;
 					char debug_msg3[64];
 					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
 					serial_print_string(debug_msg3);
-					serial_print_string("Blizu ovire! Stop. Cakam 5 sekund...\r\n");
+					serial_print_string("Blizu ovire! Stop.\r\n");
+					next_step=9;
+					}
 					break;
 				}
 				else if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2)) {
