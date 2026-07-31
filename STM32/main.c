@@ -997,16 +997,25 @@ int main(void) {
 
 		 //---------------------MERITEV------------------
 
-		 if(next_step==1 && premik_done==0)execute_robot_movement();
+		 if((next_step==1 || next_step==0) && premik_done==0)execute_robot_movement();
 		 else if((next_step==2 || next_step==3 || next_step==5 || next_step==0)&&premik_done==1)
 		 {
- 		            if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||(vl53_data_ready&&spik_test))
+			 	 	if(next_step==5 || next_step==0)
+			 	 	{
+			 	 		DC_Motor_Update(6);
+			 	 	}
+			 	 	else if ((vl53_data_ready && !motors[0].running && !motors[1].running && !motors[2].running && premik_done)||(vl53_data_ready&&spik_test))
  		            {
+			 	 		static uint16_t last_valid_distance=0;
+			 	 		static uint32_t distance_validate_timestamp=0;
+
  		            	const uint8_t num_samples=5;
 						static uint16_t action_moving_average_array[5];
 						static uint8_t action_moving_array_index=0;
 						static _Bool moving_average_ready=0;
 						uint32_t avrg_razdalja=0;
+
+						static uint8_t num_fail_prints=0;
 
 		                vl53_data_ready = 0;
 		                trenutna_razdalja = VL53L0X_ReadDistance();
@@ -1019,29 +1028,32 @@ int main(void) {
 
 		                if (false_read_tof>num_samples)
 		                {
-		                	//false_read_tof=0;
 		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
+		                	num_fail_prints++;
 
 		                	I2C4_BusRecovery();
 		                	HAL_Delay(10);
 		                	MX_I2C4_Init();       // ponovna inicializacija
 		                	VL53L0X_Init();       // ponovni zagon senzorja
+
+		                	if(num_fail_prints>=10)
+		                	{
+		                		num_fail_prints=0;
+		                		next_step=0;
+		            			serial_print_string("\r\n");
+		            			serial_print_string("MERITEV SENSOR FAIL");
+		            			serial_print_string("\r\n");
+		            			serial_print_string("MERITEV SENSOR FAIL");
+		            			serial_print_string("\r\n");
+		            			serial_print_string("MERITEV SENSOR FAIL");
+		            			serial_print_string("\r\n");
+		                	}
 		                }
-		                /*
-		                else if (read_switch(3))
-		                {
-		                	//serial_print_string("Koncno stikalo pritisnjeno, umikam...\r\n");
-		                	DC_Motor_Set_Speed(0);
-		                	dc_motor_speed=-dc_motor_speed;
-		                	DC_Motor_Set_Speed(dc_motor_speed);
-		                	//while(read_switch(3)){}//pocakamo da se umakne dovolj stran
-		                	DC_Motor_Set_Speed(0);
-		                	dc_motor_speed=-dc_motor_speed; //nastavimo hitrost nazaj na originalno
-		                }
-		                */
+
 		                else
 		                {
+		                	num_fail_prints=0;
 		                if (trenutna_razdalja!= 65535 && trenutna_razdalja!=0)
 		                    {
 		                		action_moving_average_array[action_moving_array_index]=trenutna_razdalja;
@@ -1063,6 +1075,22 @@ int main(void) {
 										avrg_razdalja+=action_moving_average_array[i];
 									}
 									avrg_razdalja/=(num_samples+1);
+
+									/*
+					                //če se sensor reading zatakne v hitri fazi
+									if(distance_validate_timestamp==0)distance_validate_timestamp=HAL_GetTick();
+					                if((HAL_GetTick()-distance_validate_timestamp)<1000 && dc_motor_speed==-900)
+					                {
+					                	if(sqrt(pow(trenutna_razdalja-last_valid_distance,2))>=2)
+					                	{
+					                		last_valid_distance=trenutna_razdalja; //če v času 1.5 s se premakne za 3 mm je ok
+					                	}
+					                	else
+					                	{
+					                		next_step==0;
+					                	}
+					                }
+					                */
 
 									DC_Motor_Update(avrg_razdalja);
 								}
@@ -3691,14 +3719,14 @@ static void MX_I2C4_Init(void) {
     GPIO_InitStruct.Pin = GPIO_PIN_12 | GPIO_PIN_13;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
     GPIO_InitStruct.Pull = GPIO_PULLUP;
-    //GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    //GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
     GPIO_InitStruct.Alternate = GPIO_AF4_I2C4;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
     // 3. Then init the peripheral
     hi2c4.Instance = I2C4;
-    hi2c4.Init.Timing = 0x10808DD3;//0x00D0C7FF
+    hi2c4.Init.Timing = 0x00D0C7FF;//0x10808DD3
     hi2c4.Init.OwnAddress1 = 0;
     hi2c4.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
     hi2c4.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -4965,7 +4993,7 @@ void execute_robot_movement(void)
     while (motors[0].running || motors[1].running)
     {
         // Varnostni izhod ob sprožitvi stikal
-        if (motors[0].end_switch_triggered || motors[1].end_switch_triggered) {
+        if (motors[0].end_switch_triggered || motors[1].end_switch_triggered || next_step==0) {
             stop_all_motors();
             serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom X/O!\r\n");
             return;
@@ -5002,7 +5030,7 @@ void execute_robot_movement(void)
         // ČAKANJE IN KONSTANTEN IZPIS MED PREMIKOM ORIENTACIJE
         while (motors[2].running)
         {
-            if (motors[2].end_switch_triggered) {
+            if (motors[2].end_switch_triggered || next_step==0) {
                 stop_motor(2);
                 serial_print_string("\r\nALERT: Koncno stikalo sprozeno med premikom izteg!\r\n");
                 return;
@@ -6268,7 +6296,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
     static _Bool panic_stop=0;
     static uint16_t start_distance=0;
 
-    if(next_step==0)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
+    if(next_step==0 || next_step==5)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
 
     switch (dc_current_state) {
 
@@ -6295,7 +6323,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					serial_print_string("MERITEV 3 STOP");
 					serial_print_string("\r\n");
 					dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
-					dc_current_state = DC_STATE_WAITING;
+					//dc_current_state = DC_STATE_WAITING;
+					dc_current_state = DC_STATE_RETRACTING;
 					char debug_msg3[64];
 					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
 					serial_print_string(debug_msg3);
@@ -6384,10 +6413,14 @@ void DC_Motor_Update(uint16_t distance_mm) {
         	}
             break;
         }
-
+/*
         case DC_STATE_WAITING: {
-            /* Preverimo, če je pretekel določen čas (npr. 5000 ms) brez blokiranja kode */
-            //pocakamo da pride do pravilnega pritiska, nato štopamo koliko časa vzdržuje pritisk
+
+        	if(dc_motor_speed!=0)
+        	{
+        		dc_motor_speed=0;
+				DC_Motor_Set_Speed(dc_motor_speed);
+        	}
 
         	if(next_step==5)
 			{
@@ -6403,16 +6436,16 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
 				}
 
-        		char debug_msg3[64];
-				snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-				serial_print_string(debug_msg3);
+        		//char debug_msg3[64];
+				//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+				//serial_print_string(debug_msg3);
 
         		serial_print_string("Apliciranje opravljeno. Umikam motor nazaj...\r\n");
                 dc_current_state = DC_STATE_RETRACTING;
 			}
             break;
         }
-
+*/
         case DC_STATE_RETRACTING: {
             /* 1. Pogoj za konec umikanja: ko dosežemo želeno varnostno razdaljo (maksimum) */
             //if (distance_mm >= DC_DIST_MAX_MM) {
@@ -6421,10 +6454,10 @@ void DC_Motor_Update(uint16_t distance_mm) {
                 DC_Motor_Set_Speed(dc_motor_speed);
                 dc_current_state = DC_STATE_REGULATED;
                 zagon_izvedbe = false;
-                char debug_msg3[64];
-				snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-				serial_print_string(debug_msg3);
-                serial_print_string("Umaknjen na varno razdaljo.\r\n");
+                //char debug_msg3[64];
+				//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+				//serial_print_string(debug_msg3);
+                serial_print_string("\r\nUmaknjen na varno razdaljo.\r\n");
                 premik_done=0; //ponastavimo zastavico za kinematiko
                 spik_test=0;
                 slowed_down=0;
@@ -6433,10 +6466,16 @@ void DC_Motor_Update(uint16_t distance_mm) {
             }
 
             /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            char debug_msg3[64];
-			snprintf(debug_msg3, sizeof(debug_msg3), "\n\nFura nazaj. Razdalja: %u mm \r\n", distance_mm);
-			serial_print_string(debug_msg3);
-            dc_motor_speed=900;
+            //char debug_msg3[64];
+			//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nFura nazaj. Razdalja: %u mm \r\n", distance_mm);
+			//serial_print_string(debug_msg3);
+
+        	if(dc_motor_speed!=900)
+        	{
+        		serial_print_string("\r\nFura nazaj.\r\n");
+        	}
+
+        	dc_motor_speed=900;
             DC_Motor_Set_Speed(dc_motor_speed);
             break;
         }
