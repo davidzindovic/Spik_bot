@@ -6297,6 +6297,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
     static _Bool panic_stop=0;
     static uint16_t start_distance=0;
 
+    static uint32_t dc_sw_timestamp=0;
+
     if(next_step==0 || next_step==5)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
 
     switch (dc_current_state) {
@@ -6362,6 +6364,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						//}
 						dc_motor_speed=-900;
 						DC_Motor_Set_Speed(dc_motor_speed);
+						dc_sw_timestamp=HAL_GetTick();
 					}
 					else if(next_step==2 && dc_motor_speed!=0) {
 						slowed_down=1;
@@ -6384,6 +6387,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
 						dc_motor_speed=-600;
 						DC_Motor_Set_Speed(dc_motor_speed);
+						dc_sw_timestamp=HAL_GetTick();
 					}
 					else
 					{
@@ -6391,7 +6395,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						DC_Motor_Set_Speed(dc_motor_speed);
 					}
         		}
-					if(read_switch(3) && dc_motor_speed<0 && (distance_mm-start_distance)>30)//ce se zaleti v sprednje stikalo
+					if(read_switch(3) && dc_motor_speed<0 && (HAL_GetTick()-dc_motor_speed)>1000)//ce se zaleti v sprednje stikalo
 					{
 						dc_motor_speed=0;
 						DC_Motor_Set_Speed(dc_motor_speed);
@@ -6403,7 +6407,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					{
 						dc_motor_speed=600;
 						DC_Motor_Set_Speed(dc_motor_speed);
-						HAL_Delay(1000);
+						HAL_Delay(500);
 						dc_motor_speed=0;
 						DC_Motor_Set_Speed(dc_motor_speed);
 
