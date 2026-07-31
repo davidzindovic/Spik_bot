@@ -141,24 +141,24 @@ vision_preview_mode	True = prikaz predogleda, False = prikaz rezultata
 
 ## Pogosti ukazi za testiranje
 
-    Segmentacija – pritisni A v predogledu.
+Segmentacija – pritisni A v predogledu.
 
-    Sprejem koordinat – pritisni A v rezultatu (začne meritev).
+Sprejem koordinat – pritisni A v rezultatu (začne meritev).
 
-    Zavrnitev – pritisni B v rezultatu (slika se shrani, CSV zabeleži čas segmentacije).
+Zavrnitev – pritisni B v rezultatu (slika se shrani, CSV zabeleži čas segmentacije).
 
-    Kalibracija – pritisni BACK (gumb 6) v prostem teku.
+Kalibracija – pritisni BACK (gumb 6) v prostem teku.
 
 ## Shranjevanje slik
 
-    Slika segmentacije se shrani v mapo meritve/MERITEV_XXX/segmentacija.png takoj po uspešni segmentaciji.
+Slika segmentacije se shrani v mapo meritve/MERITEV_XXX/segmentacija.png takoj po uspešni segmentaciji.
 
-    Slika vsebuje originalno barvno sliko z narisano konturo, rdečo piko in izpisanimi koordinatami.
+Slika vsebuje originalno barvno sliko z narisano konturo, rdečo piko in izpisanimi koordinatami.
 
 ## Opombe
 
-    disparityShift vpliva na natančnost globine – če se ti zdi, da so razdalje napačne, poskusi spremeniti to vrednost (trenutno 75).
+disparityShift vpliva na natančnost globine – če se ti zdi, da so razdalje napačne, poskusi spremeniti to vrednost (trenutno 75).
 
-    CLIPSeg model deluje na CPU, zato segmentacija traja nekaj sekund – to je normalno.
+CLIPSeg model deluje na CPU, zato segmentacija traja nekaj sekund – to je normalno.
 
-    Če želiš hitrejšo segmentacijo, lahko zmanjšaš velikost slike (trenutno 1280×720).
+Če želiš hitrejšo segmentacijo, lahko zmanjšaš velikost slike (trenutno 1280×720).
