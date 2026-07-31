@@ -14,8 +14,10 @@ Združena koda: mobilna platforma + segmentacija z RealSense in CLIPSeg.
 - Merilni protokol: MERITEV 1–5 s časovnimi žigi, shranjevanje v CSV, graf razdalje in pritiska
 - MERITEV 4 zbira tlake, MERITEV 5 je premik nazaj
 - Sporočilo "MERITEV ZAKLJUCENA" takoj zaključi meritev in pripravi sistem za novo vožnjo
+- Sporočilo "MERITEV SENSOR FAIL" zaključi MERITEV 3 in nadaljuje na MERITEV 5
 - Čas segmentacije (korak 0) se shrani takoj na začetku
-- CSV se ustvari na začetku in dopolnjuje sproti
+- CSV se ustvari na začetku in dopolnjuje sproti (takoj flush na disk)
+- D-pad desno med meritvijo sproži zaključek in pospravljanje
 """
 
 import os
@@ -44,7 +46,7 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
 try:
     sys.modules['torchaudio'] = None
-except Exception:
+except Exception:   
     pass
 
 # ==============================================================================
@@ -120,7 +122,8 @@ segmentation_elapsed = 0.0          # čas segmentacije (od pritiska A do konca 
 meas3_start_time = None             # začetni čas MERITEV 3 (za graf razdalje)
 meas4_start_time = None             # začetni čas MERITEV 4 (za graf pritiska)
 times_csv_writer = None             # CSV writer za sprotno pisanje
-times_csv_file = None               # datoteka CSV
+times_csv_file_handle = None        # Odprti datotečni objekt za flush
+times_csv_file = None               # Ime datoteke (za izpis)
 
 # UART sporočila iz poslušalca
 uart_messages = []
@@ -142,8 +145,10 @@ def uart_listener():
     """Neprekinjeno bere UART in dodaja sporočila v čakalno vrsto."""
     global uart_ser, uart_messages
     try:
-        uart_ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
-        print(f"[UART] Poslušalec aktiviran na {SERIAL_PORT}")
+        # Vedno poskusimo odpreti port, če ni odprt
+        if uart_ser is None or not uart_ser.is_open:
+            uart_ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0)
+            print(f"[UART] Poslušalec aktiviran na {SERIAL_PORT}")
         while True:
             if uart_sending.is_set():
                 time.sleep(0.01)
@@ -157,7 +162,7 @@ def uart_listener():
                                 print(f"[UART RX] {line.strip()}")
                                 with uart_messages_lock:
                                     uart_messages.append(line.strip())
-                                keywords = ["START", "STOP", "MEASURE", "DONE", "ERROR", "OK", "GO", "ACK", "ECHO", "CALIBRATION", "EXIT", "MERITEV", "Razdalja", "Pritisk", "ZAKLJUCENA"]
+                                keywords = ["START", "STOP", "MEASURE", "DONE", "ERROR", "OK", "GO", "ACK", "ECHO", "CALIBRATION", "EXIT", "MERITEV", "Razdalja", "Pritisk", "ZAKLJUCENA", "SENSOR FAIL"]
                                 for kw in keywords:
                                     if kw in line.upper():
                                         uart_log_timestamp(f"RX_{kw}")
@@ -173,13 +178,31 @@ def send_uart_command(cmd):
     global uart_ser
     try:
         with uart_lock:
+            # Preverimo, ali je port odprt, sicer ga odpremo
             if uart_ser is None or not uart_ser.is_open:
+                print("[UART] Port ni odprt, poskušam ponovno odpreti...")
+                try:
+                    if uart_ser is not None:
+                        uart_ser.close()
+                except:
+                    pass
                 uart_ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.5)
+                time.sleep(0.1)
+                # Počistimo morebitne ostanke v RX bufferju
+                uart_ser.reset_input_buffer()
+                print(f"[UART] Port ponovno odprt.")
             uart_ser.write(f"{cmd}\r\n".encode())
             uart_ser.flush()
             print(f"[SERIJSKI] Poslano: {cmd}")
     except Exception as e:
         print(f"[SERIJSKI] Napaka pri pošiljanju ukaza {cmd}: {e}")
+        # Če pride do napake, poskusimo ponastaviti port
+        try:
+            if uart_ser is not None:
+                uart_ser.close()
+            uart_ser = None
+        except:
+            pass
 
 def send_coordinates(x, y, z, o):
     """
@@ -277,25 +300,22 @@ def create_measurement_folder():
 
 def init_times_csv():
     """Ustvari CSV datoteko za čase in zapiše glavo."""
-    global times_csv_file, times_csv_writer, measurement_folder
+    global times_csv_file_handle, times_csv_writer, measurement_folder, times_csv_file
     if measurement_folder is None:
         return
     times_csv_file = os.path.join(measurement_folder, "TEREN_BF_MERITVE.csv")
-    times_csv_writer = csv.writer(open(times_csv_file, 'w', newline=''))
+    times_csv_file_handle = open(times_csv_file, 'w', newline='')
+    times_csv_writer = csv.writer(times_csv_file_handle)
     times_csv_writer.writerow(['Step', 'StartTime (s)', 'StopTime (s)', 'Elapsed (s)'])
+    times_csv_file_handle.flush()
     print(f"[MERITEV] CSV ustvarjen: {times_csv_file}")
 
 def append_time_to_csv(step, start, stop, elapsed):
-    """Doda vrstico v CSV za en korak."""
-    global times_csv_writer
-    if times_csv_writer is not None:
+    """Doda vrstico v CSV za en korak in takoj flusha."""
+    global times_csv_writer, times_csv_file_handle
+    if times_csv_writer is not None and times_csv_file_handle is not None:
         times_csv_writer.writerow([step, start, stop, elapsed])
-        # Sproti flush, da se podatki takoj zapišejo na disk
-        times_csv_writer.writerow([])  # dummy, da se flush? Bolje direktno flush
-        times_csv_writer.writerow([step, start, stop, elapsed])  # ponovno zapišemo
-        # Ker csv.writer ne flusha samodejno, pokličemo flush na datoteki
-        if hasattr(times_csv_writer, 'file'):
-            times_csv_writer.file.flush()
+        times_csv_file_handle.flush()  # takoj zapišemo na disk
 
 def start_measurement_step(step_num):
     """Začne korak meritve: pošlje MERITEV X START in zabeleži čas."""
@@ -380,13 +400,13 @@ def abort_measurement():
     vision_segmentation_result = None
     measurement_state = "idle"
     # Ne zapiramo okna, ampak ga pustimo odprtega v preview načinu
-    # vision_window_open = False  # ne zapremo
     print("[MERITEV] Meritev prekinjena, vračam se v predogled.")
 
 def finalize_measurement():
     """Po končani meritvi (po MERITEV 5 STOP ali po MERITEV ZAKLJUCENA) shrani preostale podatke, izriše grafe in zapre okno."""
     global measurement_state, measurement_folder, measurement_times, measurement_distances, measurement_pressures
-    global vision_window_open, vision_preview_mode, vision_segmentation_result
+    global vision_window_open, vision_preview_mode, vision_segmentation_result, times_csv_writer, times_csv_file_handle, times_csv_file
+    global measurement_run_counter, measurement_step_start, measurement_step_number, measurement_total_time, measurement_aborted, segmentation_elapsed, meas3_start_time, meas4_start_time
 
     if measurement_folder is None:
         print("[MERITEV] Ni mape za shranjevanje.")
@@ -400,9 +420,9 @@ def finalize_measurement():
             append_time_to_csv(rec['step'], rec['start'], rec['stop'], rec['elapsed'])
 
     # Shrani skupni čas v CSV (dodamo na konec)
-    if times_csv_writer is not None:
+    if times_csv_writer is not None and times_csv_file_handle is not None:
         times_csv_writer.writerow(['TOTAL', '', '', measurement_total_time])
-        times_csv_writer.file.flush()
+        times_csv_file_handle.flush()
 
     print(f"[MERITEV] Časovni podatki shranjeni v {times_csv_file}")
 
@@ -464,8 +484,11 @@ def finalize_measurement():
         except Exception as e:
             print(f"[MERITEV] Napaka pri risanju grafa tlaka: {e}")
 
-    # GO ni potreben, zakomentirano
-    # send_go()
+    # Zapri datoteko CSV
+    if times_csv_file_handle is not None:
+        times_csv_file_handle.close()
+        times_csv_file_handle = None
+        times_csv_writer = None
 
     # Zapri okno in omogoči vožnjo
     vision_window_open = False
@@ -473,10 +496,27 @@ def finalize_measurement():
     vision_segmentation_result = None
     cv2.destroyWindow("Segmentacija")
     measurement_state = "idle"
-    print("[MERITEV] Meritev končana. Okno zaprto, platforma pripravljena na vožnjo.")
+    
+    # Počistimo vse globalne spremenljivke, da je sistem kot na začetku
+    measurement_times = []
+    measurement_distances = []
+    measurement_pressures = []
+    measurement_step_start = None
+    measurement_step_number = 0
+    measurement_total_time = 0.0
+    measurement_aborted = False
+    measurement_waiting_for_approval = False
+    segmentation_elapsed = 0.0
+    meas3_start_time = None
+    meas4_start_time = None
+    measurement_folder = None
+    times_csv_file = None
+    # Ne ponastavljamo measurement_run_counter, da se številka map nadaljuje
+    
+    print("[MERITEV] Meritev končana. Vse spremenljivke ponastavljene. Okno zaprto, platforma pripravljena na vožnjo.")
 
 def process_uart_messages():
-    """Preveri čakalno vrsto UART sporočil in obravnava ukaze MERITEV, Razdalja, Pritisk in MERITEV ZAKLJUCENA."""
+    """Preveri čakalno vrsto UART sporočil in obravnava ukaze MERITEV, Razdalja, Pritisk, MERITEV ZAKLJUCENA in MERITEV SENSOR FAIL."""
     global measurement_state, measurement_distances, measurement_pressures, measurement_step_number, meas3_start_time, meas4_start_time, vision_window_open, measurement_waiting_for_approval, measurement_step_start, measurement_times, measurement_total_time
     with uart_messages_lock:
         while uart_messages:
@@ -497,6 +537,35 @@ def process_uart_messages():
                     print("[MERITEV] Meritev zaključena zaradi ukaza ZAKLJUCENA. Sistem pripravljen.")
                 else:
                     print("[MERITEV] Meritev že ni aktivna, ukaz ZAKLJUCENA nima učinka.")
+                continue
+            
+            # ---- NAPAČEN SENZOR (SENSOR FAIL) ----
+            if msg == "MERITEV SENSOR FAIL":
+                print("[UART] Prejeto MERITEV SENSOR FAIL - napaka senzorja, zaključujem MERITEV 3 in nadaljujem na MERITEV 5.")
+                if measurement_state == "meas3" or measurement_state == "wait3":
+                    # Zaključi MERITEV 3 s trenutnim časom
+                    stop_time = time.time()
+                    if measurement_step_start is not None:
+                        elapsed = stop_time - measurement_step_start
+                        measurement_times.append({
+                            'step': 3,
+                            'start': measurement_step_start,
+                            'stop': stop_time,
+                            'elapsed': elapsed
+                        })
+                        measurement_total_time += elapsed
+                        append_time_to_csv(3, measurement_step_start, stop_time, elapsed)
+                        print(f"[MERITEV] Korak 3 (senzor) prekinjen zaradi napake. Trajanje: {elapsed:.3f} s")
+                    else:
+                        print("[MERITEV] MERITEV SENSOR FAIL prejet, vendar ni bilo začetka MERITEV 3.")
+                    
+                    # Prekini čakanje na potrditev, če obstaja
+                    measurement_waiting_for_approval = False
+                    # Nadaljuj na MERITEV 5
+                    print("[MERITEV] Nadaljujem na MERITEV 5 (pospravljanje) zaradi napake senzorja.")
+                    start_measurement_step(5)
+                else:
+                    print(f"[MERITEV] MERITEV SENSOR FAIL prejet, vendar trenutno stanje ni ustrezno ({measurement_state}). Ignoriram.")
                 continue
             
             # ---- MERITEV X STOP ----
@@ -542,11 +611,11 @@ def process_uart_messages():
                 continue
             
             # ---- MERITEV KONEC (lahko pošlje STM32) ----
-            if msg.startswith("MERITEV KONEC"):
-                print("[UART] STM32 je poslal MERITEV KONEC - prekinjam meritev.")
-                if measurement_state != "idle":
-                    abort_measurement()
-                continue
+            #if msg.startswith("MERITEV KONEC"):
+            #    print("[UART] STM32 je poslal MERITEV KONEC - prekinjam meritev.")
+            #    if measurement_state != "idle":
+            #        abort_measurement()
+            #    continue
             
             # ---- Razdalja za MERITEV 3 ----
             if msg.startswith("Razdalja:"):
@@ -626,14 +695,19 @@ class SimpleGamepadPygame:
         print("     B (1)    : Zavrni (vrni se v preview)")
         print(" * Med merilnim protokolom:")
         print("     A (0)    : Potrdi in nadaljuj na naslednji korak (1,2,3)")
-        print("     B (1)    : Zavrni MERITEV 4 in nadaljuj na MERITEV 5 (pospravljanje)")  # NOVO
+        print("     B (1)    : Zavrni MERITEV 4 in nadaljuj na MERITEV 5 (pospravljanje)")
+        print("     D-PAD DESNO : Takoj zaključi meritev in začni pospravljanje (MERITEV 5)")
         print(" * MERITEV 4 (tlak) se izvede samodejno, nato sledi MERITEV 5 (premik nazaj)")
         print(" * Ukaz 'MERITEV ZAKLJUCENA' preko UART takoj zaključi meritev in pripravi sistem.")
+        print(" * Ukaz 'MERITEV SENSOR FAIL' preko UART zaključi MERITEV 3 in nadaljuje na MERITEV 5.")
         print("="*70 + "\n")
 
     def update_and_log(self):
         global current_angle, old_current_angle, delta_angle, mode_change_requested, cycle_timestamp, timestamp_temp
         global vision_window_open
+        # --- Dodane globalne spremenljivke za merilni protokol ---
+        global measurement_state, measurement_step_start, measurement_step_number, measurement_times, measurement_total_time, measurement_waiting_for_approval
+        # ---
         self.has_changed = False
         self.mode_changed = False
         pygame.event.pump()
@@ -705,9 +779,39 @@ class SimpleGamepadPygame:
                         send_calibration()
                     else:
                         print("[GAMEPAD] BACK pritisnjen, a okno je odprto ali meritev poteka – kalibracija ni dovoljena.")
-            elif event.type == pygame.JOYHATMOTION and self.selected_mode == 1.0:
+            elif event.type == pygame.JOYHATMOTION:
                 hat_x, hat_y = event.value
-                if hat_x != 0 and not self.e_stop and not vision_window_open and measurement_state == "idle":
+                # D-pad desno (hat_x == 1) med meritvijo – takoj zaključi in pospravi
+                if hat_x == 1 and measurement_state != "idle":
+                    print("[GAMEPAD] D-pad desno pritisnjen med meritvijo – zaključujem in začenjam pospravljanje.")
+                    # Pošlji MERITEV KONEC na STM32
+                    send_uart_command("MERITEV KONEC")
+                    # Prekini čakanje na potrditev
+                    measurement_waiting_for_approval = False
+                    # Če je tekel kakšen korak, ga zaključi
+                    if measurement_step_start is not None and measurement_step_number > 0 and measurement_step_number < 5:
+                        stop_time = time.time()
+                        elapsed = stop_time - measurement_step_start
+                        # Preverimo, ali ta korak že obstaja v measurement_times
+                        existing = False
+                        for t in measurement_times:
+                            if t['step'] == measurement_step_number:
+                                existing = True
+                                break
+                        if not existing:
+                            measurement_times.append({
+                                'step': measurement_step_number,
+                                'start': measurement_step_start,
+                                'stop': stop_time,
+                                'elapsed': elapsed
+                            })
+                            measurement_total_time += elapsed
+                            append_time_to_csv(measurement_step_number, measurement_step_start, stop_time, elapsed)
+                            print(f"[MERITEV] Korak {measurement_step_number} prekinjen zaradi D-pada desno. Trajanje: {elapsed:.3f} s")
+                    # Preklopi na MERITEV 5 (pospravljanje)
+                    measurement_state = "idle"  # začasno, da lahko zaženemo 5
+                    start_measurement_step(5)
+                elif hat_x != 0 and not self.e_stop and not vision_window_open and measurement_state == "idle":
                     new_angle = current_angle + (hat_x * angle_step)
                     if -max_angle <= new_angle <= max_angle:
                         current_angle = new_angle
@@ -936,7 +1040,7 @@ def main():
     global current_angle, old_current_angle, delta_angle
     global last_color_frame, last_depth_frame
     global measurement_state, measurement_waiting_for_approval, measurement_folder, measurement_times, measurement_distances, measurement_pressures, measurement_total_time, measurement_aborted
-    global segmentation_elapsed, meas3_start_time, meas4_start_time, times_csv_writer, times_csv_file
+    global segmentation_elapsed, meas3_start_time, meas4_start_time, times_csv_writer, times_csv_file_handle, times_csv_file
 
     # Zaženi UART listener
     uart_thread = threading.Thread(target=uart_listener, daemon=True)
@@ -1015,6 +1119,32 @@ def main():
                 current_a = False
                 current_b = False
                 current_rb = False
+
+            # Takoj po gamepad.update_and_log() in pred process_uart_messages() (ali pa v delu, kjer obravnavaš gumbe)
+            if measurement_state != "idle" and current_b and not prev_b_state:
+                print("[GAMEPAD] Gumb B pritisnjen med meritvijo – zaključujem in začenjam pospravljanje.")
+                send_uart_command("MERITEV KONEC")
+                measurement_waiting_for_approval = False
+                if measurement_step_start is not None and measurement_step_number > 0 and measurement_step_number < 5:
+                    stop_time = time.time()
+                    elapsed = stop_time - measurement_step_start
+                    existing = False
+                    for t in measurement_times:
+                        if t['step'] == measurement_step_number:
+                            existing = True
+                            break
+                    if not existing:
+                        measurement_times.append({
+                            'step': measurement_step_number,
+                            'start': measurement_step_start,
+                            'stop': stop_time,
+                            'elapsed': elapsed
+                        })
+                        measurement_total_time += elapsed
+                        append_time_to_csv(measurement_step_number, measurement_step_start, stop_time, elapsed)
+                        print(f"[MERITEV] Korak {measurement_step_number} prekinjen zaradi gumba B. Trajanje: {elapsed:.3f} s")
+                measurement_state = "idle"  # začasno, da lahko zaženemo 5
+                #start_measurement_step(5)
 
             # Obdelava UART sporočil (merilni protokol)
             process_uart_messages()
@@ -1296,8 +1426,9 @@ def main():
         if plc is not None:
             plc.close()
         pygame.quit()
-        if uart_ser and uart_ser.is_open:
+        if uart_ser is not None and uart_ser.is_open:
             uart_ser.close()
+            uart_ser = None
         print("[INFO] Program končan.")
 
 if __name__ == "__main__":
