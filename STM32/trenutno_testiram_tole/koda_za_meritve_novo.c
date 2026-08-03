@@ -514,6 +514,9 @@ _Bool spik_test=0;
 _Bool pumpa_flag=0;
 _Bool tlak_flag=0;
 
+_Bool tof_reset_requested=0;
+_Bool tof_power_cycle=0;//flag da smo ga izklopili
+
 _Bool manual_mode_flag=0;
 _Bool manual_mode_array[8]={0,0,0,0,0,0,0,0};
 //						{a,d,w,s,q,e,r,f}
@@ -1001,6 +1004,8 @@ int main(void) {
 		 if((next_step==1) && premik_done==0)execute_robot_movement();
 		 else if((next_step==2 || next_step==3 || next_step==5 || next_step==0)&&premik_done==1)
 		 {
+			 if(!tof_reset_requested)
+			 {
 			 	 	if(next_step==5 || next_step==0)
 			 	 	{
 			 	 		DC_Motor_Update(6);
@@ -1041,7 +1046,10 @@ int main(void) {
 		                	if(num_fail_prints>=10)
 		                	{
 		                		num_fail_prints=0;
-		                		next_step=0;
+								tof_reset_requested=1;
+								serial_print_string("Prosim resetirajte TOF senzor.\r\n");
+								/*
+								next_step=0;
 		            			serial_print_string("\r\n");
 		            			serial_print_string("MERITEV SENSOR FAIL");
 		            			serial_print_string("\r\n");
@@ -1049,6 +1057,7 @@ int main(void) {
 		            			serial_print_string("\r\n");
 		            			serial_print_string("MERITEV SENSOR FAIL");
 		            			serial_print_string("\r\n");
+								*/
 		                	}
 		                }
 
@@ -1094,10 +1103,42 @@ int main(void) {
 					                */
 
 									DC_Motor_Update(avrg_razdalja);
-								}
-		                    }
-		                }
- 		            }
+									}
+		                    	}
+		                	}
+ 		            	}
+			 }
+			 else
+			 {//če je zahtevan reset tofa počakamo prvo da se ugasne senzor in potem ponovni prižig
+
+			 			//če je prižgan in vemo da smo ga ugasnili potem inicializiramo
+						if ((HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 5, 100) == HAL_OK)) 
+						{
+							if(tof_power_cycle)
+							{
+								//serial_print_string("TOF senzor VL53L0X zaznan, inicializiram...\r\n");
+								VL53L0X_Init();
+								HAL_Delay(100);
+								VL53L0X_Diagnose();
+								tof_reset_requested=0;
+								tof_power_cycle=0;
+							} 
+						}
+						else {
+							tof_power_cycle=1;//ugasnjen
+							static uint8_t stevec=0;
+
+							if(stevec>200)
+							{
+							serial_print_string("Cakam TOF senzor.\r\n");
+							stevec=0;
+							}
+							else
+							{
+								stevec++;
+							}
+						}
+			 }
 		 }
 		 else if(next_step==4)
 		 {
