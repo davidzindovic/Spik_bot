@@ -3091,7 +3091,7 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
 {	static float napaka_old=0;
 	static uint32_t frequency2Bset=0;
 
-	uint16_t pumpa_max_frequency=40000;
+	uint16_t pumpa_max_frequency=500;
 	//6 rpm je 4000 frequency
 
     float napaka = izmerjen_tlak - zeljen_tlak;
@@ -3156,20 +3156,22 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     // Tlak je prenizek - potrebno ga je zvišati
     else if((napaka < 0)) {
 
-    	if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_minus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
-
-        //int vrednost=(kp * napaka *(1-2*(napaka<0)) * 100);
-        motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka *(1-2*(napaka<0)) * 100);  // Hitrost sorazmerna napaki
+    	//if (motors[stevilka_motorja].direction!=motors[stevilka_motorja].direction_minus)direction_change(stevilka_motorja,motors[stevilka_motorja].direction_minus);
+        //motors[stevilka_motorja].current_speed = (uint32_t)(kp * napaka *(1+2*(napaka<0)) * 100);  // Hitrost sorazmerna napaki
         //rabis ref hitrost pri znani frekvenci
 
         // Omeji hitrost na 0-100%
-        if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
+        //if(motors[stevilka_motorja].current_speed > motors[stevilka_motorja].max_speed) motors[stevilka_motorja].current_speed = motors[stevilka_motorja].max_speed;
 
         //speed maping:
-        frequency2Bset=motors[stevilka_motorja].current_speed*pumpa_max_frequency/500;//50000 je max frequency
-        if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
+        //frequency2Bset=motors[stevilka_motorja].current_speed*pumpa_max_frequency/500;//50000 je max frequency
+        //if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
 
-        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>500)
+
+    	frequency2Bset=kp*abs(napaka)*pumpa_max_frequency/5;//5 je približno max napaka pri kp=2
+		if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
+
+        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>100)
 		{
         	stop_motor(stevilka_motorja);
         	motors[stevilka_motorja].frequency=frequency2Bset;
