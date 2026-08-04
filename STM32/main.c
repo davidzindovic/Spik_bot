@@ -484,8 +484,8 @@ volatile BoundingBox_t robot_bbox = {
     //.min_y = 90,     // Y je lahko samo pozitiven
     //.max_y = 90+105+150
 
-	.min_y=290,
-	.max_y=470
+	.min_y=300,//290,
+	.max_y=400
 
 };
 
@@ -513,6 +513,10 @@ _Bool tof_test=0;
 _Bool spik_test=0;
 _Bool pumpa_flag=0;
 _Bool tlak_flag=0;
+_Bool ciscenje_igle_requested=0;
+
+_Bool tof_reset_requested=0;
+_Bool tof_power_cycle=0;//flag da smo ga izklopili
 
 _Bool manual_mode_flag=0;
 _Bool manual_mode_array[8]={0,0,0,0,0,0,0,0};
@@ -1001,6 +1005,8 @@ int main(void) {
 		 if((next_step==1) && premik_done==0)execute_robot_movement();
 		 else if((next_step==2 || next_step==3 || next_step==5 || next_step==0)&&premik_done==1)
 		 {
+			 if(!tof_reset_requested)
+			 {
 			 	 	if(next_step==5 || next_step==0)
 			 	 	{
 			 	 		DC_Motor_Update(6);
@@ -1027,21 +1033,24 @@ int main(void) {
 		                }
 		                else false_read_tof=0;
 
-		                if (false_read_tof>num_samples)
+		                if ((false_read_tof>num_samples)&&(!tof_reset_requested))
 		                {
 		                	serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
 		                	DC_Motor_Set_Speed(0);
 		                	num_fail_prints++;
 
-		                	I2C4_BusRecovery();
-		                	HAL_Delay(10);
-		                	MX_I2C4_Init();       // ponovna inicializacija
-		                	VL53L0X_Init();       // ponovni zagon senzorja
+							I2C4_BusRecovery();
+							HAL_Delay(10);
+							MX_I2C4_Init();       // ponovna inicializacija
+							VL53L0X_Init();       // ponovni zagon senzorja
 
 		                	if(num_fail_prints>=10)
 		                	{
 		                		num_fail_prints=0;
-		                		next_step=0;
+								tof_reset_requested=1;
+								serial_print_string("Prosim resetirajte TOF senzor.\r\n");
+								/*
+								next_step=0;
 		            			serial_print_string("\r\n");
 		            			serial_print_string("MERITEV SENSOR FAIL");
 		            			serial_print_string("\r\n");
@@ -1049,6 +1058,7 @@ int main(void) {
 		            			serial_print_string("\r\n");
 		            			serial_print_string("MERITEV SENSOR FAIL");
 		            			serial_print_string("\r\n");
+								*/
 		                	}
 		                }
 
@@ -1094,10 +1104,34 @@ int main(void) {
 					                */
 
 									DC_Motor_Update(avrg_razdalja);
-								}
-		                    }
-		                }
- 		            }
+									}
+		                    	}
+		                	}
+ 		            	}
+			 }
+			 else
+			 {//če je zahtevan reset tofa počakamo prvo da se ugasne senzor in potem ponovni prižig
+
+						//če je prižgan in vemo da smo ga ugasnili potem inicializiramo
+						if ((HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 5, 100) == HAL_OK))
+						{
+
+								I2C4_BusRecovery();
+								HAL_Delay(10);
+								MX_I2C4_Init();
+								HAL_Delay(10);
+
+								VL53L0X_Init();       // ponovni zagon senzorja
+								HAL_Delay(10);
+
+
+								tof_reset_requested=0;
+								tof_power_cycle=0;
+						}
+						else {
+							tof_power_cycle=1;//ugasnjen
+						}
+			 }
 		 }
 		 else if(next_step==4)
 		 {
@@ -1143,7 +1177,19 @@ int main(void) {
 			 stop_motor(3);
 			 pospravi_robota();
 			 post_pospravljanje=1;
+
+			 //ce smo izvedli vbod spucamo iglo:
+			 if(ciscenje_igle_requested)
+			 {
+				 motors[3].frequency=500;
+				 run_motor(3);
+				 HAL_Delay(2000);
+				 stop_motor(3);
+				 ciscenje_igle_requested=0;
+			 }
 		 }
+
+/*//debug:
 if(post_pospravljanje && (prej_step!=next_step))
 	{
 	prej_step=next_step;
@@ -1151,6 +1197,7 @@ if(post_pospravljanje && (prej_step!=next_step))
 	serial_print_uint16((uint16_t)next_step);
 	serial_print_string("\r\n");
 	}
+*/
 
 //---------------------konec dela za MERITEV------------------------
 
@@ -1186,64 +1233,127 @@ if (switch_test==1)
 //-----------------------------END--------------------------
 
 //---------------------------tof test----------------------
- if (vl53_data_ready && tof_test)
- {
-	 const uint8_t num_samples=5;
+if(tof_test || spik_test)
+{
+	if(!tof_reset_requested)
+			 {
+					if (vl53_data_ready)
+					{
+						static uint16_t last_valid_distance=0;
+						static uint32_t distance_validate_timestamp=0;
 
-	 static uint8_t num_tof_prints=0;
+						const uint8_t num_samples=5;
+						static uint16_t action_moving_average_array[5];
+						static uint8_t action_moving_array_index=0;
+						static _Bool moving_average_ready=0;
+						uint32_t avrg_razdalja=0;
 
-	 static uint16_t moving_average_array[5];
-	 static uint8_t moving_array_index=0;
+						static uint8_t num_fail_prints=0;
 
-    vl53_data_ready = 0;
-    trenutna_razdalja = VL53L0X_ReadDistance();
-    char debug_msg2[64];
-    snprintf(debug_msg2, sizeof(debug_msg2), "TOF test; Razdalja: %u mm \r\n", trenutna_razdalja);
-    serial_print_string(debug_msg2);
+						vl53_data_ready = 0;
+						trenutna_razdalja = VL53L0X_ReadDistance();
 
-    if (trenutna_razdalja!= 65535 && trenutna_razdalja!=0)
-    {
-    	moving_average_array[moving_array_index]=trenutna_razdalja;
-    	moving_array_index++;
-    }
-    else
-    {
-    	I2C4_BusRecovery();
-    	HAL_Delay(10);
-    	MX_I2C4_Init();       // ponovna inicializacija
-    	VL53L0X_Init();       // ponovni zagon senzorja
- 	 }
-    if(moving_array_index==num_samples)
-    {
-    	static uint32_t avrg_razdalja=0;
+						if(trenutna_razdalja==0 || trenutna_razdalja>65000)
+						{
+							false_read_tof++;
+						}
+						else false_read_tof=0;
 
-    	for (uint8_t i=0;i<num_samples;i++)
-    	{
-    		avrg_razdalja+=moving_average_array[i];
-    		moving_average_array[i]=0;
-    	}
-    	avrg_razdalja/=num_samples;
+						if ((false_read_tof>num_samples)&&(!tof_reset_requested))
+						{
+							serial_print_string("Nenavadna razdalja, ustavljam...\r\n");
+							num_fail_prints++;
 
-    	moving_array_index=0;
+							I2C4_BusRecovery();
+							HAL_Delay(10);
+							MX_I2C4_Init();       // ponovna inicializacija
+							VL53L0X_Init();       // ponovni zagon senzorja
 
-        char debug_msg3[64];
-        snprintf(debug_msg3, sizeof(debug_msg3), "TOF test; Povprecna Razdalja: %u mm \r\n", avrg_razdalja);
-        serial_print_string(debug_msg3);
+							if(num_fail_prints>=10)
+							{
+								num_fail_prints=0;
+								tof_reset_requested=1;
+								serial_print_string("Prosim resetirajte TOF senzor.\r\n");
+								/*
+								next_step=0;
+								serial_print_string("\r\n");
+								serial_print_string("MERITEV SENSOR FAIL");
+								serial_print_string("\r\n");
+								serial_print_string("MERITEV SENSOR FAIL");
+								serial_print_string("\r\n");
+								serial_print_string("MERITEV SENSOR FAIL");
+								serial_print_string("\r\n");
+								*/
+							}
+						}
 
-        avrg_razdalja=0;
-    }
+						else
+						{
+							num_fail_prints=0;
+						if (trenutna_razdalja!= 65535 && trenutna_razdalja!=0)
+							{
+								action_moving_average_array[action_moving_array_index]=trenutna_razdalja;
+								action_moving_array_index++;
+								if(action_moving_array_index>(num_samples-1))
+								{
+									moving_average_ready=1;
+									action_moving_array_index=0;
+								}
 
+							if(moving_average_ready)
+								{
+									avrg_razdalja=0;
 
-    if (num_tof_prints>=(num_samples-1))
-	{
-    	tof_test=0;
-    	num_tof_prints=0;
-	}
-    else
-    {
-    	num_tof_prints++;
-    }
- }
+									static uint32_t avrg_razdalja=0;
+
+									for (uint8_t i=0;i<num_samples;i++)
+									{
+										avrg_razdalja+=action_moving_average_array[i];
+									}
+									avrg_razdalja/=(num_samples+1);
+
+									char debug_msg[100];
+									snprintf(debug_msg, sizeof(debug_msg), " Razdalja: %u \r\n", avrg_razdalja);
+									serial_print_string(debug_msg);
+
+									if(spik_test)
+										{
+										DC_Motor_Update(avrg_razdalja);
+										}
+									}
+								}
+							}
+						}
+			 }
+			 else
+			 {//če je zahtevan reset tofa počakamo prvo da se ugasne senzor in potem ponovni prižig
+
+						//če je prižgan in vemo da smo ga ugasnili potem inicializiramo
+						if ((HAL_I2C_IsDeviceReady(&hi2c4, VL53L0X_ADDR, 5, 100) == HAL_OK))
+						{
+							//if(tof_power_cycle)
+							//{
+								I2C4_BusRecovery();
+								HAL_Delay(10);
+								MX_I2C4_Init();
+								HAL_Delay(10);
+
+								VL53L0X_Init();       // ponovni zagon senzorja
+								HAL_Delay(10);
+								//I2C4_BusRecovery();
+								//HAL_Delay(10);
+								//MX_I2C4_Init();       // ponovna inicializacija
+								//VL53L0X_Init();       // ponovni zagon senzorja
+
+								tof_reset_requested=0;
+								tof_power_cycle=0;
+							//}
+						}
+						else {
+							tof_power_cycle=1;//ugasnjen
+						}
+			 }
+}
 //------------------end tof test------------------
 
 //-------------pumpa test---------------
@@ -1251,6 +1361,7 @@ if (switch_test==1)
 if(pumpa_flag && !motors[3].running)
 {
 	serial_print_string("\r\nZaganjam pumpo.\r\n");
+	motors[3].frequency=500;
 	run_motor(3);//zaženemo pumpo če ni že zagnana
 }
 else if(!pumpa_flag && motors[3].running)
@@ -3692,6 +3803,7 @@ void VL53L0X_LoadTuningSettings(void) {
         }
 }
 
+
 void I2C4_BusRecovery(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
     __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -3719,7 +3831,46 @@ void I2C4_BusRecovery(void) {
     // 4. Majhen zamik, da se linije umirijo
     HAL_Delay(5);
 }
+/*
+void I2C4_BusRecovery(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
 
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+
+    // Reconfigure both pins as open-drain GPIO
+    GPIO_InitStruct.Pin   = GPIO_PIN_12 | GPIO_PIN_13; // SCL, SDA
+    GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_OD;
+    GPIO_InitStruct.Pull  = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12 | GPIO_PIN_13, GPIO_PIN_SET);
+    HAL_Delay(1);
+
+    // If SDA is stuck low, clock SCL up to 9 times
+    if (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_13) == GPIO_PIN_RESET) // SDA pin
+    {
+        for (int i = 0; i < 9; i++)
+        {
+            HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET); // SCL low
+            HAL_Delay(1);
+            HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);   // SCL high
+            HAL_Delay(1);
+            if (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_13) == GPIO_PIN_SET)
+                break;
+        }
+    }
+
+    // Generate a STOP condition: SDA low->high while SCL is high
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET); // SDA low
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);   // SCL high
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);   // SDA high (STOP)
+    HAL_Delay(1);
+}
+*/
 static void MX_I2C4_Init(void) {
     // 1. Enable clocks FIRST
     __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -6326,7 +6477,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
         case DC_STATE_REGULATED: {
             /* 1. Pogoj za ustavitev: dosežen minimum (preblizu ovire) */
 
-        	if(next_step==2 || next_step==3)
+        	if(next_step==2 || next_step==3 || spik_test)
         	{
         		if(start_distance==0 && distance_mm!=0 && distance_mm!=65535)
         		{
@@ -6335,7 +6486,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
         		if(!panic_stop)
         		{
-				if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) {
+				if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) || spik_test) {
 
 
 					if(dc_motor_speed!=0)
@@ -6357,11 +6508,12 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
 					serial_print_string(debug_msg3);
 					serial_print_string("Blizu ovire! Stop.\r\n");
+					ciscenje_igle_requested=1;
 					next_step=9;
 					}
 					break;
 				}
-				else if ((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2)) {
+				else if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2)) || spik_test) {
 				dc_motor_speed=0;
 				DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
 				serial_print_string("\r\n");
@@ -6374,7 +6526,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 				}
 
 
-					if((distance_mm>(DC_DIST_MIN_MM+20))&&(next_step==2)&&!slowed_down) {
+					if((((distance_mm>(DC_DIST_MIN_MM+20))&&(next_step==2)) || spik_test)&&!slowed_down) {
 
 						//if(dc_motor_speed!=(-900))
 						//{
@@ -6386,7 +6538,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						DC_Motor_Set_Speed(dc_motor_speed);
 						dc_sw_timestamp=HAL_GetTick();
 					}
-					else if(next_step==2 && dc_motor_speed!=0) {
+					else if((next_step==2 || spik_test) && dc_motor_speed!=0) {
 						slowed_down=1;
 						dc_motor_speed=0;
 						DC_Motor_Set_Speed(dc_motor_speed);
@@ -6398,12 +6550,11 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						serial_print_string("MERITEV 2 STOP");
 						serial_print_string("\r\n");
 					}
-					else if(next_step==3)
+					else if(next_step==3 || spik_test)
 					{
 						char debug_msg3[64];
-						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
 						serial_print_string(debug_msg3);
-						serial_print_string("\n\nPocasi se priblizujem oviri.\r\n");
 
 						dc_motor_speed=-600;
 						DC_Motor_Set_Speed(dc_motor_speed);
