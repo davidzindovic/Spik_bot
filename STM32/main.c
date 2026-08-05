@@ -115,8 +115,8 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      83U     /* below this: stop (unless reversing out) */
-#define DC_DIST_MAX_MM      130U    /* above this: stop (unless forwarding back) */
+#define DC_DIST_MIN_MM      94U //83+35     /* below this: stop (unless reversing out) */
+#define DC_DIST_MAX_MM      163U//113+50=max reach//130U    /* above this: stop (unless forwarding back) */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
  *
@@ -6467,208 +6467,230 @@ void DC_Motor_Update(uint16_t distance_mm) {
     static _Bool slowed_down=0;
     static _Bool panic_stop=0;
     static uint16_t start_distance=0;
+    static uint8_t num_too_far_reading=0;
 
     static uint32_t dc_sw_timestamp=0;
 
     if(next_step==0 || next_step==5)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
 
-    switch (dc_current_state) {
+    if(distance_mm<DC_DIST_MAX_MM)//ce smo predalec da pridemo do drevesa pocakamo par meritev da se ustali, potem kenslamo
+    {	num_too_far_reading=0;
+		switch (dc_current_state) {
 
-        case DC_STATE_REGULATED: {
-            /* 1. Pogoj za ustavitev: dosežen minimum (preblizu ovire) */
+			case DC_STATE_REGULATED: {
+				/* 1. Pogoj za ustavitev: dosežen minimum (preblizu ovire) */
 
-        	if(next_step==2 || next_step==3 || spik_test)
-        	{
-        		if(start_distance==0 && distance_mm!=0 && distance_mm!=65535)
-        		{
-        			start_distance=distance_mm;
-        		}
-
-        		if(!panic_stop)
-        		{
-				if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) || spik_test) {
-
-
-					if(dc_motor_speed!=0)
+				if(next_step==2 || next_step==3 || spik_test)
+				{
+					if(start_distance==0 && distance_mm!=0 && distance_mm!=65535)
 					{
+						start_distance=distance_mm;
+					}
+
+					if(!panic_stop)
+					{
+					if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) || spik_test) {
+
+
+						if(dc_motor_speed!=0)
+						{
+						dc_motor_speed=0;
+						DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
+
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV 3 STOP");
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV 3 STOP");
+						serial_print_string("\r\n");
+						serial_print_string("MERITEV 3 STOP");
+						serial_print_string("\r\n");
+						dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
+						//dc_current_state = DC_STATE_WAITING;
+						//dc_current_state = DC_STATE_RETRACTING;
+						char debug_msg3[64];
+						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+						serial_print_string(debug_msg3);
+						serial_print_string("Blizu ovire! Stop.\r\n");
+						ciscenje_igle_requested=1;
+						next_step=9;
+						}
+						break;
+					}
+					else if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2)) || spik_test) {
 					dc_motor_speed=0;
 					DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
-
 					serial_print_string("\r\n");
-					serial_print_string("MERITEV 3 STOP");
+					serial_print_string("MERITEV 2 STOP");
 					serial_print_string("\r\n");
-					serial_print_string("MERITEV 3 STOP");
+					serial_print_string("MERITEV 2 STOP");
 					serial_print_string("\r\n");
-					serial_print_string("MERITEV 3 STOP");
+					serial_print_string("MERITEV 2 STOP");
 					serial_print_string("\r\n");
-					dc_stop_timestamp = HAL_GetTick(); /* Shranimo trenutni čas ustavljanja */
-					//dc_current_state = DC_STATE_WAITING;
-					//dc_current_state = DC_STATE_RETRACTING;
-					char debug_msg3[64];
-					snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-					serial_print_string(debug_msg3);
-					serial_print_string("Blizu ovire! Stop.\r\n");
-					ciscenje_igle_requested=1;
-					next_step=9;
 					}
+
+
+						if((((distance_mm>(DC_DIST_MIN_MM+24))&&(next_step==2)) || spik_test)&&!slowed_down) {
+
+							//if(dc_motor_speed!=(-900))
+							//{
+								char debug_msg3[64];
+								snprintf(debug_msg3, sizeof(debug_msg3), "\n\nHitro se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+								serial_print_string(debug_msg3);
+							//}
+							dc_motor_speed=-900;
+							DC_Motor_Set_Speed(dc_motor_speed);
+							dc_sw_timestamp=HAL_GetTick();
+						}
+						else if((next_step==2 || spik_test) && dc_motor_speed!=0) {
+							slowed_down=1;
+							dc_motor_speed=0;
+							DC_Motor_Set_Speed(dc_motor_speed);
+							serial_print_string("\r\n");
+							serial_print_string("MERITEV 2 STOP");
+							serial_print_string("\r\n");
+							serial_print_string("MERITEV 2 STOP");
+							serial_print_string("\r\n");
+							serial_print_string("MERITEV 2 STOP");
+							serial_print_string("\r\n");
+						}
+						else if(next_step==3 || spik_test)
+						{
+							char debug_msg3[64];
+							snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
+							serial_print_string(debug_msg3);
+
+							dc_motor_speed=-600;
+							DC_Motor_Set_Speed(dc_motor_speed);
+							dc_sw_timestamp=HAL_GetTick();
+						}
+						else
+						{
+							dc_motor_speed=0;
+							DC_Motor_Set_Speed(dc_motor_speed);
+						}
+					}
+					/*
+						if(read_switch(3) && dc_motor_speed<0 && (HAL_GetTick()-dc_sw_timestamp)>3000)//ce se zaleti v sprednje stikalo
+						{
+							dc_motor_speed=0;
+							DC_Motor_Set_Speed(dc_motor_speed);
+
+							panic_stop=1;//da ne pade v kak case
+						}
+
+						if(panic_stop==1)//premaknemo nazaj in prisilimo pospravljanje
+						{
+							dc_motor_speed=600;
+							DC_Motor_Set_Speed(dc_motor_speed);
+							HAL_Delay(500);
+							dc_motor_speed=0;
+							DC_Motor_Set_Speed(dc_motor_speed);
+
+							serial_print_string("\r\n");
+							serial_print_string("MERITEV ZAKLJUCENA");
+							serial_print_string("\r\n");
+							serial_print_string("MERITEV ZAKLJUCENA");
+							serial_print_string("\r\n");
+							serial_print_string("MERITEV ZAKLJUCENA");
+							serial_print_string("\r\n");
+
+							next_step=0;
+						}
+						*/
+
+				}
+				break;
+			}
+	/*
+			case DC_STATE_WAITING: {
+
+				if(dc_motor_speed!=0)
+				{
+					dc_motor_speed=0;
+					DC_Motor_Set_Speed(dc_motor_speed);
+				}
+
+				if(next_step==5)
+				{
+					dc_stop_timestamp = HAL_GetTick();
+					dc_wait_time_ms=2000; //zelimo da ohrani pritisk 5 sekund
+					dc_time_elapsed=0;
+
+					while(dc_time_elapsed < dc_wait_time_ms)
+					{
+
+									dc_time_elapsed+=HAL_GetTick()-dc_stop_timestamp;
+									dc_stop_timestamp=HAL_GetTick();
+
+					}
+
+					//char debug_msg3[64];
+					//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+					//serial_print_string(debug_msg3);
+
+					serial_print_string("Apliciranje opravljeno. Umikam motor nazaj...\r\n");
+					dc_current_state = DC_STATE_RETRACTING;
+				}
+				break;
+			}
+	*/
+			case DC_STATE_RETRACTING: {
+				/* 1. Pogoj za konec umikanja: ko dosežemo želeno varnostno razdaljo (maksimum) */
+				//if (distance_mm >= DC_DIST_MAX_MM) {
+				if (read_switch(3)) {
+					dc_motor_speed=0;
+					DC_Motor_Set_Speed(dc_motor_speed);
+					dc_current_state = DC_STATE_REGULATED;
+					zagon_izvedbe = false;
+					//char debug_msg3[64];
+					//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
+					//serial_print_string(debug_msg3);
+					serial_print_string("\r\nUmaknjen na varno razdaljo.\r\n");
+					premik_done=0; //ponastavimo zastavico za kinematiko
+					spik_test=0;
+					slowed_down=0;
+					start_distance=0;
+					panic_stop=0;
 					break;
 				}
-				else if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2)) || spik_test) {
-				dc_motor_speed=0;
-				DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
-				serial_print_string("\r\n");
-				serial_print_string("MERITEV 2 STOP");
-				serial_print_string("\r\n");
-				serial_print_string("MERITEV 2 STOP");
-				serial_print_string("\r\n");
-				serial_print_string("MERITEV 2 STOP");
-				serial_print_string("\r\n");
-				}
 
+				/* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
+				//char debug_msg3[64];
+				//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nFura nazaj. Razdalja: %u mm \r\n", distance_mm);
+				//serial_print_string(debug_msg3);
 
-					if((((distance_mm>(DC_DIST_MIN_MM+20))&&(next_step==2)) || spik_test)&&!slowed_down) {
-
-						//if(dc_motor_speed!=(-900))
-						//{
-							char debug_msg3[64];
-							snprintf(debug_msg3, sizeof(debug_msg3), "\n\nHitro se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
-							serial_print_string(debug_msg3);
-						//}
-						dc_motor_speed=-900;
-						DC_Motor_Set_Speed(dc_motor_speed);
-						dc_sw_timestamp=HAL_GetTick();
-					}
-					else if((next_step==2 || spik_test) && dc_motor_speed!=0) {
-						slowed_down=1;
-						dc_motor_speed=0;
-						DC_Motor_Set_Speed(dc_motor_speed);
-						serial_print_string("\r\n");
-						serial_print_string("MERITEV 2 STOP");
-						serial_print_string("\r\n");
-						serial_print_string("MERITEV 2 STOP");
-						serial_print_string("\r\n");
-						serial_print_string("MERITEV 2 STOP");
-						serial_print_string("\r\n");
-					}
-					else if(next_step==3 || spik_test)
-					{
-						char debug_msg3[64];
-						snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
-						serial_print_string(debug_msg3);
-
-						dc_motor_speed=-600;
-						DC_Motor_Set_Speed(dc_motor_speed);
-						dc_sw_timestamp=HAL_GetTick();
-					}
-					else
-					{
-						dc_motor_speed=0;
-						DC_Motor_Set_Speed(dc_motor_speed);
-					}
-        		}
-        		/*
-					if(read_switch(3) && dc_motor_speed<0 && (HAL_GetTick()-dc_sw_timestamp)>3000)//ce se zaleti v sprednje stikalo
-					{
-						dc_motor_speed=0;
-						DC_Motor_Set_Speed(dc_motor_speed);
-
-						panic_stop=1;//da ne pade v kak case
-					}
-
-					if(panic_stop==1)//premaknemo nazaj in prisilimo pospravljanje
-					{
-						dc_motor_speed=600;
-						DC_Motor_Set_Speed(dc_motor_speed);
-						HAL_Delay(500);
-						dc_motor_speed=0;
-						DC_Motor_Set_Speed(dc_motor_speed);
-
-						serial_print_string("\r\n");
-						serial_print_string("MERITEV ZAKLJUCENA");
-						serial_print_string("\r\n");
-						serial_print_string("MERITEV ZAKLJUCENA");
-						serial_print_string("\r\n");
-						serial_print_string("MERITEV ZAKLJUCENA");
-						serial_print_string("\r\n");
-
-						next_step=0;
-					}
-					*/
-
-        	}
-            break;
-        }
-/*
-        case DC_STATE_WAITING: {
-
-        	if(dc_motor_speed!=0)
-        	{
-        		dc_motor_speed=0;
-				DC_Motor_Set_Speed(dc_motor_speed);
-        	}
-
-        	if(next_step==5)
-			{
-				dc_stop_timestamp = HAL_GetTick();
-				dc_wait_time_ms=2000; //zelimo da ohrani pritisk 5 sekund
-				dc_time_elapsed=0;
-
-				while(dc_time_elapsed < dc_wait_time_ms)
+				if(dc_motor_speed!=900)
 				{
-
-								dc_time_elapsed+=HAL_GetTick()-dc_stop_timestamp;
-								dc_stop_timestamp=HAL_GetTick();
-
+					serial_print_string("\r\nFura nazaj.\r\n");
 				}
 
-        		//char debug_msg3[64];
-				//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-				//serial_print_string(debug_msg3);
-
-        		serial_print_string("Apliciranje opravljeno. Umikam motor nazaj...\r\n");
-                dc_current_state = DC_STATE_RETRACTING;
+				dc_motor_speed=900;
+				DC_Motor_Set_Speed(dc_motor_speed);
+				break;
 			}
-            break;
-        }
-*/
-        case DC_STATE_RETRACTING: {
-            /* 1. Pogoj za konec umikanja: ko dosežemo želeno varnostno razdaljo (maksimum) */
-            //if (distance_mm >= DC_DIST_MAX_MM) {
-        	if (read_switch(3)) {
-            	dc_motor_speed=0;
-                DC_Motor_Set_Speed(dc_motor_speed);
-                dc_current_state = DC_STATE_REGULATED;
-                zagon_izvedbe = false;
-                //char debug_msg3[64];
-				//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nRazdalja: %u mm \r\n", distance_mm);
-				//serial_print_string(debug_msg3);
-                serial_print_string("\r\nUmaknjen na varno razdaljo.\r\n");
-                premik_done=0; //ponastavimo zastavico za kinematiko
-                spik_test=0;
-                slowed_down=0;
-                start_distance=0;
-                panic_stop=0;
-                break;
-            }
 
-            /* 2. Vzvratna vožnja s fiksno, varno konstantno hitrostjo (negativna vrednost) */
-            //char debug_msg3[64];
-			//snprintf(debug_msg3, sizeof(debug_msg3), "\n\nFura nazaj. Razdalja: %u mm \r\n", distance_mm);
-			//serial_print_string(debug_msg3);
-
-        	if(dc_motor_speed!=900)
-        	{
-        		serial_print_string("\r\nFura nazaj.\r\n");
-        	}
-
-        	dc_motor_speed=900;
-            DC_Motor_Set_Speed(dc_motor_speed);
-            break;
-        }
-
-        default:
-            dc_current_state = DC_STATE_REGULATED;
-            break;
+			default:
+				dc_current_state = DC_STATE_REGULATED;
+				break;
+		}
+	}
+    else
+    {
+    	dc_motor_speed=0;
+    	DC_Motor_Set_Speed(dc_motor_speed);
+    	num_too_far_reading++;
+    	if(num_too_far_reading>=10)
+    	{
+    		serial_print_string("Deblo je zal predalec :(");
+			serial_print_string("\r\n");
+			serial_print_string("MERITEV ZAKLJUCENA");
+			serial_print_string("\r\n");
+			serial_print_string("MERITEV ZAKLJUCENA");
+			serial_print_string("\r\n");
+			serial_print_string("MERITEV ZAKLJUCENA");
+			serial_print_string("\r\n");
+			num_too_far_reading=0;
+    	}
     }
 }
 
