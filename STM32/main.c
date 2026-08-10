@@ -115,8 +115,30 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-#define DC_DIST_MIN_MM      94U //83+35     /* below this: stop (unless reversing out) */
-#define DC_DIST_MAX_MM      163U//113+50=max reach//130U    /* above this: stop (unless forwarding back) */
+//do konca porinjena igla
+#define DC_DIST_MIN_MM      88U //83+35     /* below this: stop (unless reversing out) */
+
+#define DOLZINA_IGLE 20U
+#define MAX_IZTEG 71U
+
+//pr tej razdalji se igla dotika debla
+#define DC_DIST_MAX_MM      108U//113+50=max reach//130U    /* above this: stop (unless forwarding back) */
+
+#define TOF_OFFSET 5U
+
+/*
+ * TOF senzor razdalje:
+ * Od TOF do sredine konusa = 4.84+72.51+11 = 88.35 mm
+ * Od TOF do konc igle = 4.84+72.51+30.61 = 107.96 mm
+ * dolzina igle = 20 mm
+ * max izteg igle = 71 mm
+ */
+
+/*
+ * tof test:
+ * les od konca bloka 31.5 mm (čis pr igli skor)
+ * tof reading ~107 mm
+ */
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
  *
@@ -6504,14 +6526,14 @@ void DC_Motor_Update(uint16_t distance_mm) {
     static int16_t dc_motor_speed=0;
     static _Bool slowed_down=0;
     static _Bool panic_stop=0;
-    static uint16_t start_distance=0;
+
     static uint8_t num_too_far_reading=0;
 
     static uint32_t dc_sw_timestamp=0;
 
     if(next_step==0 || next_step==5)dc_current_state=DC_STATE_RETRACTING;//pospravimo v primeru prekinitve
 
-    if(distance_mm<DC_DIST_MAX_MM)//ce smo predalec da pridemo do drevesa pocakamo par meritev da se ustali, potem kenslamo
+    if(distance_mm<(DC_DIST_MAX_MM+MAX_IZTEG-DOLZINA_IGLE))//ce smo predalec da pridemo do drevesa pocakamo par meritev da se ustali, potem kenslamo
     {	num_too_far_reading=0;
 		switch (dc_current_state) {
 
@@ -6520,15 +6542,11 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
 				if(next_step==2 || next_step==3 || spik_test)
 				{
-					if(start_distance==0 && distance_mm!=0 && distance_mm!=65535)
-					{
-						start_distance=distance_mm;
-					}
+
 
 					if(!panic_stop)
 					{
 					if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) || spik_test) {
-
 
 						if(dc_motor_speed!=0)
 						{
@@ -6567,7 +6585,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					}
 
 
-						if((((distance_mm>(DC_DIST_MIN_MM+24))&&(next_step==2)) || spik_test)&&!slowed_down) {
+						if((((distance_mm>(DC_DIST_MIN_MM+DOLZINA_IGLE))&&(next_step==2)) || spik_test)&&!slowed_down) {
 
 							//if(dc_motor_speed!=(-900))
 							//{
@@ -6687,7 +6705,6 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					premik_done=0; //ponastavimo zastavico za kinematiko
 					spik_test=0;
 					slowed_down=0;
-					start_distance=0;
 					panic_stop=0;
 					break;
 				}
