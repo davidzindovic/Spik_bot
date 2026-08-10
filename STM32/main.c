@@ -6546,7 +6546,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 
 					if(!panic_stop)
 					{
-					if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3)) || spik_test) {
+					if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==3||spik_test))) {
 
 						if(dc_motor_speed!=0)
 						{
@@ -6569,10 +6569,18 @@ void DC_Motor_Update(uint16_t distance_mm) {
 						serial_print_string("Blizu ovire! Stop.\r\n");
 						ciscenje_igle_requested=1;
 						next_step=9;
+
+						if(spik_test)
+						{
+							HAL_Delay(3000);
+							ciscenje_igle_requested=0;
+							dc_current_state=DC_STATE_RETRACTING;
+						}
+
 						}
 						break;
 					}
-					else if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2)) || spik_test) {
+					else if (((distance_mm <= DC_DIST_MIN_MM)&&(next_step==2|| spik_test)) ) {
 					dc_motor_speed=0;
 					DC_Motor_Set_Speed(dc_motor_speed);  /* Takojšnja ustavitev */
 					serial_print_string("\r\n");
@@ -6585,7 +6593,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					}
 
 
-						if((((distance_mm>(DC_DIST_MIN_MM+DOLZINA_IGLE))&&(next_step==2)) || spik_test)&&!slowed_down) {
+						if((((distance_mm>(DC_DIST_MIN_MM+DOLZINA_IGLE))&&(next_step==2|| spik_test)) )&&!slowed_down) {
 
 							//if(dc_motor_speed!=(-900))
 							//{
@@ -6597,7 +6605,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 							DC_Motor_Set_Speed(dc_motor_speed);
 							dc_sw_timestamp=HAL_GetTick();
 						}
-						else if((next_step==2 || spik_test) && dc_motor_speed!=0) {
+						else if((next_step==2 || (spik_test  && !slowed_down)) && dc_motor_speed!=0) {
 							slowed_down=1;
 							dc_motor_speed=0;
 							DC_Motor_Set_Speed(dc_motor_speed);
@@ -6609,7 +6617,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 							serial_print_string("MERITEV 2 STOP");
 							serial_print_string("\r\n");
 						}
-						else if(next_step==3 || spik_test)
+						else if(next_step==3 || (spik_test && slowed_down))
 						{
 							char debug_msg3[64];
 							snprintf(debug_msg3, sizeof(debug_msg3), "\n\nPocasi se priblizujem oviri. Razdalja: %u mm \r\n", distance_mm);
@@ -6619,7 +6627,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 							DC_Motor_Set_Speed(dc_motor_speed);
 							dc_sw_timestamp=HAL_GetTick();
 						}
-						else
+						else //if((DC_DIST_MAX_MM+MAX_IZTEG-DOLZINA_IGLE)<distance_mm)
 						{
 							dc_motor_speed=0;
 							DC_Motor_Set_Speed(dc_motor_speed);
