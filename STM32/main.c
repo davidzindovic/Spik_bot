@@ -3172,9 +3172,10 @@ float izmeri_pritisk()
 	uint8_t analog_pin_za_merjenje=0;//0 do 5
 	float max_bari_senzor=8.2943; //vrednost pri 3.3V
 	uint32_t analog_average=0;
+	uint8_t num_samples_4_average=50;
 
-	for(uint8_t a=0;a<10;a++)analog_average+=read_analog_pin(analog_pin_za_merjenje);
-	analog_average/=10;
+	for(uint8_t a=0;a<num_samples_4_average;a++)analog_average+=read_analog_pin(analog_pin_za_merjenje);
+	analog_average/=num_samples_4_average;
 
 	return mapFloat(analog_average,973,4095,0.0,max_bari_senzor);
 	//return mapFloat(read_analog_pin(analog_pin_za_merjenje),0,4095,0.0,max_bari_senzor);//adc 0-4096, pritisk 0-5?
@@ -3212,6 +3213,8 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
 {	static float napaka_old=0;
 	static uint32_t frequency2Bset=0;
 
+	float locljivost_napake=0.2;
+
 	uint16_t pumpa_max_frequency=500;
 	//6 rpm je 4000 frequency
 
@@ -3242,7 +3245,7 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
     //serial_print_string("----------------------\r\n\n");
 
     // Tlak je previsok - potrebno ga je znižati
-    if((napaka > 0)) {//&& ((napaka-napaka_old)>0.15)//
+    if((napaka >= 0)) {//&& ((napaka-napaka_old)>0.15)//
 
     	stop_motor(stevilka_motorja); //neprovratni ventil
 
@@ -3288,14 +3291,33 @@ _Bool reguliraj_pritisk(float izmerjen_tlak, float zeljen_tlak,
         //frequency2Bset=motors[stevilka_motorja].current_speed*pumpa_max_frequency/500;//50000 je max frequency
         //if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
 
+    	serial_print_string("\r\nNapaka: ");
+    	serial_print_float(napaka);
+    	serial_print_string("\r\n");
 
-    	frequency2Bset=kp*abs(napaka)*pumpa_max_frequency/5;//5 je približno max napaka pri kp=2
-		if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
+    	//frequency2Bset=kp*abs(napaka)*pumpa_max_frequency/5;//5 je približno max napaka pri kp=2
+		//if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
 
-        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>100)
+    	if((-napaka)>toleranca)
+    		{
+    			float set=(-napaka/toleranca)*100.0;
+    			frequency2Bset=(uint32_t) set;
+    		}
+
+    	else
+    		{
+    			stop_motor(stevilka_motorja);
+			}
+
+    	if(frequency2Bset>pumpa_max_frequency)frequency2Bset=pumpa_max_frequency;
+
+        if (abs(frequency2Bset-motors[stevilka_motorja].frequency)>90)
 		{
         	stop_motor(stevilka_motorja);
         	motors[stevilka_motorja].frequency=frequency2Bset;
+	    	serial_print_string("\r\Freq: ");
+	    	serial_print_float(frequency2Bset);
+	    	serial_print_string("\r\n");
         	run_motor(stevilka_motorja);
 		}
 
