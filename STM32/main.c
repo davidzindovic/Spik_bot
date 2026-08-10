@@ -514,6 +514,7 @@ _Bool spik_test=0;
 _Bool pumpa_flag=0;
 _Bool tlak_flag=0;
 _Bool ciscenje_igle_requested=0;
+_Bool regulacija_tlaka_flag=0;
 
 _Bool tof_reset_requested=0;
 _Bool tof_power_cycle=0;//flag da smo ga izklopili
@@ -988,6 +989,7 @@ int main(void) {
     		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
     		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
     		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
+    		"  regulacija  -> Vklopi/izklopi regulacijo pritiska na 1.8 bar\r\n"
     		"----------------------------------------------------------------------\r\n"
             " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
     		"----------------------------------------------------------------------\r\n\r\n";
@@ -1364,7 +1366,7 @@ if(pumpa_flag && !motors[3].running)
 	motors[3].frequency=500;
 	run_motor(3);//zaženemo pumpo če ni že zagnana
 }
-else if(!pumpa_flag && motors[3].running)
+else if(!pumpa_flag && !regulacija_tlaka_flag && motors[3].running)
 {
 	serial_print_string("\r\nUstavljam pumpo.\r\n");
 	stop_motor(3);
@@ -1382,6 +1384,14 @@ if(tlak_flag)
 	tlak_flag=0;
 }
 //-----------konc tlak-------------------
+//----------regulacija tlaka test-----------
+if(regulacija_tlaka_flag)
+{
+	//vzpostavimo stabilen pritisk
+	reguliraj_pritisk(izmeri_pritisk(),1.8,0.05,3);
+}
+//-----------konc tlak-------------------
+
 
 		/* USER CODE BEGIN 3 */
 	}
@@ -5853,10 +5863,10 @@ void USART3_IRQHandler(void)
 
 								serial_print_string("\r\nManual mode izklopljen.\r\n");
 
-								char menu1[] =
-										"\r\n==================================================================\r\n"
-										//" KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
-										"======================================================================\r\n"
+							    char menu1[] =
+							            "\r\n==================================================================\r\n"
+							            //" KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
+							            "======================================================================\r\n"
 							            " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
 							            "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
 							            "  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
@@ -5872,9 +5882,10 @@ void USART3_IRQHandler(void)
 							    		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
 							    		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
 							    		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
-										"----------------------------------------------------------------------\r\n"
-										" Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
-										"----------------------------------------------------------------------\r\n\r\n";
+							    		"  regulacija  -> Vklopi/izklopi regulacijo pritiska na 1.8 bar\r\n"
+							    		"----------------------------------------------------------------------\r\n"
+							            " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
+							    		"----------------------------------------------------------------------\r\n\r\n";
 
 								HAL_UART_Transmit(&huart3, (uint8_t*)menu1, strlen(menu1), 500);
 
@@ -5906,6 +5917,7 @@ void USART3_IRQHandler(void)
 	                            		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
 	                            		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
 	                            		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
+	                            		"  regulacija  -> Vklopi/izklopi regulacijo pritiska na 1.8 bar\r\n"
 	                            		"----------------------------------------------------------------------\r\n"
 	                                    " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
 	                            		"----------------------------------------------------------------------\r\n\r\n";
@@ -5946,7 +5958,11 @@ void USART3_IRQHandler(void)
 						{
 							tlak_flag=!tlak_flag;
 						}
-
+	                    //------------regulacija tlaka----------------
+						else if(strcasecmp((char*)uart3_rx_buffer, "regulacija") == 0)
+						{
+							regulacija_tlaka_flag=!regulacija_tlaka_flag;
+						}
 	                    //------------konc rocnih komand----------------
 
 
