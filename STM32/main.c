@@ -144,7 +144,7 @@ typedef struct {
 
 //podatki za tof pozicijo bolj naprej
 //do konca porinjena igla
-#define DC_DIST_MIN_MM      67U//v resnici:67U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MIN_MM      69U//v resnici:67U     /* below this: stop (unless reversing out) */
 
 #define DOLZINA_IGLE 19U//od sredine konusa
 #define MAX_IZTEG 57U//124-86+19=57U//v resnici: 71U
@@ -6771,7 +6771,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
     	dc_motor_speed=0;
     	DC_Motor_Set_Speed(dc_motor_speed);
     	num_too_far_reading++;
-    	if(num_too_far_reading>=10)
+    	if(num_too_far_reading>=10 && (dc_current_state!=DC_STATE_RETRACTING))
     	{
     		serial_print_string("Deblo je zal predalec :(");
 			serial_print_string("\r\n");
@@ -6783,6 +6783,37 @@ void DC_Motor_Update(uint16_t distance_mm) {
 			serial_print_string("\r\n");
 			num_too_far_reading=0;
 			spik_test=0;
+
+			if(!read_switch(3))
+			{
+				if(dc_motor_speed!=900)
+				{
+					serial_print_string("\r\nFura nazaj.\r\n");
+				}
+
+				dc_motor_speed=900;
+				DC_Motor_Set_Speed(dc_motor_speed);
+			}
+			else
+			{
+				dc_motor_speed=0;
+				DC_Motor_Set_Speed(dc_motor_speed);
+			}
+
+			while(!read_switch(3)){}
+
+			dc_motor_speed=0;
+			DC_Motor_Set_Speed(dc_motor_speed);
+			dc_current_state = DC_STATE_REGULATED;
+
+			zagon_izvedbe = false;
+			serial_print_string("\r\nUmaknjen na varno razdaljo.\r\n");
+			premik_done=0; //ponastavimo zastavico za kinematiko
+			spik_test=0;
+			slowed_down=0;
+			panic_stop=0;
+
+
     	}
     }
 }
