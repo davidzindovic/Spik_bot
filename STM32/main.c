@@ -144,7 +144,7 @@ typedef struct {
 
 //podatki za tof pozicijo bolj naprej
 //do konca porinjena igla
-#define DC_DIST_MIN_MM      68U//v resnici:67U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MIN_MM      66U//v resnici:67U     /* below this: stop (unless reversing out) */
 
 #define DOLZINA_IGLE 19U//od sredine konusa
 #define MAX_IZTEG 57U//124-86+19=57U//v resnici: 71U
