@@ -144,15 +144,15 @@ typedef struct {
 
 //podatki za tof pozicijo bolj naprej
 //do konca porinjena igla
-#define DC_DIST_MIN_MM      67U     /* below this: stop (unless reversing out) */
+#define DC_DIST_MIN_MM      67U//v resnici:67U     /* below this: stop (unless reversing out) */
 
 #define DOLZINA_IGLE 19U//od sredine konusa
-#define MAX_IZTEG 71U
+#define MAX_IZTEG 57U//124-86+19=57U//v resnici: 71U
 
 //pr tej razdalji se igla dotika debla
-#define DC_DIST_MAX_MM      86U   /* above this: stop (unless forwarding back) */
+#define DC_DIST_MAX_MM      87U   /* above this: stop (unless forwarding back) */
 
-#define TOF_OFFSET 5U
+//#define TOF_OFFSET 5U
 
 /*
  * TOF senzor razdalje:
@@ -6621,8 +6621,8 @@ void DC_Motor_Update(uint16_t distance_mm) {
 					serial_print_string("\r\n");
 					}
 
-
-						if((((distance_mm>(DC_DIST_MIN_MM+DOLZINA_IGLE))&&(next_step==2|| spik_test)) )&&!slowed_down) {
+						//ce se igla se ne dotika debla
+						if((((distance_mm>(DC_DIST_MAX_MM))&&(next_step==2|| spik_test)) )&&!slowed_down) {
 
 							//if(dc_motor_speed!=(-900))
 							//{
@@ -6782,6 +6782,7 @@ void DC_Motor_Update(uint16_t distance_mm) {
 			serial_print_string("MERITEV ZAKLJUCENA");
 			serial_print_string("\r\n");
 			num_too_far_reading=0;
+			spik_test=0;
     	}
     }
 }
