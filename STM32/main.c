@@ -115,16 +115,18 @@ typedef struct {
 #define VL53L0X_REG_SYSTEM_INTERRUPT_CLEAR 0x0B
 
 /* ---- DC motor PWM controller (distance-regulated) ---- */
-//do konca porinjena igla
-#define DC_DIST_MIN_MM      88U //83+35     /* below this: stop (unless reversing out) */
 
-#define DOLZINA_IGLE 20U
-#define MAX_IZTEG 71U
+//podatki za tof pozicijo bolj nazaj
+//do konca porinjena igla
+//#define DC_DIST_MIN_MM      88U //83+35     /* below this: stop (unless reversing out) */
+
+//#define DOLZINA_IGLE 20U
+//#define MAX_IZTEG 71U
 
 //pr tej razdalji se igla dotika debla
-#define DC_DIST_MAX_MM      108U//113+50=max reach//130U    /* above this: stop (unless forwarding back) */
+//#define DC_DIST_MAX_MM      108U//113+50=max reach//130U    /* above this: stop (unless forwarding back) */
 
-#define TOF_OFFSET 5U
+//#define TOF_OFFSET 5U
 
 /*
  * TOF senzor razdalje:
@@ -133,12 +135,39 @@ typedef struct {
  * dolzina igle = 20 mm
  * max izteg igle = 71 mm
  */
-
 /*
  * tof test:
  * les od konca bloka 31.5 mm (čis pr igli skor)
  * tof reading ~107 mm
  */
+//----------------------------------------
+
+//podatki za tof pozicijo bolj naprej
+//do konca porinjena igla
+#define DC_DIST_MIN_MM      67U     /* below this: stop (unless reversing out) */
+
+#define DOLZINA_IGLE 19U//od sredine konusa
+#define MAX_IZTEG 71U
+
+//pr tej razdalji se igla dotika debla
+#define DC_DIST_MAX_MM      86U   /* above this: stop (unless forwarding back) */
+
+#define TOF_OFFSET 5U
+
+/*
+ * TOF senzor razdalje:
+ * Od TOF do sredine konusa = 4.32+50.25+11 = 65.57 mm
+ * Od TOF do konc igle = 4.32+50.25+11+19 = 84.57 mm
+ * dolzina igle = 19 mm
+ * max izteg igle = 71 mm
+ */
+/*
+ * tof test:
+ * les od konca bloka 31.5 mm (čis pr igli)
+ * tof reading ~87 mm
+ */
+//----------------------------------------
+
 
 /* X-NUCLEO-IHM04A1 H-bridge pin mapping (STM32H750B-DK Arduino header)
  *
