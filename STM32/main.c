@@ -1032,7 +1032,7 @@ int main(void) {
             "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
             "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
     		"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
-    		"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+    		"  cc          -> Izklop nacina za krmiljenje s tipkovnico\r\n"
     		"  calibrate   -> Izvede kalibracijo\r\n"
     		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
     		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
@@ -5905,7 +5905,7 @@ void USART3_IRQHandler(void)
 	                        pospravi_robota();
 	                    }
 	                    //------------manual mode-------------------
-	                    else if((strcasecmp((char*)uart3_rx_buffer, "manual") == 0)||(strcasecmp((char*)uart3_rx_buffer, "obup") == 0))
+	                    else if((strcasecmp((char*)uart3_rx_buffer, "manual") == 0)||(strcasecmp((char*)uart3_rx_buffer, "cc") == 0))
 	                    {
 	                    	manual_mode_flag=!manual_mode_flag;
 
@@ -5947,7 +5947,7 @@ void USART3_IRQHandler(void)
 							            "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
 							            "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
 							    		"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
-							    		"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+							    		"  cc          -> Izklop nacina za krmiljenje s tipkovnico\r\n"
 							    		"  calibrate   -> Izvede kalibracijo\r\n"
 							    		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
 							    		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
@@ -5982,7 +5982,7 @@ void USART3_IRQHandler(void)
 	                                    "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
 	                                    "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
 	                            		"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
-	                            		"  obup        -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+	                            		"  cc          -> Izklop nacina za krmiljenje s tipkovnico\r\n"
 	                            		"  calibrate   -> Izvede kalibracijo\r\n"
 	                            		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
 	                            		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
