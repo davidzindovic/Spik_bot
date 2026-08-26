@@ -589,7 +589,10 @@ float notranji_polmer_cevi=3;//mm
 float polmer_ovinka_cevi=16.625;//mm
 
 float kolicina_precrpane_tekocine=0; //v micro litrih
+
 float kolicina_tekocine_na_obrat=(2*PI*16.625)*(PI*pow(1.5,2));//obseg*presek   |   PREVERI DATA TYPE
+//=737.6 mm^3=0.7376cm^3=0.0007376 dm^3=0.0007376 L=0.73776 mL
+
 float target_kolicina_tekocine=1000; //v micro litrih
 uint32_t pump_num_steps=0; //za beleženje števila korakov od zahteve za spremljanje tekočine
 uint32_t pump_num_steps_per_turn=100; //POPRAVI!!
