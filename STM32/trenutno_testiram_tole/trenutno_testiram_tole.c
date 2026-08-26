@@ -589,10 +589,14 @@ float notranji_polmer_cevi=3;//mm
 float polmer_ovinka_cevi=16.625;//mm
 
 float kolicina_precrpane_tekocine=0; //v micro litrih
-float kolicina_tekocine_na_obrat=(2*PI*16.625)*(PI*pow(r,2));//obseg*presek
+float kolicina_tekocine_na_obrat=(2*PI*16.625)*(PI*pow(r,2));//obseg*presek   |   PREVERI DATA TYPE
 float target_kolicina_tekocine=1000; //v micro litrih
-uint32_t pump_num_steps=0;
-uint32_t pump_num_steps_per_turn=100;
+uint32_t pump_num_steps=0; //za beleženje števila korakov od zahteve za spremljanje tekočine
+uint32_t pump_num_steps_per_turn=100; //POPRAVI!!
+uint32_t target_num_steps=pump_num_steps_per_turn*target_kolicina_tekocine/kolicina_tekocine_na_obrat;
+_Bool spremljanje_tekocine_requested=0;//da se bo v prekinitvi motor ugasnil ko precrpa dovolj
+_Bool pump_single_turn=0;
+_Bool pump_target_liquid_flag=0;
 //-----------------------------------
 
 // Funkcija za izpis stanja spremenljivk nazaj na UART
@@ -1433,7 +1437,21 @@ else if(!pumpa_flag && !regulacija_tlaka_flag && motors[3].running)
 	serial_print_string("\r\nUstavljam pumpo.\r\n");
 	stop_motor(3);
 }
+
+if(pump_single_turn && !motors[3].running)
+{
+	serial_print_string("\r\nEn obrat pumpe.\r\n");
+	run_motor(3);
+}
+else if(pump_target_liquid_flag && !motors[3].running)
+{
+	serial_print_string("\r\nCrpanje 1mL.\r\n");
+	run_motor(3);
+}
 //--------------konec pumpa test-----------------
+
+
+	
 //---------senzor za tlak test-------------
 if(tlak_flag)
 {
@@ -4748,6 +4766,29 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	else if (htim->Instance == TIM12) {
 	if (motors[3].running == true)
         {
+			if(pump_single_turn && !pump_target_liquid_flag)
+			{
+				if (pump_num_steps==0) pump_num_steps=motors[3].position; 
+				if(pump_num_steps_per_turn<(motors[3].position-pump_num_steps)
+				{
+					pump_num_steps=0;
+					pump_single_turn=0;
+					stop_motor(3);
+				}
+			}
+			
+			if(pump_target_liquid_flag && !pump_single_turn)
+			{
+				if (pump_num_steps==0) pump_num_steps=motors[3].position; 
+				if(target_num_steps<(motors[3].position-pump_num_steps)
+				{
+					pump_num_steps=0;
+					pump_target_liquid_flag=0;
+					stop_motor(3);
+				}
+			}
+			
+			
 		motors[3].position += 1;
 		}
 	}
@@ -6044,6 +6085,14 @@ void USART3_IRQHandler(void)
 	                    else if(strcasecmp((char*)uart3_rx_buffer, "pumpa") == 0)
 	                    {
 	                        pumpa_flag=!pumpa_flag;
+	                    }
+						else if(strcasecmp((char*)uart3_rx_buffer, "pumpturn") == 0)
+	                    {
+	                        pump_single_turn=!pump_single_turn;
+	                    }
+						else if(strcasecmp((char*)uart3_rx_buffer, "pump1ml") == 0)
+	                    {
+	                        pump_target_liquid_flag=!pump_target_liquid_flag;
 	                    }
 
 	                    //------------senzor za tlak----------------
