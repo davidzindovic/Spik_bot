@@ -1057,8 +1057,8 @@ int main(void) {
     		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
     		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
     		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
-    		"  pumpturn   -> Obrni pumpo za en obrat\r\n"
-    		"  pump1ml    -> Prečrpaj 1 mL\r\n"
+    		"  pumpturn    -> Obrni pumpo za en obrat\r\n"
+    		"  pump1ml     -> Prečrpaj 1 mL\r\n"
     		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
     		"  regulacija  -> Vklopi/izklopi regulacijo pritiska na 1.8 bar\r\n"
     		"----------------------------------------------------------------------\r\n"
@@ -6032,8 +6032,8 @@ void USART3_IRQHandler(void)
 	                            		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
 	                            		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
 	                            		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
-	                            		"  pumpturn   -> Obrni pumpo za en obrat\r\n"
-	                            		"  pump1ml    -> Prečrpaj 1 mL\r\n"
+	                            		"  pumpturn    -> Obrni pumpo za en obrat\r\n"
+	                            		"  pump1ml     -> Prečrpaj 1 mL\r\n"
 	                            		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
 	                            		"  regulacija  -> Vklopi/izklopi regulacijo pritiska na 1.8 bar\r\n"
 							    		"----------------------------------------------------------------------\r\n"
@@ -6069,8 +6069,8 @@ void USART3_IRQHandler(void)
 	                            		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
 	                            		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
 	                            		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
-	                            		"  pumpturn   -> Obrni pumpo za en obrat\r\n"
-	                            		"  pump1ml    -> Prečrpaj 1 mL\r\n"
+	                            		"  pumpturn    -> Obrni pumpo za en obrat\r\n"
+	                            		"  pump1ml     -> Prečrpaj 1 mL\r\n"
 	                            		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
 	                            		"  regulacija  -> Vklopi/izklopi regulacijo pritiska na 1.8 bar\r\n"
 	                            		"----------------------------------------------------------------------\r\n"
@@ -6127,7 +6127,40 @@ void USART3_IRQHandler(void)
 							regulacija_tlaka_flag=!regulacija_tlaka_flag;
 						}
 	                    //------------konc rocnih komand----------------
+	                    //------------navodila----------------
+						else if(strcasecmp((char*)uart3_rx_buffer, "navodila") == 0)
+						{
+	                        {
+	                            char menu[] =
+	                                    "\r\n==================================================================\r\n"
+	                                    //" KALIBRACIJA USPESNO ZAKLJUCENA!\r\n"
+	                                    "======================================================================\r\n"
+	                                    " Navodila za vnos ukazov preko UART (vseeno male/VELIKE crke):\r\n"
+	                                    "  x=stevilka  -> Nastavi cilj X (pozitiven ali negativen)\r\n"
+	                                    "  y=stevilka  -> Nastavi cilj Y (samo pozitiven)\r\n"
+	                                    "  o=stevilka  -> Nastavi orientacijo O (omejitev od -30 do 30)\r\n"
+	                                    "  go          -> Sprozi socasen premik M0 in M1, nato sekvencno M2\r\n"
+	                                    "  exit        -> Pospravi robota iz koncne lege v zacetno\r\n"
+	                            		"  manual      -> Nacin za krmiljenje s tipkovnico\r\n"
+	                            		"  cc          -> Izklop nacina za krmiljenje s tipkovnico\r\n"
+	                            		"  calibrate   -> Izvede kalibracijo\r\n"
+	                            		"  stikala     -> Vklop nacina za preverjanje delovanja stikal\r\n"
+	                            		"  sw          -> Izklop nacina za preverjanje delovanja stikal\r\n"
+	                            		"  tof         -> Izpit desetih meritev TOF senzorja\r\n"
+	                            		"  spik        -> Preklop nacina za preizkus spikanja\r\n"
+	                            		"  pumpa       -> Vklopi/izklopi pumpo\r\n"
+	                            		"  pumpturn    -> Obrni pumpo za en obrat\r\n"
+	                            		"  pump1ml     -> Prečrpaj 1 mL\r\n"
+	                            		"  tlak        -> Zažene nekaj meritev tlaka\r\n"
+	                            		"  regulacija  -> Vklopi/izklopi regulacijo pritiska na 1.8 bar\r\n"
+	                            		"----------------------------------------------------------------------\r\n"
+	                                    " Vnesi ukaz za orientacijo -> y -> x; in pritisni ENTER:\r\n"
+	                            		"----------------------------------------------------------------------\r\n\r\n";
 
+	                        	HAL_UART_Transmit(&huart3, (uint8_t*)menu, strlen(menu), 500);
+	                        }
+						}
+	                    //------------konc navodila----------------
 
 
 	                    //-------------ukazi iz pc za MERITEV----------
