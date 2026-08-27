@@ -1215,6 +1215,8 @@ int main(void) {
 			 //vzpostavimo stabilen pritisk
 			 while(!reguliraj_pritisk(izmeri_pritisk(),target_pressure,target_accuracy,pump_motor_number) && (next_step!=0)){}
 
+
+			/*
 			uint32_t pumpa_stop_timestamp = HAL_GetTick();
 			uint32_t pumpa_wait_time_ms=10000; //zelimo da ohrani pritisk 10 sekund
 			uint32_t pump_time_elapsed=0;
@@ -1233,6 +1235,13 @@ int main(void) {
 					pumpa_stop_timestamp = HAL_GetTick();
 				}
 			}
+			*/
+
+			stop_motor(pump_motor_number); //za ziher preden prožimo flag za 1mL
+			pump_target_liquid_flag=1;
+
+			serial_print_string("\r\nCrpanje 1mL.\r\n");
+			run_motor(pump_motor_number);
 
 			stop_motor(pump_motor_number);
 
@@ -1448,7 +1457,7 @@ if(pump_single_turn && !motors[3].running)
 	serial_print_string("\r\nEn obrat pumpe.\r\n");
 	run_motor(3);
 }
-else if(pump_target_liquid_flag && !motors[3].running)
+else if(pump_target_liquid_flag && !motors[3].running && next_step==9)
 {
 	serial_print_string("\r\nCrpanje 1mL.\r\n");
 	run_motor(3);
