@@ -1208,8 +1208,8 @@ int main(void) {
 		 }
 		 else if(next_step==4)
 		 {
-			 float target_pressure=1.8; //zelimo 1.8 bara imeti v sistemu
-			 float target_accuracy=0.05;
+			 float target_pressure=1.0; //zelimo 1.8 bara imeti v sistemu
+			 float target_accuracy=0.10;
 			 uint8_t pump_motor_number=3;
 
 			 //vzpostavimo stabilen pritisk
@@ -1486,7 +1486,7 @@ if(tlak_flag)
 if(regulacija_tlaka_flag)
 {
 	//vzpostavimo stabilen pritisk
-	reguliraj_pritisk(izmeri_pritisk(),1.8,0.15,3);
+	reguliraj_pritisk(izmeri_pritisk(),1.0,0.10,3);
 }
 //-----------konc tlak-------------------
 
