@@ -1464,7 +1464,14 @@ else if(pump_target_liquid_flag && !motors[3].running && next_step==9)
 {
 	serial_print_string("\r\nCrpanje 1mL.\r\n");
 	motors[3].frequency=500;
+	serial_print_string("\r\nZacetek crpanja 1mL\r\n");
 	run_motor(3);
+}
+if (pump_target_liquid_flag)//za beleženje
+{
+	serial_print_string("\r\nPritisk:");
+	serial_print_float(izmeri_pritisk());
+	serial_print_string("\r\n");
 }
 //--------------konec pumpa test-----------------
 
@@ -4802,7 +4809,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 				if (pump_num_steps==0)
 				{
 					pump_num_steps=motors[3].position;
-					serial_print_string("\r\nZacetek crpanja 1mL\r\n");
 				}
 				if(target_num_steps<(motors[3].position-pump_num_steps))
 				{
@@ -4810,12 +4816,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 					pump_target_liquid_flag=0;
 					stop_motor(3);
 					serial_print_string("\r\nKoncano crpanje 1mL.\r\n");
-				}
-				else
-				{
-					serial_print_string("\r\nPritisk:");
-					serial_print_float(izmeri_pritisk());
-					serial_print_string("\r\n");
 				}
 			}
 
