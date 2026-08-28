@@ -1208,8 +1208,8 @@ int main(void) {
 		 }
 		 else if(next_step==4)
 		 {
-			 float target_pressure=1.0; //zelimo 1.0 bara imeti v sistemu
-			 float target_accuracy=0.10;
+			 float target_pressure=1.8; //zelimo 1.8 bara imeti v sistemu
+			 float target_accuracy=0.05;
 			 uint8_t pump_motor_number=3;
 
 			 //vzpostavimo stabilen pritisk
@@ -1486,7 +1486,7 @@ if(tlak_flag)
 if(regulacija_tlaka_flag)
 {
 	//vzpostavimo stabilen pritisk
-	reguliraj_pritisk(izmeri_pritisk(),1.0,0.10,3);
+	reguliraj_pritisk(izmeri_pritisk(),1.8,0.15,3);
 }
 //-----------konc tlak-------------------
 
@@ -4799,13 +4799,23 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			if(pump_target_liquid_flag && !pump_single_turn)
 			{//static uint32_t target_num_steps=pump_num_steps_per_turn*target_kolicina_tekocine/kolicina_tekocine_na_obrat;
 
-				if (pump_num_steps==0) pump_num_steps=motors[3].position;
+				if (pump_num_steps==0)
+				{
+					pump_num_steps=motors[3].position;
+					serial_print_string("\r\nZacetek crpanja 1mL\r\n");
+				}
 				if(target_num_steps<(motors[3].position-pump_num_steps))
 				{
 					pump_num_steps=0;
 					pump_target_liquid_flag=0;
 					stop_motor(3);
 					serial_print_string("\r\nKoncano crpanje 1mL.\r\n");
+				}
+				else
+				{
+					serial_print_string("\r\nPritisk:");
+					serial_print_float(izmeri_pritisk());
+					serial_print_string("\r\n");
 				}
 			}
 
