@@ -49,7 +49,15 @@ def main():
     
     try:
         with serial.Serial(COM_PORT, BAUD_RATE, timeout=1) as ser:
-            print("Čakam na začetek črpanja...")
+            # Počakamo trenutek za stabilizacijo povezave po odpiranju portov
+            time.sleep(1)
+
+            # Pošiljanje ukaza na STM32
+            command = "pump1ml"
+            ser.write(command.encode('utf-8'))
+            print(f"Poslan ukaz: {command.strip()}")
+
+            print("Čakam na odziv in začetek črpanja...")
             
             while True:
                 # Branje vrstice iz serijskega vmesnika
